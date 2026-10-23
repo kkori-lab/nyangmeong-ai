@@ -1,4 +1,4 @@
-# PR마다 린트·포맷·테스트를 돌린다. .env.local이 없으면 AI_MODE=mock으로 뜨므로 비밀값을 넣지 않는다
+# PR마다 검증 명령(scripts/check.sh)을 돌린다. .env.local이 없으면 AI_MODE=mock으로 뜨므로 비밀값을 넣지 않는다
 name: build
 
 on:
@@ -15,9 +15,6 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - name: Install
         run: uv sync --locked
-      - name: Lint
-        run: uv run ruff check .
-      - name: Format
-        run: uv run ruff format --check .
-      - name: Test
-        run: uv run pytest
+      # 검증 명령(ruff check, ruff format --check, pytest). 로컬·하네스와 같은 파일을 쓴다
+      - name: Check
+        run: sh scripts/check.sh

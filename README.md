@@ -25,13 +25,43 @@ setup.bat          # Windows (cmd·PowerShell·탐색기 더블클릭)
 ## 실행
 
 ```bash
-uv run uvicorn app.main:app --reload      # http://localhost:8000/health
+uv run uvicorn app.main:app --reload      # http://localhost:8000/health, API 문서 http://localhost:8000/docs
 ```
 
 ## 검사
 
 ```bash
-uv run ruff check .
-uv run ruff format --check .
-uv run pytest
+sh scripts/check.sh      # ruff check, ruff format --check, pytest. CI와 하네스가 같은 파일을 쓴다
 ```
+
+## AI로 작업하기
+
+백엔드 저장소와 같은 하네스다(`/start` → `승인` → `/impl` → 사람 확인 → `/end`). 흐름 그림과 도구별 시작 방법은 백엔드 README "AI로 작업하기"에 있다. 이 저장소에서 다른 것만 적는다.
+
+- 검증 명령은 `sh scripts/check.sh`다.
+- 마일스톤은 Python 몫만 적는다(`docs/convention/milestone.md` "Python 몫"). 파일이 없으면 첫 `/start`가 만든다.
+- 외부 AI API가 정해지지 않았거나 키가 없으면 `AI_MODE=mock`으로 먼저 만든다.
+
+| 할 일 | 입력 |
+| --- | --- |
+| 다음 작업 시작 | `/start` |
+| 특정 화면 시작 | `/start AIM-002` |
+| 기획 승인 (구현·검증 루프 시작) | `승인` 또는 `/impl` |
+| 다시 검증 (직접 고친 뒤) | `/verify` |
+| 마무리 | `/end` → `확인` → `커밋` → `푸시` → (마일스톤이 끝나면) `PR`. 병합은 GitHub에서 사람이 |
+
+### 사람 확인
+
+`/impl`이 끝에 주는 "`/end` 전에 확인할 것"(직접 `/verify`를 돌렸으면 그 보고)의 "사람 확인" 목록대로 Postman 데스크톱 앱으로 확인한다.
+
+1. 이 저장소에서 `uv run uvicorn app.main:app --reload` → `Application startup complete`가 나오면 준비 완료. 목록에 적힌 `AI_MODE`인지 `.env.local`을 확인한다.
+2. 로그인이 필요한 `/ai/**` API면 백엔드 저장소에서 `./gradlew bootRun`을 띄우고 쿠키를 받는다.
+   - `POST http://localhost:8080/api/auth/dev-tokens`, Headers `X-Requested-With: XMLHttpRequest`, Body → raw → JSON `{"mbrSn": <MBR에 있는 번호>}` → 200
+   - 쿠키는 포트와 관계없이 `localhost`에 붙으므로 Postman이 `http://localhost:8000` 요청에도 실어 보낸다. 두 서버의 `.env.local` `JWT_SECRET_BASE64`와 백엔드 `app.jwt.secret-base64`가 같아야 한다.
+3. 내부 API(`/internal/v1/**`)는 Headers에 `X-Internal-Key: <.env.local의 INTERNAL_API_KEY>`를 넣는다. 파일은 Body → form-data에서 필드 종류를 File로 바꿔 고른다.
+4. 목록의 요청을 그대로 보낸다: 메서드·URL, Headers, Body. POST·PUT·PATCH·DELETE의 `/ai/**` 요청에는 `X-Requested-With: XMLHttpRequest`를 넣는다.
+5. 응답 코드와 JSON(또는 이미지)을 기대 결과와 비교한다. 스트리밍 응답은 Postman 응답 창에 이벤트가 차례로 쌓이는지 본다.
+6. Postman으로 만들기 어려운 조건(만료 토큰, 외부 API 시간 초과 등)은 목록의 테스트로 확인한다: `uv run pytest <파일>::<테스트 이름>`
+7. 확인용으로 만든 대화는 목록의 정리 방법대로 지운다. 공용 DB다.
+8. 목록의 "바뀐 파일"을 훑어본다. 기획에 없는 파일이면 문제로 답한다.
+9. Ctrl+C로 끈다.
