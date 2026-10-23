@@ -23,9 +23,7 @@
 
 ## Test Plan
 
-- [ ] `uv run ruff check .`
-- [ ] `uv run ruff format --check .`
-- [ ] `uv run pytest`
+- [ ] `sh scripts/check.sh` (ruff check, ruff format --check, pytest)
 - [ ] 호출해 본 API: 
 
 Result: <!-- 검증 판정과 회차 -->
