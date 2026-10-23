@@ -5,8 +5,10 @@
 이미 맞는 것은 건너뛴다. 사람이 직접 할 일이 남으면 [직접] 줄로 알리고 종료 코드 3으로 끝낸다.
 """
 
+import asyncio
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -14,6 +16,10 @@ import sys
 import time
 import urllib.request
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.core.config import Settings
 
 ROOT = Path(__file__).resolve().parent.parent
 ENV_FILE = ROOT / ".env.local"
@@ -158,6 +164,87 @@ def check_google_credentials(path: Path) -> None:
         todo(f"Google 서비스 계정 키 파일 형식이 아닙니다: {path}")
 
 
+def db_setup(env: dict[str, str]) -> None:
+    step("DB")
+
+    if not all(env.get(key) for key in ("DB_URL", "DB_USERNAME", "DB_PASSWORD")):
+        print("  [비움] DB 접속 정보가 없어 확인을 건너뜁니다")
+        return
+
+    # 서버와 같은 설정·엔진 코드로 붙는다. 공용 DB라 조회만 하고 쓰지 않는다
+    sys.path.insert(0, str(ROOT))
+    from app.core.config import Settings
+    from app.core.db import OWNED_TABLES, READ_ONLY_TABLES
+
+    settings = Settings(
+        db_url=env["DB_URL"], db_username=env["DB_USERNAME"], db_password=env["DB_PASSWORD"]
+    )
+    try:
+        database, grants, unreadable = asyncio.run(asyncio.wait_for(probe_db(settings), 15))
+    except Exception as error:  # 접속 실패 원인은 드라이버마다 예외가 달라 모두 받는다
+        todo("DB에 접속하지 못했습니다. .env.local 의 DB 값(URL·계정·비밀번호)을 확인해 주세요")
+        print(f"         {type(error).__name__}: {error}")
+        return
+    ok(f"DB 접속 ({settings.db_username}@{database})")
+
+    for table in unreadable:
+        todo(f"{table} 을(를) 조회할 수 없습니다. 테이블이 있는지와 SELECT 권한을 확인해 주세요")
+    for table in OWNED_TABLES:
+        if table in unreadable:
+            continue
+        missing = {"INSERT", "UPDATE", "DELETE"} - privileges(grants, database, table)
+        if missing:
+            todo(f"{table} 에 {', '.join(sorted(missing))} 권한이 없습니다")
+        else:
+            skip(f"{table} 읽기·쓰기 권한")
+    for table in READ_ONLY_TABLES:
+        if table not in unreadable:
+            skip(f"{table} 읽기 권한")
+
+    # Python 계정은 테이블 3개만 다루므로 DB 전체 쓰기 권한이 있으면 알린다(막지는 않는다)
+    if {"INSERT", "UPDATE", "DELETE"} & privileges(grants, database, "*"):
+        user = settings.db_username
+        print(f"  [확인] {user} 계정에 DB 전체 쓰기 권한이 있습니다. 전용 계정으로 좁히길 권합니다")
+
+
+async def probe_db(settings: "Settings") -> tuple[str, list[str], list[str]]:
+    from sqlalchemy import text
+
+    from app.core.db import OWNED_TABLES, READ_ONLY_TABLES, create_engine
+
+    engine = create_engine(settings)
+    try:
+        async with engine.connect() as conn:
+            database = (await conn.execute(text("SELECT DATABASE()"))).scalar_one()
+            grants = list((await conn.execute(text("SHOW GRANTS FOR CURRENT_USER()"))).scalars())
+            unreadable = []
+            for table in OWNED_TABLES + READ_ONLY_TABLES:
+                try:
+                    await conn.execute(text(f"SELECT 1 FROM `{table}` LIMIT 0"))
+                except Exception:
+                    unreadable.append(table)
+            return database, grants, unreadable
+    finally:
+        await engine.dispose()
+
+
+def privileges(grants: list[str], database: str, table: str) -> set[str]:
+    """SHOW GRANTS 줄 중 이 테이블에 적용되는 권한. table="*" 이면 DB 전체에 걸린 권한만."""
+    targets = {"*.*", f"`{database}`.*", f"`{database.replace('_', r'\_')}`.*"}
+    if table != "*":
+        targets.add(f"`{database}`.`{table}`")
+    found: set[str] = set()
+    for grant in grants:
+        match = re.match(r"GRANT (.+?) ON (\S+) TO ", grant)
+        if not match or match.group(2) not in targets:
+            continue
+        names = {name.strip() for name in match.group(1).split(",")}
+        if "ALL PRIVILEGES" in names:
+            names |= {"SELECT", "INSERT", "UPDATE", "DELETE"}
+        found |= names
+    return found
+
+
 def vscode_cli() -> str | None:
     found = shutil.which("code")
     if found:
@@ -288,6 +375,7 @@ def main() -> None:
     os.chdir(ROOT)
     git_setup()
     env = env_setup()
+    db_setup(env)
     vscode_setup()
     mcp_setup(env)
     check()

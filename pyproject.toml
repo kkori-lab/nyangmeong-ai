@@ -5,8 +5,11 @@ description = "냥멍케어 AI 서비스 (AI 대화창, 영수증 OCR, 픽셀 �
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
+    "asyncmy>=0.2.17",
+    "cryptography>=50.0.2",
     "fastapi>=0.115",
     "pydantic-settings>=2.6",
+    "sqlalchemy[asyncio]>=2.0",
     "uvicorn[standard]>=0.32",
 ]
 
