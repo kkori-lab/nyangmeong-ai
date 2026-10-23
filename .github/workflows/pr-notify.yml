@@ -1,0 +1,38 @@
+# PR이 열리면 디스코드로 알린다. 웹훅 주소는 저장소 시크릿 DISCORD_WEBHOOK_URL에만 둔다
+# PR 제목은 run에 직접 넣지 않고 env로 넘긴다(제목에 넣은 명령이 실행되지 않게)
+name: pr-notify
+
+on:
+  pull_request:
+    types: [opened, ready_for_review]
+
+permissions: {}
+
+jobs:
+  notify:
+    # 초안은 열릴 때 건너뛰고 ready_for_review 때 알린다
+    if: github.event.action != 'opened' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send to Discord
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          REPO: ${{ github.event.repository.name }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          TITLE: ${{ github.event.pull_request.title }}
+          URL: ${{ github.event.pull_request.html_url }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          HEAD: ${{ github.event.pull_request.head.ref }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          FILES: ${{ github.event.pull_request.changed_files }}
+          ADDS: ${{ github.event.pull_request.additions }}
+          DELS: ${{ github.event.pull_request.deletions }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then echo "DISCORD_WEBHOOK_URL 시크릿이 없어 건너뜀"; exit 0; fi
+          jq -n \
+            --arg t "[$REPO] #$NUMBER 열림 — $HEAD → $BASE" \
+            --arg d "$TITLE" \
+            --arg u "$URL" \
+            --arg f "작성: $AUTHOR · 변경 ${FILES}파일 +$ADDS −$DELS" \
+            '{allowed_mentions: {parse: []}, embeds: [{title: $t, description: $d, url: $u, color: 5763719, footer: {text: $f}}]}' \
+          | curl -sSf -H 'Content-Type: application/json' -d @- "$WEBHOOK"

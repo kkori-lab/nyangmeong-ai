@@ -1,6 +1,7 @@
 from enum import StrEnum
 from functools import lru_cache
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,6 +18,11 @@ class Settings(BaseSettings):
     )
 
     ai_mode: AiMode = AiMode.MOCK
+
+    # mysql://호스트:포트/DB. 백엔드 JDBC 주소(jdbc:mysql://...)를 그대로 넣어도 된다
+    db_url: str = ""
+    db_username: str = ""
+    db_password: SecretStr = SecretStr("")
 
 
 @lru_cache
