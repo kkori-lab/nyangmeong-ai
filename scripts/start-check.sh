@@ -47,7 +47,7 @@ echo "## 설정 키"
 check_keys() {
   [ -f "$1" ] || return 0
   missing=$(sed 's/\r$//' "$1" | grep -E '^[A-Za-z_][A-Za-z0-9_.-]*[[:space:]]*=' | sed 's/[[:space:]]*=.*//' | while IFS= read -r k; do
-    case "$k" in DMS_MCP_URL | FIGMA_FILE_URL | dms.mcp-url) continue ;; esac
+    case "$k" in (DMS_MCP_URL | FIGMA_FILE_URL | dms.mcp-url) continue ;; esac
     re=$(printf '%s' "$k" | sed 's/\./\\./g')
     v=$(sed 's/\r$//' "$2" 2>/dev/null | grep -E "^$re[[:space:]]*=" | tail -1 | sed -e 's/^[^=]*=[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"\(.*\)"$/\1/')
     [ -n "$v" ] || printf '%s ' "$k"
