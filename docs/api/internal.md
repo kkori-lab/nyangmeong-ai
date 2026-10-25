@@ -7,7 +7,7 @@ Java 백엔드만 부르는 API다. 공통 규칙은 `docs/api/README.md`에 있
 | 메서드 | 경로 | 설명 | 기능 ID | 담당 | 요청 DTO | 응답 DTO |
 | --- | --- | --- | --- | --- | --- | --- |
 | POST | /internal/v1/ocr/receipt | 영수증 이미지(multipart `file`)에서 항목을 뽑는다. 저장하지 않는다. 추출 0건도 200(값이 모두 null, `sections` 빈 배열). 오류: 이미지로 읽히지 않음 400 `FILE_TYPE_NOT_ALLOWED`(백엔드 `ErrorCode`와 같은 이름), 분석 시간 초과 504 `OCR_TIMEOUT`, 외부 API 오류 502 `OCR_API_ERROR`. 시간 제한은 Java 제한(15초)보다 짧게 둔다 | AIM-008-06, AIM-010-01 | LJS | ReceiptOcrRequest | ReceiptOcrResponse |
-| POST | /internal/v1/character/generate | 사진과 등록 정보로 픽셀 캐릭터 PNG를 만든다. 응답 본문이 `image/png`(512×512, `ApiResponse` 껍데기 없음). 저장하지 않는다. 오류(`ApiResponse`): 외부 API 오류 502 `CHARACTER_API_ERROR`, 규격을 맞추지 못함 502 `CHARACTER_SPEC_MISMATCH` | MYP-010-08·17 | LJS | CharacterGenerationRequest | (PNG) |
+| POST | /internal/v1/character/generate | 사진과 등록 정보로 픽셀 캐릭터 PNG를 만든다. 응답 본문이 `image/png`(512×512, `ApiResponse` 껍데기 없음). 저장하지 않는다. 오류(`ApiResponse`): 사진을 이미지로 읽을 수 없음 400 `FILE_TYPE_NOT_ALLOWED`, 필드 누락·`petSeCd` 허용값(`PETC0001`·`PETC0002`) 밖 400 `INVALID_REQUEST`, 외부 API 오류 502 `CHARACTER_API_ERROR`, 규격을 맞추지 못함 502 `CHARACTER_SPEC_MISMATCH` | MYP-010-08·17 | LJS | CharacterGenerationRequest | (PNG) |
 | DELETE | /internal/v1/members/{mbrSn}/conversations | 탈퇴 회원의 대화방·메시지를 물리 삭제한다. 대화가 없어도 200 | AIM-011-19 | LJS | - | - |
 
 ## DTO

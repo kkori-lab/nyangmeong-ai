@@ -1,8 +1,8 @@
 import asyncio
 
+from app.core.image import detect_image_type
 from app.core.response import AppError
 from app.ocr.clients import OcrApiError, OcrClient
-from app.ocr.rules import detect_image_type
 from app.ocr.schemas import ReceiptOcrResponse
 
 

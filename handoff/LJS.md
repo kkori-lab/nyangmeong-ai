@@ -1,25 +1,27 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-008 영수증 OCR 인식·파싱 — 끝 (검증 통과 2회차, 사람 확인 완료 2026-10-25)
+SCR-MYP-010 픽셀 캐릭터 관리 (생성 입력·규격) — 끝 (검증 통과 1회차, 사람 확인 완료 2026-10-25)
 
 기획 상태: 승인됨
 
-- FN-AIM-008-06 OCR API 호출: `app/ocr/{router,service,schemas,clients,rules}.py` 신설, `app/main.py`에 라우터 등록. 부를 API는 없음(내가 제공): `POST /internal/v1/ocr/receipt` (multipart `file`, LJS) → `ReceiptOcrResponse`(`ApiResponse.data`). `clients.py`는 `AI_MODE`로 mock/real을 고르는 Protocol, 이번에는 mock만. 공통으로 `app/core`에 `X-Internal-Key` 검사(틀리면 401)와 `ApiResponse` 껍데기·예외 변환을 함께 만든다.
-  - 완료 조건: `명령:` `sh scripts/check.sh` 종료 코드 0, 그리고 tests/ocr에서 (a) mock 응답이 `ReceiptOcrResponse` 필드·`sections` 구조와 일치 (b) `X-Internal-Key` 없음/틀림 401 (c) 이미지로 안 읽히는 파일 거절. `화면:` 서버를 띄워 Postman으로 multipart 요청 → `ApiResponse` 껍데기 안 `data`에 mock 영수증.
-- FN-AIM-010-01 인식 실패·일시 오류 판정(화면은 SCR-AIM-010): 추출 0건은 200 + 값 모두 null, `sections` 빈 배열. 분석 시간 초과 504 `OCR_TIMEOUT`, 외부 API 오류 502 `OCR_API_ERROR`(두 오류를 구분해 돌려준다). 시간 제한은 Java 15초보다 짧게 — 설정값 `OCR_TIMEOUT_SEC`.
-  - 완료 조건: `명령:` 같은 테스트에서 mock 클라이언트를 (0건 / 지연 / 예외)로 바꿔 200·504·502와 코드가 나온다.
-- 가짜로 먼저: Google Vision real 클라이언트는 서비스 계정 키가 없어 mock 기준으로 완료. real 연결은 "다음에 할 것".
+- FN-MYP-010-08 1단계 · 사진 첨부: `app/character/{router,service,schemas,clients,rules}.py` 신설(`rules.py`는 PNG 규격 검증 전용), `app/main.py`에 라우터 등록. 부를 API는 없음(내가 제공): `POST /internal/v1/character/generate` (multipart `CharacterGenerationRequest`: `photo` 필수·`petSeCd` 필수·`vrtyNm`·`colrNm`·`chrcCn` 선택, LJS) → 성공 시 본문 `image/png`(`ApiResponse` 껍데기 없음), 오류는 `ApiResponse`. `X-Internal-Key` 검사는 `app/core` 기존 것 재사용. `petSeCd`는 `PETC0001`(강아지)·`PETC0002`(고양이)만 받고 그 밖은 기존 검증 오류 응답(백엔드 `db/20261012_insert_com_cd_v0.9.sql:54-55`). 이미지 시그니처 판독은 `app/ocr/rules.py`의 `detect_image_type`을 `app/core/image.py`로 옮겨(결정 2026-10-25: 중복 대신 core 이동) OCR과 캐릭터가 같이 쓴다. `app/ocr/rules.py`는 이 함수뿐이라 삭제하고 `app/ocr/service.py:5` import만 바꾼다(동작 변경 없음, 기존 OCR 테스트가 회귀 확인). `photo`가 jpg·png·webp 시그니처가 아니면 400 `FILE_TYPE_NOT_ALLOWED`(구현 전에 `docs/api/internal.md` 캐릭터 행 오류 목록에 먼저 추가). `clients.py`는 `AI_MODE`로 mock/real을 고르는 Protocol, 이번에는 mock만.
+  - 완료 조건: `명령:` `sh scripts/check.sh` 종료 코드 0, tests/character에서 (a) mock 요청 → 200·`image/png`·512×512 (b) `X-Internal-Key` 없음/틀림 401 (c) `photo` 비이미지 400 `FILE_TYPE_NOT_ALLOWED` (d) `photo`·`petSeCd` 누락 또는 `petSeCd`가 두 코드 밖이면 기존 검증 오류 응답. `화면:` 서버를 띄워 Postman으로 multipart 요청 → PNG 미리보기가 512×512로 보인다.
+- FN-MYP-010-17 캐릭터 규격 고정: `schemas.py`에 `CharacterSpec`(캔버스 512×512, 얼굴 영역 x128·y64·w256·h256 — `docs/api/internal.md` mock 절 값) 상수. mock 클라이언트는 이 규격의 고정 PNG를 표준 라이브러리(`zlib`·`struct`)로 만들어 돌려준다(파일 커밋 없음).
+  - 완료 조건: `명령:` (a)와 같음.
+- FN-MYP-010-18 규격 일관성 검증: `rules.py`에 PNG 시그니처·IHDR 폭·높이를 읽어 `CharacterSpec`과 비교하는 함수. 서비스는 생성 결과가 규격 밖이면 502 `CHARACTER_SPEC_MISMATCH`, 클라이언트 예외는 502 `CHARACTER_API_ERROR`.
+  - 완료 조건: `명령:` mock 클라이언트를 (511×512 PNG / PNG 아님 / 예외)로 바꿔 502와 두 코드가 구분돼 나온다.
+- 가짜로 먼저: 이미지 생성 real 클라이언트는 API·키 미정이라 mock 기준으로 완료. 명세의 "착수 전 샘플 10건 이상 검증"과 얼굴 영역 위치 검증은 real 생성기가 정해진 뒤 "다음에 할 것".
 
-결정(2026-10-25): 이미지 판독은 파일 시그니처(매직 바이트, jpg·png·webp)로 한다(Pillow 안 씀). 판독 불가는 400, `code`는 백엔드 `ErrorCode.FILE_TYPE_NOT_ALLOWED`와 같은 이름을 쓴다(구현 전에 `docs/api/internal.md` OCR 행 오류 목록에 먼저 추가). `OCR_TIMEOUT_SEC` 기본 12.
+새 의존성: 없음
 
 ### 추가 요청
-| 추가-1 | scripts/start-check.sh | 명령: `sh -n scripts/start-check.sh` 종료 코드 0 | 요청 2026-10-25 15:40 "1. ㅇㅇ 수정하고 다시 실행가자" (macOS sh에서 `case` 패턴 `)` 문법 오류, 패턴 앞에 `(` 추가) |
-
-새 의존성: python-multipart (FastAPI `UploadFile` multipart 파싱에 필수, 이유: 현재 `pyproject.toml`에 없음).
 
 ## 다음에 할 것
-- 다음 마일스톤: SCR-MYP-010 캐릭터 (`/start`로 시작)
+- 다음 마일스톤: SCR-AIM-011 AI 대화창 · 대화 저장·조회·삭제 (`/start`로 시작)
+- 연결 남음: SCR-MYP-010 real 이미지 생성 클라이언트 (API·키 팀 결정, LJS)
+- 연결 남음: SCR-MYP-010 얼굴 영역 위치 검증·샘플 10건 이상 검증 (real 생성기 결정 뒤. 얼굴 추출은 프론트에서 먼저 시도, LJS)
+- 연결 남음: Java `PythonCharacterGenerator` 신설·연결 (LJS 백엔드. 지금은 `FakeCharacterGenerator`뿐)
 - 연결 남음: SCR-AIM-008 real 모드 Google Vision 클라이언트 (서비스 계정 키 수령 후, LJS)
 - 연결 남음: Java `PythonOcrClient` 연결 확인 (LJS 백엔드)
 - 하네스 수정 PR 후보(공용, 이번 커밋에서 뺌): `scripts/start-check.sh` 수정분, 그리고 macOS BSD `sed` 문제(`milestone-status.sh`·`impl-check.sh`·`api-row.sh`)와 `verify-collect.sh:37-38`의 `case` 문법. 백엔드 `8b015d0`이 같은 종류를 고쳤는지 비교

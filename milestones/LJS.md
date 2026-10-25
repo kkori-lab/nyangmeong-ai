@@ -8,10 +8,13 @@
 - Python 전용 DB 계정 불필요(저장하지 않음). 기다리는 것: Google Vision 서비스 계정 키 (LJS, real 모드만), Java `PythonOcrClient` (LJS 백엔드, 연결 확인)
 - 완료 조건: mock 모드에서 `POST /internal/v1/ocr/receipt`가 `ReceiptOcrResponse` 모양을 돌려준다. 추출 0건과 오류가 구분되어 응답된다.
 
-## SCR-MYP-010 픽셀 캐릭터 관리 (생성 입력·규격) — 대기
+## SCR-MYP-010 픽셀 캐릭터 관리 (생성 입력·규격) — 끝
 - 기능: FN-MYP-010-08 1단계 · 사진 첨부, FN-MYP-010-17 캐릭터 규격 고정, FN-MYP-010-18 규격 일관성 검증
 - 기다리는 것: 이미지 생성 API·키 (팀 결정, real 모드만), Java `PythonCharacterGenerator` (LJS 백엔드, 연결 확인)
 - 완료 조건: mock 모드에서 `/internal/v1/character`가 512×512 규격 이미지를 돌려주고, 규격 검증이 규격 밖 결과를 거른다.
+- 연결 남음: FN-MYP-010-08·17 real 이미지 생성 클라이언트 (API·키 팀 결정, LJS)
+- 연결 남음: FN-MYP-010-18 얼굴 영역 위치·샘플 10건 이상 검증 (real 생성기 결정 뒤, LJS)
+- 연결 남음: Java `PythonCharacterGenerator` 연결 (LJS 백엔드)
 
 ## SCR-AIM-011 AI 대화창 (새 창) · 대화 저장·조회·삭제 — 대기
 - 기능: FN-AIM-011-03 본창 세션 공유, FN-AIM-011-07 새 대화 생성, FN-AIM-011-08 반려동물 선택 · 펫 태그, FN-AIM-011-09 대화 목록 조회, FN-AIM-011-10 대화 선택 · 이어 쓰기, FN-AIM-011-11 대화 제목 자동 생성, FN-AIM-011-13 대화 삭제, FN-AIM-011-14 대화 이력 서버 저장, FN-AIM-011-19 이력 보관 · 파기
