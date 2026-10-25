@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     # Java→Python 내부 호출 공유 키. 빈 값이면 내부 호출 전부 거절
     internal_api_key: SecretStr = SecretStr("")
 
+    # 백엔드 app.jwt.secret-base64와 같은 값. 빈 값이면 /ai/** 전부 401
+    jwt_secret_base64: SecretStr = SecretStr("")
+
+    # 백엔드 app.crypto.aes-key-base64와 같은 값(대화 제목·본문 암호화)
+    conversation_enc_key: SecretStr = SecretStr("")
+
     # OCR 분석 제한 시간(초). Java 제한 15초보다 짧게 둠 : Java가 먼저 끊는 일 방지
     ocr_timeout_sec: float = 12.0
 
