@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     prod_db_username: str = ""
     prod_db_password: SecretStr = SecretStr("")
 
+    # Java→Python 내부 호출 공유 키. 빈 값이면 내부 호출 전부 거절
+    internal_api_key: SecretStr = SecretStr("")
+
+    # OCR 분석 제한 시간(초). Java 제한 15초보다 짧게 둠 : Java가 먼저 끊는 일 방지
+    ocr_timeout_sec: float = 12.0
+
     # app_profile에 맞는 DB 접속 정보. 코드는 이 세 속성만 읽는다
     @property
     def db_url(self) -> str:
