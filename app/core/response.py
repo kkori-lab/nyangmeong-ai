@@ -15,9 +15,9 @@ class AppError(Exception):
         self.message = message
 
 
-def success(data: Any = None) -> JSONResponse:
+def success(data: Any = None, http_code: int = 200) -> JSONResponse:
     # 백엔드 ApiResponse와 동일 : null 필드 제외, 성공 응답은 path 없음
-    return _build("success", 200, "ok", None, None, data)
+    return _build("success", http_code, "ok", None, None, data)
 
 
 def error(code: str, http_code: int, message: str, path: str) -> JSONResponse:

@@ -7,7 +7,7 @@ AI 서버(이 저장소)의 API와 요청·응답 DTO다. **팀 확인 전 초�
 | 영역 | 파일 | 호출자 | 담당 |
 | --- | --- | --- | --- |
 | 내부 API(OCR, 캐릭터, 대화 파기) | [`internal.md`](internal.md) | Java | LJS |
-| AI 대화창 | `chat.md`(대화창 마일스톤 기획 때 만든다) | React | LJS |
+| AI 대화창 | [`chat.md`](chat.md) | React | LJS |
 
 ## 공통 규칙
 
