@@ -124,9 +124,15 @@ def env_setup() -> dict[str, str]:
         todo(f".env.local 의 AI_MODE={mode} 는 mock 또는 real 이어야 합니다")
     skip(f"AI_MODE = {mode}")
 
+    profile = env.get("APP_PROFILE", "local")
+    if profile not in ("local", "prod"):
+        todo(f".env.local 의 APP_PROFILE={profile} 는 local 또는 prod 이어야 합니다")
+    skip(f"APP_PROFILE = {profile}")
+
     # 비어 있는 키는 그 기능을 붙일 때 채운다. real 모드에서 외부 API 키가 비면 할 일로 남긴다
     groups = {
-        "DB": ("DB_URL", "DB_USERNAME", "DB_PASSWORD"),
+        "DB(local)": db_keys("local"),
+        "DB(prod)": db_keys("prod"),
         "인증": ("JWT_SECRET_BASE64", "INTERNAL_API_KEY"),
         "암호화": ("CONVERSATION_ENC_KEY",),
         "LLM": ("LLM_API_KEY",),
@@ -164,28 +170,44 @@ def check_google_credentials(path: Path) -> None:
         todo(f"Google 서비스 계정 키 파일 형식이 아닙니다: {path}")
 
 
+def db_keys(profile: str) -> tuple[str, str, str]:
+    prefix = profile.upper()
+    return (f"{prefix}_DB_URL", f"{prefix}_DB_USERNAME", f"{prefix}_DB_PASSWORD")
+
+
 def db_setup(env: dict[str, str]) -> None:
     step("DB")
 
-    if not all(env.get(key) for key in ("DB_URL", "DB_USERNAME", "DB_PASSWORD")):
-        print("  [비움] DB 접속 정보가 없어 확인을 건너뜁니다")
+    # 서버가 쓰는 APP_PROFILE의 DB만 확인한다
+    profile = env.get("APP_PROFILE", "local")
+    if profile not in ("local", "prod"):
+        print(f"  [비움] APP_PROFILE={profile} 이 잘못되어 확인을 건너뜁니다")
+        return
+    url_key, username_key, password_key = db_keys(profile)
+    if not all(env.get(key) for key in (url_key, username_key, password_key)):
+        print(f"  [비움] DB({profile}) 접속 정보가 없어 확인을 건너뜁니다")
         return
 
-    # 서버와 같은 설정·엔진 코드로 붙는다. 공용 DB라 조회만 하고 쓰지 않는다
+    # 서버와 같은 설정·엔진 코드로 붙는다. 공용 DB일 수 있어 조회만 하고 쓰지 않는다
     sys.path.insert(0, str(ROOT))
     from app.core.config import Settings
     from app.core.db import OWNED_TABLES, READ_ONLY_TABLES
 
     settings = Settings(
-        db_url=env["DB_URL"], db_username=env["DB_USERNAME"], db_password=env["DB_PASSWORD"]
+        app_profile=profile,
+        **{
+            f"{profile}_db_url": env[url_key],
+            f"{profile}_db_username": env[username_key],
+            f"{profile}_db_password": env[password_key],
+        },
     )
     try:
         database, grants, unreadable = asyncio.run(asyncio.wait_for(probe_db(settings), 15))
     except Exception as error:  # 접속 실패 원인은 드라이버마다 예외가 달라 모두 받는다
-        todo("DB에 접속하지 못했습니다. .env.local 의 DB 값(URL·계정·비밀번호)을 확인해 주세요")
+        todo(f"DB({profile})에 접속하지 못했습니다. .env.local 의 {url_key} 등 값을 확인해 주세요")
         print(f"         {type(error).__name__}: {error}")
         return
-    ok(f"DB 접속 ({settings.db_username}@{database})")
+    ok(f"DB({profile}) 접속 ({settings.db_username}@{database})")
 
     for table in unreadable:
         todo(f"{table} 을(를) 조회할 수 없습니다. 테이블이 있는지와 SELECT 권한을 확인해 주세요")
