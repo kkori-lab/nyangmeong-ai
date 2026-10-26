@@ -49,7 +49,7 @@ background: false
 - "사람 확인"은 판정과 관계없이, 사람이 그대로 따라 할 수 있게 쓴다. 기능 ID는 기획에 적힌 짝을 그대로 쓴다. 값은 코드에서 확인한 실제 값이다(README "사람 확인" 참고).
   - 띄우기는 `uv run uvicorn app.main:app --reload`(이 저장소)이고, 확인할 `AI_MODE`(mock·real)를 함께 적는다. real이 필요하면 필요한 `.env.local` 키 이름을 적는다(값은 적지 않는다).
   - AI 대화창(`/ai/**`): Postman으로 보낼 요청. 메서드와 전체 URL(`http://localhost:8000/ai/...`), Headers, Body(raw JSON), 기대 응답 코드와 JSON. 스트리밍 응답은 받을 이벤트 순서를 적는다. 상태를 바꾸는 요청은 Headers에 `X-Requested-With: XMLHttpRequest`를 적는다. 로그인이 필요하면 첫 줄에 백엔드 저장소에서 `./gradlew bootRun`을 띄우고 `POST http://localhost:8080/api/auth/dev-tokens`(Headers `X-Requested-With: XMLHttpRequest`, Body `{"mbrSn": <번호>}`)로 쿠키를 받는 단계를 적는다. 쿠키는 포트와 관계없이 `localhost`에 붙으므로 8000 요청에도 실린다.
-  - 내부 API(`/internal/v1/**`, Java만 부른다): Headers에 `X-Internal-Key`(값은 `.env.local`의 `INTERNAL_API_KEY`)를 적는다. 파일을 보내는 요청은 Body form-data와 필드 이름을 적는다.
+  - 내부 API(`/internal/v1/**`, Java만 부른다): 키 헤더는 없다. 파일을 보내는 요청은 Body form-data와 필드 이름을 적는다.
   - 만료 토큰·외부 API 시간 초과처럼 Postman으로 만들기 어려운 조건은 그 테스트와 `uv run pytest <파일>::<테스트 이름>`. 참고로 API 문서(`http://localhost:8000/docs`)에서 찾을 API 이름도 적는다.
 - 마지막 줄:
   - 통과: "위 '사람 확인'대로 확인한 뒤 `/end`로 마무리하세요"
