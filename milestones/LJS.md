@@ -2,6 +2,8 @@
 
 기준: AI매니저_기능명세서_v0.7_20261009, 마이페이지_기능명세서_v0.4_20261025 (DMS, 2026-10-25)
 
+> **다시 만들어야 함(2026-10-26).** 범위가 기능명세서 v0.9(147건, SCR-AIM-013 추가)로 확정됐고, Python이 DB·JWT를 다루지 않기로 했다(`docs/convention/milestone.md` "범위"·"Python 몫"). v0.9가 DMS에 올라간 뒤 다시 만든다. 그 전에 아래 "끝"인 SCR-AIM-011도 대화 저장을 Java 내부 API로 옮기는 재작업이 남아 있다.
+
 ## SCR-AIM-008 영수증 촬영 · 업로드 (OCR 인식·파싱) — 끝
 - 기능: FN-AIM-008-06 OCR API 호출, FN-AIM-010-01 인식 실패 · 일시 오류 판정 (화면은 SCR-AIM-010)
 - 연결 남음: FN-AIM-008-06 real 모드 (Google Vision 서비스 계정 키, LJS), FN-AIM-008-06·010-01 Java `PythonOcrClient` 연결 확인 (LJS 백엔드)
