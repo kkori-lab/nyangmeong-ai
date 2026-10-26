@@ -13,7 +13,7 @@ Python ──▶ Java      내부 API  인증 확인(/internal/auth/check), 대�
 
 2026-10-26 결정: **DB는 Java만 다룬다.** Python은 DB에 붙지 않는 상태 없는 AI 서버다. AI 벤더 API(LLM·OCR·이미지 생성) 호출은 전부 Python이 한다. (10-25의 A안 — Python이 분석 단계 테이블을 소유 — 은 폐기됐다.) 배포는 nginx 한 도메인에서 `/api/`는 Java, `/ai/`는 Python으로 접두사를 자르지 않고 넘긴다. `/internal/**`와 `/health`는 nginx로 내보내지 않는다. 같은 오리진이라 CORS 설정은 필요 없다.
 
-- **인증**: Python은 JWT를 검증하지 않고 키도 두지 않는다. 미들웨어가 모든 `/ai/**` 요청에서 브라우저의 `Cookie` 헤더를 그대로 실어 Java `GET /internal/auth/check`를 부른다. 통과하면 `data { mbrSn, mbrAuthrtCd }`를 받는다. 결과는 캐시하지 않는다(로그아웃·정지가 바로 반영되어야 함).
+- **인증**: Python은 JWT를 검증하지 않고 키도 두지 않는다. 라우터 의존성(`app/core/auth.py` `require_member`)이 모든 `/ai/**` 요청에서 브라우저의 `Cookie` 헤더를 그대로 실어 Java `GET /internal/auth/check`를 부른다. 통과하면 `data { mbrSn, mbrAuthrtCd }`를 받는다. 결과는 캐시하지 않는다(로그아웃·정지가 바로 반영되어야 함). `/ai/**` 라우터를 새로 만들면 이 의존성을 빠뜨리지 않는다(미들웨어가 아니라 자동으로 붙지 않는다).
   - Java가 401(`UNAUTHORIZED`·`TOKEN_EXPIRED`)이나 403(`MEMBER_INACTIVE`)을 주면 상태 코드·`ApiResponse` 오류 본문·`Set-Cookie`를 다시 만들지 않고 그대로 브라우저에 전달한다. `MEMBER_INACTIVE`의 `Set-Cookie`가 쿠키를 지운다.
   - Java에 닿지 못하면 502 `EXTERNAL_API_ERROR`("외부 서비스 호출에 실패했습니다. 잠시 후 다시 시도해 주세요.")를 준다.
   - `X-Requested-With` 검사(GET·HEAD·OPTIONS 외 `XMLHttpRequest` 필수, 없으면 403 `FORBIDDEN`)는 Python이 계속 한다. 인증 확인이 GET이라 Java의 같은 검사를 거치지 않기 때문이다.
@@ -24,7 +24,7 @@ Python ──▶ Java      내부 API  인증 확인(/internal/auth/check), 대�
 - 채팅으로 만든 일정·케어 항목은 여기서 저장하지 않는다. 미리보기 카드를 돌려주고, React가 Java 일정 등록 API(`schdlSrcCd`='AI 생성')를 부른 뒤 결과(등록됨·취소됨)를 대화에 기록한다.
 - **서버 간 키**: 방향마다 다른 키를 같은 헤더 `X-Internal-Key`로 보낸다. Java → Python은 `INTERNAL_API_KEY`, Python → Java는 `BACKEND_INTERNAL_KEY`(`config.md`). 받는 쪽은 상수 시간 비교, 설정이 빈 값이면 모두 거부한다.
 - 개인 데이터(반려동물 기록 등)는 외부 AI API에 보내지 않는다(POL-006, FN-AIM-011-16).
-- **전환 상태**: 지금 코드는 아직 DB 직접 접근(`app/chat/repository.py`, `app/core/db.py`·`crypto.py`)과 JWT 검증(`app/core/auth.py`)을 쓴다. Java 쪽 `/internal/auth/check`와 대화 저장 API가 나온 뒤 교체한다. 탈퇴 회원 대화 파기 내부 API(`DELETE /internal/v1/members/{mbrSn}/conversations`)도 그때 지운다(Java가 자기 테이블에서 직접 파기).
+- **전환 상태**: 지금 코드는 아직 DB 직접 접근(`app/chat/repository.py`, `app/core/db.py`·`crypto.py`)을 쓴다. 인증은 Java `/internal/auth/check` 호출로 바꿨다(2026-10-26). 대화 저장은 Java 대화 저장 API가 나온 뒤 교체한다. 탈퇴 회원 대화 파기 내부 API(`DELETE /internal/v1/members/{mbrSn}/conversations`)도 그때 지운다(Java가 자기 테이블에서 직접 파기).
 
 ## 패키지 안
 

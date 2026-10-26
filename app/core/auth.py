@@ -1,17 +1,28 @@
-import base64
-import binascii
 from typing import Annotated
 
-import jwt
-from fastapi import Cookie, Depends, Request
+import httpx2
+from fastapi import Depends, Request
 
+from app.core.backend import get_backend_client
 from app.core.config import Settings, get_settings
 from app.core.response import AppError
 
-ALGORITHM = "HS256"
-TYP_ACCESS = "access"
+AUTH_CHECK_PATH = "/internal/auth/check"
 REQUESTED_WITH = "XMLHttpRequest"
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+class BackendAuthError(Exception):
+    """Java 인증 오류. 본문·Set-Cookie를 다시 만들지 않고 그대로 전달한다"""
+
+    def __init__(
+        self, status_code: int, body: bytes, content_type: str | None, set_cookies: list[str]
+    ) -> None:
+        super().__init__(status_code)
+        self.status_code = status_code
+        self.body = body
+        self.content_type = content_type
+        self.set_cookies = set_cookies
 
 
 def require_requested_with(request: Request) -> None:
@@ -22,42 +33,40 @@ def require_requested_with(request: Request) -> None:
         raise AppError("FORBIDDEN", 403, "접근 권한이 없습니다.")
 
 
-def require_member(
+async def require_member(
+    request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
-    access_token: Annotated[str | None, Cookie()] = None,
+    client: Annotated[httpx2.AsyncClient, Depends(get_backend_client)],
 ) -> int:
-    """쿠키 access_token 검증 후 회원 번호(sub) 반환. 서명·만료·typ만 본다(세션 테이블은 못 읽음)"""
-    key = _secret_bytes(settings)
-    if not access_token or key is None:
-        raise _unauthorized()
+    """브라우저 Cookie를 실어 Java /internal/auth/check 호출 후 회원 번호 반환. 캐시하지 않음"""
+    base_url = settings.backend_base_url.rstrip("/")
+    if not base_url:
+        raise _external_error()
+    headers = {"X-Internal-Key": settings.backend_internal_key.get_secret_value()}
+    cookie = request.headers.get("cookie")
+    if cookie:
+        headers["Cookie"] = cookie
     try:
-        claims = jwt.decode(
-            access_token, key, algorithms=[ALGORITHM], options={"require": ["exp", "sub"]}
+        res = await client.get(f"{base_url}{AUTH_CHECK_PATH}", headers=headers)
+    except httpx2.HTTPError:
+        raise _external_error() from None
+
+    if res.status_code in (401, 403):
+        raise BackendAuthError(
+            res.status_code,
+            res.content,
+            res.headers.get("content-type"),
+            res.headers.get_list("set-cookie"),
         )
-    except jwt.ExpiredSignatureError:
-        raise AppError(
-            "TOKEN_EXPIRED", 401, "로그인이 만료되었습니다. 다시 로그인해 주세요."
-        ) from None
-    except jwt.InvalidTokenError:
-        raise _unauthorized() from None
-    # refresh 토큰을 access 자리에 넣은 경우 차단
-    if claims.get("typ") != TYP_ACCESS:
-        raise _unauthorized()
+    if res.status_code != 200:
+        raise _external_error()
     try:
-        return int(claims["sub"])
-    except (TypeError, ValueError):
-        raise _unauthorized() from None
+        return int(res.json()["data"]["mbrSn"])
+    except (ValueError, KeyError, TypeError):
+        raise _external_error() from None
 
 
-def _secret_bytes(settings: Settings) -> bytes | None:
-    encoded = settings.jwt_secret_base64.get_secret_value().strip()
-    if not encoded:
-        return None
-    try:
-        return base64.b64decode(encoded, validate=True)
-    except binascii.Error:
-        return None
-
-
-def _unauthorized() -> AppError:
-    return AppError("UNAUTHORIZED", 401, "로그인이 필요합니다.")
+def _external_error() -> AppError:
+    return AppError(
+        "EXTERNAL_API_ERROR", 502, "외부 서비스 호출에 실패했습니다. 잠시 후 다시 시도해 주세요."
+    )

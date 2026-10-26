@@ -4,7 +4,7 @@
 
 **이 저장소는 공개다. 한 번 커밋된 값은 지워도 이력에 남는다.**
 
-- 설정은 `.env.local` 하나에 둔다. 비밀값(내부 호출 키, 외부 AI API 키, 전환 전에는 DB 접속 정보·JWT·암호화 키)이 들어 있어 git에 올리지 않고(`.gitignore`) 디스코드로 공유한다. 서버 주소도 공개 저장소에 적지 않는다.
+- 설정은 `.env.local` 하나에 둔다. 비밀값(내부 호출 키, 외부 AI API 키, 전환 전에는 DB 접속 정보·암호화 키)이 들어 있어 git에 올리지 않고(`.gitignore`) 디스코드로 공유한다. 서버 주소도 공개 저장소에 적지 않는다.
 - 키 목록은 커밋된 `.env.local.example`에 둔다. 값은 비우고(`AI_MODE=mock`만 예외), 비밀값을 쓰지 않는다. 키를 추가·변경하면 이 예시 파일도 같은 PR에서 고치고 디스코드의 파일도 갱신한다.
 - 코드는 `.env.local`을 직접 읽지 않고 `app/core/config.py`의 `Settings`로 읽는다. 키를 추가하면 `Settings`에도 필드를 넣는다. 비밀값 필드는 `SecretStr`로 둔다.
 - 환경변수가 `.env.local`보다 우선한다. 운영 서버는 환경변수로 넣는다.
@@ -14,7 +14,7 @@
   - `BACKEND_INTERNAL_KEY`: Python → Java 키. Python이 `X-Internal-Key`로 보내고 Java가 받는 값과 같아야 한다.
   - 두 키는 따로 만든다(32바이트 난수, 예: `openssl rand -base64 32`). 같은 값이면 방향을 나눈 의미가 없다. 받는 쪽은 설정이 빈 값이면 모든 요청을 거부한다.
   - 키를 추가·변경하면 `.env.local.example`과 `Settings`도 같은 PR에서 고친다.
-- 전환 전 코드만 읽는 값: `APP_PROFILE`·`LOCAL_DB_*`·`PROD_DB_*`(DB 접속), `JWT_SECRET_BASE64`(JWT 검증), `CONVERSATION_ENC_KEY`(대화 암호화). Python이 DB·JWT를 다루지 않게 되면(`architecture.md` "전환 상태") 지운다. 그때까지 `APP_PROFILE` 기본값을 `prod`로 바꾸지 않는다 — 값을 빠뜨린 PC가 공용 DB에 쓰게 된다.
+- 전환 전 코드만 읽는 값: `APP_PROFILE`·`LOCAL_DB_*`·`PROD_DB_*`(DB 접속), `CONVERSATION_ENC_KEY`(대화 암호화). Python이 DB를 다루지 않게 되면(`architecture.md` "전환 상태") 지운다. 그때까지 `APP_PROFILE` 기본값을 `prod`로 바꾸지 않는다 — 값을 빠뜨린 PC가 공용 DB에 쓰게 된다.
 - Google 서비스 계정 키 같은 파일은 저장소 밖이나 git 제외 경로에 두고 `.env.local`에는 경로만 적는다.
 - DMS MCP 서버 주소(`DMS_MCP_URL`)도 `.env.local`에 둔다. setup이 읽어 감지한 AI 도구(Claude Code·Codex)에 등록한다.
 - 로그에 비밀번호와 토큰을 남기지 않는다. Java로 넘기는 사용자 `Cookie` 헤더와 `X-Internal-Key` 값도 로그·오류 응답·예외 메시지에 남기지 않는다(새면 그 사용자로 Java API를 부를 수 있다).
