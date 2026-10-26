@@ -37,5 +37,5 @@ SCR-AIM-011 AI 대화창 (새 창) · 인증 전환 — 서버 간 키 양방향
 - 연결 남음: Java `PythonCharacterGenerator` 신설·연결 (LJS 백엔드. 지금은 `FakeCharacterGenerator`뿐)
 - 연결 남음: SCR-AIM-008 real 모드 Google Vision 클라이언트 (서비스 계정 키 수령 후, LJS)
 - 연결 남음: Java `PythonOcrClient` 연결 확인 (LJS 백엔드)
-- 하네스 수정 PR 후보(공용, 이번 커밋에서 뺌): `scripts/doctor.py` "인증" 키를 `BACKEND_BASE_URL`만으로·`scripts/fake_backend.py`(SCR-AIM-011 인증 전환분), `verify-collect.sh:18` `cut -c8-`가 멀티바이트 "시작 "을 잘못 자름, `scripts/start-check.sh` 수정분, 그리고 macOS BSD `sed` 문제(`milestone-status.sh`·`impl-check.sh`·`api-row.sh`)와 `verify-collect.sh:37-38`의 `case` 문법. 백엔드 `8b015d0`이 같은 종류를 고쳤는지 비교
+- 하네스 수정 PR 후보(공용): `verify-collect.sh:18` `cut -c8-`가 멀티바이트 "시작 "을 잘못 자름, `scripts/start-check.sh` 수정분, 그리고 macOS BSD `sed` 문제(`milestone-status.sh`·`impl-check.sh`·`api-row.sh`)와 `verify-collect.sh:37-38`의 `case` 문법. 백엔드 `8b015d0`이 같은 종류를 고쳤는지 비교
 - `docs/api/internal.md`는 mock이 Java `FakeOcrClient` 시나리오(`fake`, `fake-empty` 등)를 따른다고 적었으나 mock은 고정 응답 1개. 필요해지면 구현
