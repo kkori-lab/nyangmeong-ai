@@ -12,7 +12,7 @@ Java ↔ Python 서버 간 API다. 공통 규칙은 `docs/api/README.md`에 있�
 
 ## Python → Java
 
-Java가 만드는 API다(백엔드 저장소 기준). 모두 `X-Internal-Key: <BACKEND_INTERNAL_KEY>`와 브라우저에서 받은 `Cookie` 헤더를 함께 보낸다.
+Java가 만드는 API다(백엔드 저장소 기준). 모두 브라우저에서 받은 `Cookie` 헤더를 그대로 보낸다. 키 헤더는 없다.
 
 | 메서드 | 경로 | 설명 | 기능 ID | 담당 | 요청 DTO | 응답 DTO |
 | --- | --- | --- | --- | --- | --- | --- |

@@ -9,15 +9,13 @@ from app.ocr.clients import OcrApiError, get_ocr_client
 from app.ocr.schemas import ReceiptOcrResponse
 
 URL = "/internal/v1/ocr/receipt"
-KEY = {"X-Internal-Key": "test-key"}
 PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 16
 
 
 @pytest.fixture
 def app(monkeypatch: pytest.MonkeyPatch):
-    # 각자 PC의 .env.local 값과 무관하게 mock 모드·고정 키로 기동
+    # 각자 PC의 .env.local 값과 무관하게 mock 모드로 기동
     monkeypatch.setenv("AI_MODE", "mock")
-    monkeypatch.setenv("INTERNAL_API_KEY", "test-key")
     monkeypatch.setenv("OCR_TIMEOUT_SEC", "0.05")
     get_settings.cache_clear()
     return create_app()
@@ -28,8 +26,8 @@ def client(app) -> TestClient:
     return TestClient(app)
 
 
-def _post(client: TestClient, content: bytes = PNG, headers: dict | None = KEY):
-    return client.post(URL, files={"file": ("r.png", content)}, headers=headers or {})
+def _post(client: TestClient, content: bytes = PNG):
+    return client.post(URL, files={"file": ("r.png", content)})
 
 
 def test_mock_응답이_ReceiptOcrResponse_모양이다(client: TestClient) -> None:
@@ -48,25 +46,6 @@ def test_mock_응답이_ReceiptOcrResponse_모양이다(client: TestClient) -> N
     assert set(section["drugs"][0]) == {"mdcnNm", "mdcnDays", "mdcnUsage", "mdcnAmt"}
 
 
-@pytest.mark.parametrize("headers", [None, {"X-Internal-Key": "wrong"}])
-def test_내부_키가_없거나_틀리면_401(client: TestClient, headers: dict | None) -> None:
-    response = _post(client, headers=headers)
-
-    assert response.status_code == 401
-    assert response.json()["code"] == "UNAUTHORIZED"
-
-
-def test_내부_키_설정이_비어_있으면_빈_헤더도_401(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("INTERNAL_API_KEY", "")
-    get_settings.cache_clear()
-
-    response = _post(client, headers={"X-Internal-Key": ""})
-
-    assert response.status_code == 401
-
-
 def test_이미지로_읽히지_않는_파일은_400(client: TestClient) -> None:
     response = _post(client, content=b"%PDF-1.4 not an image")
 
@@ -75,7 +54,7 @@ def test_이미지로_읽히지_않는_파일은_400(client: TestClient) -> None
 
 
 def test_file_파트가_없으면_400(client: TestClient) -> None:
-    response = client.post(URL, headers=KEY)
+    response = client.post(URL)
 
     assert response.status_code == 400
     assert response.json()["code"] == "INVALID_REQUEST"

@@ -6,9 +6,8 @@ from fastapi.responses import JSONResponse
 from app.chat import service
 from app.chat.repository import ConversationRepository, get_conversation_repository
 from app.core import response
-from app.core.internal_auth import require_internal_key
 
-router = APIRouter(prefix="/internal/v1/members", dependencies=[Depends(require_internal_key)])
+router = APIRouter(prefix="/internal/v1/members")
 
 
 @router.delete("/{mbrSn}/conversations")

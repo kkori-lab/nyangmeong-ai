@@ -17,5 +17,5 @@ AI 서버(이 저장소)의 API와 요청·응답 DTO다. **팀 확인 전 초�
 - 오류의 `code`는 오류 상수 이름이다(예: `OCR_TIMEOUT`). 받는 쪽은 `code`로만 분기하고 `message`로 분기하지 않는다.
 - 필드 이름은 DB 약어 기반 camelCase다(백엔드 DTO와 같다). 읽지 못한 값은 `null`, 목록은 빈 배열이다.
 - `/ai/**`: 요청마다 쿠키 `access_token`을 Java `/internal/auth/check`에 넘겨 인증한다(`architecture.md` "인증"). Java의 인증 오류(401 `UNAUTHORIZED`·`TOKEN_EXPIRED`, 403 `MEMBER_INACTIVE`)는 본문·`Set-Cookie`까지 그대로 전달하고, Java에 닿지 못하면 502 `EXTERNAL_API_ERROR`다. 상태를 바꾸는 요청은 `X-Requested-With: XMLHttpRequest`가 없으면 403 `FORBIDDEN`이다.
-- `/internal/v1/**`(Java → Python): `X-Internal-Key` 헤더가 `.env.local`의 `INTERNAL_API_KEY`와 다르면 401 `UNAUTHORIZED`다. Python → Java 내부 API에는 `BACKEND_INTERNAL_KEY`를 같은 헤더로 보낸다(키는 방향마다 따로 둔다). 둘 다 외부(Nginx)에 열지 않는다.
+- `/internal/v1/**`(Java → Python)와 Python → Java 내부 API는 키 헤더 없이 부른다(2026-10-26 결정). 둘 다 외부(Nginx)에 열지 않는다.
 - 필수: 요청은 반드시 보내야 하는 것, 응답은 항상 값이 있는 것(null 아님).

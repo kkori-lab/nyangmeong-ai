@@ -26,16 +26,14 @@ def _client(
     async def me(mbr_sn: Annotated[int, Depends(require_member)]) -> dict:
         return {"mbrSn": mbr_sn}
 
-    settings = Settings(
-        _env_file=None, backend_base_url=base_url, backend_internal_key="py-to-java"
-    )
+    settings = Settings(_env_file=None, backend_base_url=base_url)
     backend = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     app.dependency_overrides[get_settings] = lambda: settings
     app.dependency_overrides[get_backend_client] = lambda: backend
     return TestClient(app)
 
 
-def test_Java가_통과시키면_회원_번호_Java로_쿠키와_내부_키를_보낸다() -> None:
+def test_Java가_통과시키면_회원_번호_Java로_쿠키만_보낸다() -> None:
     # FN-AIM-011-03
     seen: list[httpx2.Request] = []
 
@@ -50,7 +48,7 @@ def test_Java가_통과시키면_회원_번호_Java로_쿠키와_내부_키를_�
     assert res.status_code == 200
     assert res.json() == {"mbrSn": 42}
     assert str(seen[0].url) == f"{BACKEND}/internal/auth/check"
-    assert seen[0].headers["x-internal-key"] == "py-to-java"
+    assert "x-internal-key" not in seen[0].headers
     assert seen[0].headers["cookie"] == "access_token=abc"
 
 

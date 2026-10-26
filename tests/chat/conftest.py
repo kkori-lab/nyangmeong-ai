@@ -12,7 +12,6 @@ from app.main import create_app
 # 0~31 바이트 : 테스트 전용 키(운영 값 아님)
 ENC_KEY_B64 = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
 AJAX = {"X-Requested-With": "XMLHttpRequest"}
-INTERNAL = {"X-Internal-Key": "test-key"}
 
 
 def fake_auth_check(request: httpx2.Request) -> httpx2.Response:
@@ -93,7 +92,6 @@ def repo() -> FakeRepo:
 def client(monkeypatch: pytest.MonkeyPatch, repo: FakeRepo) -> TestClient:
     # 각자 PC의 .env.local 값과 무관하게 mock 모드·고정 키로 기동
     monkeypatch.setenv("AI_MODE", "mock")
-    monkeypatch.setenv("INTERNAL_API_KEY", "test-key")
     monkeypatch.setenv("BACKEND_BASE_URL", "http://backend.test")
     monkeypatch.setenv("CONVERSATION_ENC_KEY", ENC_KEY_B64)
     get_settings.cache_clear()

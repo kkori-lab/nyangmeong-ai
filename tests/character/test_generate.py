@@ -10,7 +10,6 @@ from app.core.config import get_settings
 from app.main import create_app
 
 URL = "/internal/v1/character/generate"
-KEY = {"X-Internal-Key": "test-key"}
 PHOTO = b"\x89PNG\r\n\x1a\n" + b"0" * 16
 FORM = {"petSeCd": "PETC0001", "vrtyNm": "말티즈", "colrNm": "흰색", "chrcCn": "귀가 쳐짐"}
 
@@ -43,9 +42,8 @@ class _FakeClient:
 
 @pytest.fixture
 def app(monkeypatch: pytest.MonkeyPatch):
-    # 각자 PC의 .env.local 값과 무관하게 mock 모드·고정 키로 기동
+    # 각자 PC의 .env.local 값과 무관하게 mock 모드로 기동
     monkeypatch.setenv("AI_MODE", "mock")
-    monkeypatch.setenv("INTERNAL_API_KEY", "test-key")
     get_settings.cache_clear()
     return create_app()
 
@@ -59,10 +57,9 @@ def _post(
     client: TestClient,
     photo: bytes | None = PHOTO,
     data: dict | None = None,
-    headers: dict | None = KEY,
 ):
     files = {"photo": ("p.png", photo)} if photo is not None else None
-    return client.post(URL, files=files, data=FORM if data is None else data, headers=headers or {})
+    return client.post(URL, files=files, data=FORM if data is None else data)
 
 
 def test_mock_요청하면_512x512_PNG를_껍데기_없이_돌려준다(client: TestClient) -> None:
@@ -71,14 +68,6 @@ def test_mock_요청하면_512x512_PNG를_껍데기_없이_돌려준다(client: 
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
     assert png_size(response.content) == (512, 512)
-
-
-@pytest.mark.parametrize("headers", [None, {"X-Internal-Key": "wrong"}])
-def test_내부_키가_없거나_틀리면_401(client: TestClient, headers: dict | None) -> None:
-    response = _post(client, headers=headers)
-
-    assert response.status_code == 401
-    assert response.json()["code"] == "UNAUTHORIZED"
 
 
 def test_사진이_이미지가_아니면_400_FILE_TYPE_NOT_ALLOWED(client: TestClient) -> None:

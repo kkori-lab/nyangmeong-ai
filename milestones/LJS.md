@@ -30,10 +30,9 @@
 
 ## SCR-AIM-011 AI 대화창 (새 창) · 인증 전환 (Java 확인 호출) — 끝
 - 기능: FN-AIM-011-03 본창 세션 공유 (2026-10-26 결정: JWT 직접 검증 → 요청마다 Java `/internal/auth/check`)
-- 기다리는 것: Java `/internal/auth/check`·`BACKEND_INTERNAL_KEY` (백엔드, 연결 확인)
+- 기다리는 것: 없음 (실제 Java 연결 확인 2026-10-26, 서버 간 키 양방향 제거)
 - 완료 조건: `/ai/**`가 Java 확인 결과로 회원을 정하고, Java 인증 오류는 본문·`Set-Cookie`까지 그대로, Java에 닿지 못하면 502 `EXTERNAL_API_ERROR`. (Java는 가짜 응답으로 검증)
 - 범위 밖: 대화 저장을 Java 내부 API로 옮기는 것(Java API 경로 미정), 탈퇴 파기 내부 API 삭제
-- 연결 남음: FN-AIM-011-03 실제 Java 연결 확인 (Spring의 X-Internal-Key 제거 반영, LJS 백엔드)
 
 ## SCR-AIM-002 대화창 · 검색 질문/응답 — 대기
 - 기능: FN-AIM-002-02 외부 AI API 호출 · 응답 표시, FN-AIM-002-03 의료 판단 제한 고지, FN-AIM-002-04 연관 바로가기 제안, FN-AIM-002-07 API 오류 · 타임아웃 처리, FN-AIM-002-08 개인 데이터 응답 제외, FN-AIM-002-09 진단성 질문 제한, FN-AIM-002-10 검색 · 라우팅 독립 동작, FN-AIM-002-11 대화 컨텍스트 적용, FN-AIM-011-15 AI 컨텍스트 범위 제한 (화면은 SCR-AIM-011), FN-AIM-011-16 개인 데이터 비전달 (화면은 SCR-AIM-011)

@@ -1,7 +1,7 @@
 import pytest
 
 from app.core.crypto import FieldCrypto
-from tests.chat.conftest import AJAX, ENC_KEY_B64, INTERNAL, FakeRepo, as_member
+from tests.chat.conftest import AJAX, ENC_KEY_B64, FakeRepo, as_member
 
 URL = "/ai/conversations"
 CRYPTO = FieldCrypto(ENC_KEY_B64)
@@ -163,7 +163,7 @@ def test_파기_대상_회원만_지운다(client, repo):
     _seed(repo, 1, "A1")
     _seed(repo, 1, "A2")
     b = _seed(repo, 2, "B1")
-    res = client.delete(PURGE.format(1), headers=INTERNAL)
+    res = client.delete(PURGE.format(1))
 
     assert res.status_code == 200
     assert list(repo.rooms) == [b.room_sn]
@@ -171,13 +171,4 @@ def test_파기_대상_회원만_지운다(client, repo):
 
 
 def test_파기_대화_없는_회원도_200(client):
-    assert client.delete(PURGE.format(77), headers=INTERNAL).status_code == 200
-
-
-@pytest.mark.parametrize("headers", [{}, {"X-Internal-Key": "wrong"}])
-def test_파기_내부_키_없거나_틀리면_401(client, repo, headers):
-    _seed(repo, 1, "A1")
-    res = client.delete(PURGE.format(1), headers=headers)
-
-    assert res.status_code == 401
-    assert len(repo.rooms) == 1
+    assert client.delete(PURGE.format(77)).status_code == 200

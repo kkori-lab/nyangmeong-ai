@@ -42,10 +42,8 @@ async def require_member(
     base_url = settings.backend_base_url.rstrip("/")
     if not base_url:
         raise _external_error()
-    headers = {"X-Internal-Key": settings.backend_internal_key.get_secret_value()}
     cookie = request.headers.get("cookie")
-    if cookie:
-        headers["Cookie"] = cookie
+    headers = {"Cookie": cookie} if cookie else {}
     try:
         res = await client.get(f"{base_url}{AUTH_CHECK_PATH}", headers=headers)
     except httpx2.HTTPError:

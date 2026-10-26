@@ -22,7 +22,7 @@ Python ──▶ Java      내부 API  인증 확인(/internal/auth/check), 대�
 - **질문 한 번의 순서**: ① 사용자 메시지를 Java에 저장(여기서 실패하면 LLM을 부르지 않는다) → ② 최근 6턴·설정값으로 LLM 호출 → ③ SSE로 React에 흘려보냄 → ④ 답변을 멱등 키와 함께 Java에 저장(실패하면 재시도). 브라우저 연결이 끊겨도 ②~④는 끝까지 한다. 메시지 테이블은 INSERT 전용이라 미완료 행을 먼저 넣고 UPDATE하는 방식은 쓰지 않는다.
 - **영수증·캐릭터**: 업로드 검증·파일 저장·상태·알림은 Java가 한다. Python은 `/internal/v1/ocr/receipt`·`/internal/v1/character/generate`로 받은 이미지의 인식·생성 결과만 돌려준다. 채팅 영수증 분석(SCR-AIM-013)도 React → Java `/api/receipts` 경유다. 채팅 대화 이력에 남기는 결과 요약·함께 보낸 텍스트를 누가 저장할지는 미정이다.
 - 채팅으로 만든 일정·케어 항목은 여기서 저장하지 않는다. 미리보기 카드를 돌려주고, React가 Java 일정 등록 API(`schdlSrcCd`='AI 생성')를 부른 뒤 결과(등록됨·취소됨)를 대화에 기록한다.
-- **서버 간 키**: 방향마다 다른 키를 같은 헤더 `X-Internal-Key`로 보낸다. Java → Python은 `INTERNAL_API_KEY`, Python → Java는 `BACKEND_INTERNAL_KEY`(`config.md`). 받는 쪽은 상수 시간 비교, 설정이 빈 값이면 모두 거부한다.
+- **서버 간 호출**: 양방향 모두 키 없이 부른다(2026-10-26 결정). 내부 경로(`/internal/**`)는 외부(Nginx)에 열지 않는 것으로만 막는다.
 - 개인 데이터(반려동물 기록 등)는 외부 AI API에 보내지 않는다(POL-006, FN-AIM-011-16).
 - **전환 상태**: 지금 코드는 아직 DB 직접 접근(`app/chat/repository.py`, `app/core/db.py`·`crypto.py`)을 쓴다. 인증은 Java `/internal/auth/check` 호출로 바꿨다(2026-10-26). 대화 저장은 Java 대화 저장 API가 나온 뒤 교체한다. 탈퇴 회원 대화 파기 내부 API(`DELETE /internal/v1/members/{mbrSn}/conversations`)도 그때 지운다(Java가 자기 테이블에서 직접 파기).
 

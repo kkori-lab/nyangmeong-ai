@@ -10,12 +10,9 @@
 - 환경변수가 `.env.local`보다 우선한다. 운영 서버는 환경변수로 넣는다.
 - 백엔드와 같아야 하는 값(2026-10-26 결정):
   - `BACKEND_BASE_URL`: Python이 Java 내부 API(인증 확인, 대화 저장)를 부를 주소. 서버 주소라 공개 저장소에 적지 않는다.
-  - `INTERNAL_API_KEY`: Java → Python 키. Java가 `X-Internal-Key`로 보내는 값과 같아야 한다.
-  - `BACKEND_INTERNAL_KEY`: Python → Java 키. Python이 `X-Internal-Key`로 보내고 Java가 받는 값과 같아야 한다.
-  - 두 키는 따로 만든다(32바이트 난수, 예: `openssl rand -base64 32`). 같은 값이면 방향을 나눈 의미가 없다. 받는 쪽은 설정이 빈 값이면 모든 요청을 거부한다.
   - 키를 추가·변경하면 `.env.local.example`과 `Settings`도 같은 PR에서 고친다.
 - 전환 전 코드만 읽는 값: `APP_PROFILE`·`LOCAL_DB_*`·`PROD_DB_*`(DB 접속), `CONVERSATION_ENC_KEY`(대화 암호화). Python이 DB를 다루지 않게 되면(`architecture.md` "전환 상태") 지운다. 그때까지 `APP_PROFILE` 기본값을 `prod`로 바꾸지 않는다 — 값을 빠뜨린 PC가 공용 DB에 쓰게 된다.
 - Google 서비스 계정 키 같은 파일은 저장소 밖이나 git 제외 경로에 두고 `.env.local`에는 경로만 적는다.
 - DMS MCP 서버 주소(`DMS_MCP_URL`)도 `.env.local`에 둔다. setup이 읽어 감지한 AI 도구(Claude Code·Codex)에 등록한다.
-- 로그에 비밀번호와 토큰을 남기지 않는다. Java로 넘기는 사용자 `Cookie` 헤더와 `X-Internal-Key` 값도 로그·오류 응답·예외 메시지에 남기지 않는다(새면 그 사용자로 Java API를 부를 수 있다).
+- 로그에 비밀번호와 토큰을 남기지 않는다. Java로 넘기는 사용자 `Cookie` 헤더도 로그·오류 응답·예외 메시지에 남기지 않는다(새면 그 사용자로 Java API를 부를 수 있다).
 - 작업 기록은 `handoff/<이름>.md`에 사람마다 한 파일로 두고 커밋한다. 다른 PC에서도 이어서 작업하기 위해서다. 공개 저장소이므로 비밀값과 개인 PC 경로를 쓰지 않는다.
