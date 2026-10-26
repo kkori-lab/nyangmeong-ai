@@ -36,11 +36,8 @@ class Settings(BaseSettings):
     prod_db_username: str = ""
     prod_db_password: SecretStr = SecretStr("")
 
-    # Java→Python 내부 호출 공유 키. 빈 값이면 내부 호출 전부 거절
-    internal_api_key: SecretStr = SecretStr("")
-
-    # 백엔드 app.jwt.secret-base64와 같은 값. 빈 값이면 /ai/** 전부 401
-    jwt_secret_base64: SecretStr = SecretStr("")
+    # Python→Java 내부 API 주소. 빈 값이면 /ai/** 전부 502
+    backend_base_url: str = ""
 
     # 백엔드 app.crypto.aes-key-base64와 같은 값(대화 제목·본문 암호화)
     conversation_enc_key: SecretStr = SecretStr("")

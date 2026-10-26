@@ -5,11 +5,10 @@ from fastapi.responses import JSONResponse
 
 from app.core import response
 from app.core.config import Settings, get_settings
-from app.core.internal_auth import require_internal_key
 from app.ocr import service
 from app.ocr.clients import OcrClient, get_ocr_client
 
-router = APIRouter(prefix="/internal/v1/ocr", dependencies=[Depends(require_internal_key)])
+router = APIRouter(prefix="/internal/v1/ocr")
 
 
 @router.post("/receipt")

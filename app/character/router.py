@@ -5,9 +5,8 @@ from fastapi import APIRouter, Depends, Form, Response, UploadFile
 from app.character import service
 from app.character.clients import CharacterClient, CharacterRequest, get_character_client
 from app.character.schemas import PetSeCd
-from app.core.internal_auth import require_internal_key
 
-router = APIRouter(prefix="/internal/v1/character", dependencies=[Depends(require_internal_key)])
+router = APIRouter(prefix="/internal/v1/character")
 
 
 @router.post("/generate")

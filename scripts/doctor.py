@@ -133,7 +133,7 @@ def env_setup() -> dict[str, str]:
     groups = {
         "DB(local)": db_keys("local"),
         "DB(prod)": db_keys("prod"),
-        "인증": ("JWT_SECRET_BASE64", "INTERNAL_API_KEY"),
+        "인증": ("BACKEND_BASE_URL",),
         "암호화": ("CONVERSATION_ENC_KEY",),
         "LLM": ("LLM_API_KEY",),
         "이미지 생성": ("OPENAI_API_KEY",),

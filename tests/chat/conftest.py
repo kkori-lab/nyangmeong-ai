@@ -1,26 +1,28 @@
-import time
 from datetime import datetime, timedelta
 
-import jwt
+import httpx2
 import pytest
 from fastapi.testclient import TestClient
 
 from app.chat.repository import MessageRow, RoomRow, get_conversation_repository
+from app.core.backend import get_backend_client
 from app.core.config import get_settings
 from app.main import create_app
 
 # 0~31 바이트 : 테스트 전용 키(운영 값 아님)
-JWT_SECRET_B64 = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
 ENC_KEY_B64 = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
-JWT_KEY = bytes(range(32))
 AJAX = {"X-Requested-With": "XMLHttpRequest"}
-INTERNAL = {"X-Internal-Key": "test-key"}
 
 
-def make_token(mbr_sn: int, typ: str = "access", exp_in: int = 600, key: bytes = JWT_KEY) -> str:
-    now = int(time.time())
-    claims = {"sub": str(mbr_sn), "sid": "1", "typ": typ, "iat": now, "exp": now + exp_in}
-    return jwt.encode(claims, key, algorithm="HS256")
+def fake_auth_check(request: httpx2.Request) -> httpx2.Response:
+    """Java /internal/auth/check 흉내 : 쿠키 access_token=member-<번호>면 통과"""
+    cookie = request.headers.get("cookie", "")
+    token = dict(p.strip().split("=", 1) for p in cookie.split(";") if "=" in p).get(
+        "access_token", ""
+    )
+    if token.startswith("member-"):
+        return httpx2.Response(200, json={"data": {"mbrSn": int(token[7:]), "mbrAuthrtCd": "U"}})
+    return httpx2.Response(401, json={"status": "error", "httpCode": 401, "code": "UNAUTHORIZED"})
 
 
 class FakeRepo:
@@ -90,14 +92,15 @@ def repo() -> FakeRepo:
 def client(monkeypatch: pytest.MonkeyPatch, repo: FakeRepo) -> TestClient:
     # 각자 PC의 .env.local 값과 무관하게 mock 모드·고정 키로 기동
     monkeypatch.setenv("AI_MODE", "mock")
-    monkeypatch.setenv("INTERNAL_API_KEY", "test-key")
-    monkeypatch.setenv("JWT_SECRET_BASE64", JWT_SECRET_B64)
+    monkeypatch.setenv("BACKEND_BASE_URL", "http://backend.test")
     monkeypatch.setenv("CONVERSATION_ENC_KEY", ENC_KEY_B64)
     get_settings.cache_clear()
     app = create_app()
     app.dependency_overrides[get_conversation_repository] = lambda: repo
+    backend = httpx2.AsyncClient(transport=httpx2.MockTransport(fake_auth_check))
+    app.dependency_overrides[get_backend_client] = lambda: backend
     return TestClient(app)
 
 
 def as_member(client: TestClient, mbr_sn: int) -> None:
-    client.cookies.set("access_token", make_token(mbr_sn))
+    client.cookies.set("access_token", f"member-{mbr_sn}")

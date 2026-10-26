@@ -5,17 +5,26 @@
 ## 서비스 사이의 경계
 
 ```
-React  ──▶ Java      비즈니스 API 전부(일정 등록 포함)
-React  ──▶ Python    /ai/**  AI 대화창
-Java   ──▶ Python    /internal/v1/**  OCR 인식, 캐릭터 생성, 탈퇴 회원 대화 파기
-Python ─X─▶ Java     호출 없음
+React  ──▶ Java      비즈니스 API 전부(일정·케어 항목 등록, 영수증 업로드·저장, 캐릭터 생성·조회 등)
+React  ──▶ Python    /ai/**  AI 대화창(대화 목록·생성·삭제, 질문 전송·답변 스트리밍)
+Java   ──▶ Python    /internal/v1/**  영수증 OCR 인식, 캐릭터 이미지 생성 (결과만 돌려준다)
+Python ──▶ Java      내부 API  인증 확인(/internal/auth/check), 대화 저장·조회
 ```
 
-- Python이 아는 것은 자기 API, 대화 테이블 2개, `SYS_STNG`의 AI 설정값(읽기), JWT 검증 키, 내부 호출 공유 키뿐이다.
-- 회원·반려동물 데이터는 요청에 실려 온다(예: 채팅 요청의 `pets: [{id, name}]`). 그 값으로 저장 권한을 판단하지 않는다. 소유권은 Java가 저장할 때 다시 검사한다.
-- 채팅으로 만든 일정·케어 항목은 여기서 저장하지 않는다. 미리보기 카드를 돌려주고, React가 Java 일정 등록 API를 부른 뒤 결과(등록됨·취소됨)를 여기에 기록한다.
-- `ocr`·`character`는 결과만 돌려준다. 영수증·캐릭터 상태, 파일 저장, 알림은 Java가 한다.
+2026-10-26 결정: **DB는 Java만 다룬다.** Python은 DB에 붙지 않는 상태 없는 AI 서버다. AI 벤더 API(LLM·OCR·이미지 생성) 호출은 전부 Python이 한다. (10-25의 A안 — Python이 분석 단계 테이블을 소유 — 은 폐기됐다.) 배포는 nginx 한 도메인에서 `/api/`는 Java, `/ai/`는 Python으로 접두사를 자르지 않고 넘긴다. `/internal/**`와 `/health`는 nginx로 내보내지 않는다. 같은 오리진이라 CORS 설정은 필요 없다.
+
+- **인증**: Python은 JWT를 검증하지 않고 키도 두지 않는다. 라우터 의존성(`app/core/auth.py` `require_member`)이 모든 `/ai/**` 요청에서 브라우저의 `Cookie` 헤더를 그대로 실어 Java `GET /internal/auth/check`를 부른다. 통과하면 `data { mbrSn, mbrAuthrtCd }`를 받는다. 결과는 캐시하지 않는다(로그아웃·정지가 바로 반영되어야 함). `/ai/**` 라우터를 새로 만들면 이 의존성을 빠뜨리지 않는다(미들웨어가 아니라 자동으로 붙지 않는다).
+  - Java가 401(`UNAUTHORIZED`·`TOKEN_EXPIRED`)이나 403(`MEMBER_INACTIVE`)을 주면 상태 코드·`ApiResponse` 오류 본문·`Set-Cookie`를 다시 만들지 않고 그대로 브라우저에 전달한다. `MEMBER_INACTIVE`의 `Set-Cookie`가 쿠키를 지운다.
+  - Java에 닿지 못하면 502 `EXTERNAL_API_ERROR`("외부 서비스 호출에 실패했습니다. 잠시 후 다시 시도해 주세요.")를 준다.
+  - `X-Requested-With` 검사(GET·HEAD·OPTIONS 외 `XMLHttpRequest` 필수, 없으면 403 `FORBIDDEN`)는 Python이 계속 한다. 인증 확인이 GET이라 Java의 같은 검사를 거치지 않기 때문이다.
+  - Python은 토큰을 갱신·발급하지 않는다. `refresh_token`(`Path=/api/auth`)은 여기에 오지 않는다.
+- **대화 저장**: 대화방·메시지 저장과 조회, 본인 대화 판정, 제목·본문 암호화는 Java가 한다. Python은 같은 `Cookie`를 실어 Java 내부 API를 부른다. AI 역할 메시지 추가는 내부 전용 경로로만 한다(React가 직접 부를 수 있으면 AI 답변을 꾸며 넣을 수 있다).
+- **질문 한 번의 순서**: ① 사용자 메시지를 Java에 저장(여기서 실패하면 LLM을 부르지 않는다) → ② 최근 6턴·설정값으로 LLM 호출 → ③ SSE로 React에 흘려보냄 → ④ 답변을 멱등 키와 함께 Java에 저장(실패하면 재시도). 브라우저 연결이 끊겨도 ②~④는 끝까지 한다. 메시지 테이블은 INSERT 전용이라 미완료 행을 먼저 넣고 UPDATE하는 방식은 쓰지 않는다.
+- **영수증·캐릭터**: 업로드 검증·파일 저장·상태·알림은 Java가 한다. Python은 `/internal/v1/ocr/receipt`·`/internal/v1/character/generate`로 받은 이미지의 인식·생성 결과만 돌려준다. 채팅 영수증 분석(SCR-AIM-013)도 React → Java `/api/receipts` 경유다. 채팅 대화 이력에 남기는 결과 요약·함께 보낸 텍스트를 누가 저장할지는 미정이다.
+- 채팅으로 만든 일정·케어 항목은 여기서 저장하지 않는다. 미리보기 카드를 돌려주고, React가 Java 일정 등록 API(`schdlSrcCd`='AI 생성')를 부른 뒤 결과(등록됨·취소됨)를 대화에 기록한다.
+- **서버 간 호출**: 양방향 모두 키 없이 부른다(2026-10-26 결정). 내부 경로(`/internal/**`)는 외부(Nginx)에 열지 않는 것으로만 막는다.
 - 개인 데이터(반려동물 기록 등)는 외부 AI API에 보내지 않는다(POL-006, FN-AIM-011-16).
+- **전환 상태**: 지금 코드는 아직 DB 직접 접근(`app/chat/repository.py`, `app/core/db.py`·`crypto.py`)을 쓴다. 인증은 Java `/internal/auth/check` 호출로 바꿨다(2026-10-26). 대화 저장은 Java 대화 저장 API가 나온 뒤 교체한다. 탈퇴 회원 대화 파기 내부 API(`DELETE /internal/v1/members/{mbrSn}/conversations`)도 그때 지운다(Java가 자기 테이블에서 직접 파기).
 
 ## 패키지 안
 

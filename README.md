@@ -57,8 +57,8 @@ sh scripts/check.sh      # ruff check, ruff format --check, pytest. CI와 하네
 1. 이 저장소에서 `uv run uvicorn app.main:app --reload` → `Application startup complete`가 나오면 준비 완료. 목록에 적힌 `AI_MODE`인지 `.env.local`을 확인한다.
 2. 로그인이 필요한 `/ai/**` API면 백엔드 저장소에서 `./gradlew bootRun`을 띄우고 쿠키를 받는다.
    - `POST http://localhost:8080/api/auth/dev-tokens`, Headers `X-Requested-With: XMLHttpRequest`, Body → raw → JSON `{"mbrSn": <MBR에 있는 번호>}` → 200
-   - 쿠키는 포트와 관계없이 `localhost`에 붙으므로 Postman이 `http://localhost:8000` 요청에도 실어 보낸다. 두 서버의 `.env.local` `JWT_SECRET_BASE64`와 백엔드 `app.jwt.secret-base64`가 같아야 한다.
-3. 내부 API(`/internal/v1/**`)는 Headers에 `X-Internal-Key: <.env.local의 INTERNAL_API_KEY>`를 넣는다. 파일은 Body → form-data에서 필드 종류를 File로 바꿔 고른다.
+   - 쿠키는 포트와 관계없이 `localhost`에 붙으므로 Postman이 `http://localhost:8000` 요청에도 실어 보낸다. 이 저장소 `.env.local`의 `BACKEND_BASE_URL`이 `http://localhost:8080`이어야 한다(Python이 쿠키를 Java에 넘겨 인증을 확인한다).
+3. 내부 API(`/internal/v1/**`)는 키 헤더 없이 보낸다. 파일은 Body → form-data에서 필드 종류를 File로 바꿔 고른다.
 4. 목록의 요청을 그대로 보낸다: 메서드·URL, Headers, Body. POST·PUT·PATCH·DELETE의 `/ai/**` 요청에는 `X-Requested-With: XMLHttpRequest`를 넣는다.
 5. 응답 코드와 JSON(또는 이미지)을 기대 결과와 비교한다. 스트리밍 응답은 Postman 응답 창에 이벤트가 차례로 쌓이는지 본다.
 6. Postman으로 만들기 어려운 조건(만료 토큰, 외부 API 시간 초과 등)은 목록의 테스트로 확인한다: `uv run pytest <파일>::<테스트 이름>`
