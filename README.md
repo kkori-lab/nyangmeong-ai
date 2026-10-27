@@ -5,11 +5,11 @@
 | 패키지 | 맡는 일 | 호출자 |
 |---|---|---|
 | `app/chat` | AI 대화창 전체(답변, 제목, 의도 판정, 채팅 일정 등록 해석). 대화 저장은 Java 내부 API로 | React (`/ai/**`) |
-| `app/ocr` | 영수증 인식·파싱 | Java (내부 API) |
-| `app/character` | 픽셀 캐릭터 이미지 생성 | Java (내부 API) |
+| `app/ocr` | 영수증 인식·파싱 | React (`/ai/**`, 전환 전에는 Java 내부 API) |
+| `app/character` | 픽셀 캐릭터 이미지 생성 | React (`/ai/**`, 전환 전에는 Java 내부 API) |
 | `app/core` | 설정, Java 호출(인증 확인), 공통 응답 | — |
 
-Java는 Python의 `/internal/v1/**`(OCR·캐릭터)를, Python은 Java의 `/internal/**`(인증 확인·대화 저장)를 부른다. Python은 DB에 붙지 않는다.
+React는 AI 채팅·영수증 OCR·캐릭터 생성·검사결과지 PDF 분석을 Python `/ai/**`로 부르고(2026-10-27 결정), Python은 Java의 `/internal/**`(인증 확인·대화 저장·원본과 작업 상태 저장)를 부른다. Java가 부르던 `/internal/v1/**`(OCR·캐릭터)는 폐기 예정이다. Python은 DB에 붙지 않는다.
 
 ## 개발 환경
 
@@ -59,7 +59,7 @@ sh scripts/check.sh      # ruff check, ruff format --check, pytest. CI와 하네
    - `POST http://localhost:8080/api/auth/dev-tokens`, Headers `X-Requested-With: XMLHttpRequest`, Body → raw → JSON `{"mbrSn": <MBR에 있는 번호>}` → 200
    - 쿠키는 포트와 관계없이 `localhost`에 붙으므로 Postman이 `http://localhost:8000` 요청에도 실어 보낸다. 이 저장소 `.env.local`의 `BACKEND_BASE_URL`이 `http://localhost:8080`이어야 한다(Python이 쿠키를 Java에 넘겨 인증을 확인한다).
    - Java에 아직 없는 내부 API(대화 저장 등)는 가짜 Java로 확인한다: `uv run uvicorn scripts.fake_backend:app --port 8081`, `BACKEND_BASE_URL=http://localhost:8081`, 쿠키는 Postman에서 `access_token=member-<번호>`를 직접 넣는다.
-3. 내부 API(`/internal/v1/**`)는 키 헤더 없이 보낸다. 파일은 Body → form-data에서 필드 종류를 File로 바꿔 고른다.
+3. 내부 API(`/internal/v1/**`, 폐기 예정)는 키 헤더 없이 보낸다. 파일은 Body → form-data에서 필드 종류를 File로 바꿔 고른다.
 4. 목록의 요청을 그대로 보낸다: 메서드·URL, Headers, Body. POST·PUT·PATCH·DELETE의 `/ai/**` 요청에는 `X-Requested-With: XMLHttpRequest`를 넣는다.
 5. 응답 코드와 JSON(또는 이미지)을 기대 결과와 비교한다. 스트리밍 응답은 Postman 응답 창에 이벤트가 차례로 쌓이는지 본다.
 6. Postman으로 만들기 어려운 조건(만료 토큰, 외부 API 시간 초과 등)은 목록의 테스트로 확인한다: `uv run pytest <파일>::<테스트 이름>`

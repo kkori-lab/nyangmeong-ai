@@ -5,10 +5,10 @@
 ## 서비스 사이의 경계
 
 ```
-React  ──▶ Java      비즈니스 API 전부(일정·케어 항목 등록, 영수증 업로드·저장, 캐릭터 생성·조회 등)
-React  ──▶ Python    /ai/**  AI 대화창(대화 목록·생성·삭제, 질문 전송·답변 스트리밍)
-Java   ──▶ Python    /internal/v1/**  영수증 OCR 인식, 캐릭터 이미지 생성 (결과만 돌려준다)
-Python ──▶ Java      내부 API  인증 확인(/internal/auth/check), 대화 저장·조회
+React  ──▶ Java      비즈니스 API(일정·케어 항목 등록, 영수증 확인·저장, 캐릭터 작업 상태·이미지 조회 등)
+React  ──▶ Python    /ai/**  AI 대화창, 영수증 OCR, 캐릭터 생성 요청, 검사결과지 PDF 분석
+Python ──▶ Java      내부 API  인증 확인(/internal/auth/check), 대화 저장·조회, 원본·결과·작업 상태 저장
+Java   ──▶ Python    /internal/v1/**  폐기 예정(2026-10-27). 코드·계약 삭제는 백엔드 PR과 함께
 ```
 
 2026-10-26 결정: **DB는 Java만 다룬다.** Python은 DB에 붙지 않는 상태 없는 AI 서버다. AI 벤더 API(LLM·OCR·이미지 생성) 호출은 전부 Python이 한다. (10-25의 A안 — Python이 분석 단계 테이블을 소유 — 은 폐기됐다.) 배포는 nginx 한 도메인에서 `/api/`는 Java, `/ai/`는 Python으로 접두사를 자르지 않고 넘긴다. `/internal/**`와 `/health`는 nginx로 내보내지 않는다. 같은 오리진이라 CORS 설정은 필요 없다.
@@ -20,7 +20,10 @@ Python ──▶ Java      내부 API  인증 확인(/internal/auth/check), 대�
   - Python은 토큰을 갱신·발급하지 않는다. `refresh_token`(`Path=/api/auth`)은 여기에 오지 않는다.
 - **대화 저장**: 대화방·메시지 저장과 조회, 본인 대화 판정, 제목·본문 암호화는 Java가 한다. Python은 같은 `Cookie`를 실어 Java 내부 API를 부른다. AI 역할 메시지 추가는 내부 전용 경로로만 한다(React가 직접 부를 수 있으면 AI 답변을 꾸며 넣을 수 있다).
 - **질문 한 번의 순서**: ① 사용자 메시지를 Java에 저장(여기서 실패하면 LLM을 부르지 않는다) → ② 최근 6턴·설정값으로 LLM 호출 → ③ SSE로 React에 흘려보냄 → ④ 답변을 멱등 키와 함께 Java에 저장(실패하면 재시도). 브라우저 연결이 끊겨도 ②~④는 끝까지 한다. 메시지 테이블은 INSERT 전용이라 미완료 행을 먼저 넣고 UPDATE하는 방식은 쓰지 않는다.
-- **영수증·캐릭터**: 업로드 검증·파일 저장·상태·알림은 Java가 한다. Python은 `/internal/v1/ocr/receipt`·`/internal/v1/character/generate`로 받은 이미지의 인식·생성 결과만 돌려준다. 채팅 영수증 분석(SCR-AIM-013)도 React → Java `/api/receipts` 경유다. 채팅 대화 이력에 남기는 결과 요약·함께 보낸 텍스트를 누가 저장할지는 미정이다.
+- **영수증·캐릭터·검사결과지 PDF** (2026-10-27 결정, 백엔드 흐름은 재설계 중): React가 Python `/ai/**`를 직접 부른다. Python은 업로드를 받아 인식·생성하고, 원본·결과·상태 저장은 Java 내부 API에 요청한다. 파일·DB 저장, 확인 모달 뒤 저장, 알림은 계속 Java가 한다. 저장·상태 내부 API는 아직 없다(백엔드 재설계 뒤 계약).
+  - 영수증(SCR-AIM-008·010·013): 채팅 영수증 분석도 같은 경로다. 채팅 결과 요약은 Python이 대화 저장 내부 API로 남긴다.
+  - 캐릭터(SCR-MYP-010): 작업 상태는 Java가 갖는다. ① Python이 Java에 작업 생성을 요청하고 React에 202·작업 번호를 준다 → ② Python이 백그라운드에서 생성한다 → ③ 결과·상태(성공·실패)를 Java 내부 API로 보낸다 → ④ React는 Java에서 상태를 조회한다. 생성 중 Python이 죽어 멈춘 작업의 타임아웃 정리는 Java가 한다.
+  - 검사결과지 PDF(SCR-HLT-005, FN-HLT-005-04): 인식만 Python이 한다. 원본은 Java 첨부 자료에 있으므로 Python이 PDF를 받는 방법(React가 다시 올림 / Python이 첨부 번호로 Java에서 받음)은 마일스톤 기획에서 정한다.
 - 채팅으로 만든 일정·케어 항목은 여기서 저장하지 않는다. 미리보기 카드를 돌려주고, React가 Java 일정 등록 API(`schdlSrcCd`='AI 생성')를 부른 뒤 결과(등록됨·취소됨)를 대화에 기록한다.
 - **서버 간 호출**: 양방향 모두 키 없이 부른다(2026-10-26 결정). 내부 경로(`/internal/**`)는 외부(Nginx)에 열지 않는 것으로만 막는다.
 - 개인 데이터(반려동물 기록 등)는 외부 AI API에 보내지 않는다(POL-006, FN-AIM-011-16).
