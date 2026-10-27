@@ -8,16 +8,20 @@ Java ↔ Python 서버 간 API다. 공통 규칙은 `docs/api/README.md`에 있�
 | --- | --- | --- | --- | --- | --- | --- |
 | POST | /internal/v1/ocr/receipt | 영수증 이미지(multipart `file`)에서 항목을 뽑는다. 저장하지 않는다. 추출 0건도 200(값이 모두 null, `sections` 빈 배열). 오류: 이미지로 읽히지 않음 400 `FILE_TYPE_NOT_ALLOWED`(백엔드 `ErrorCode`와 같은 이름), 분석 시간 초과 504 `OCR_TIMEOUT`, 외부 API 오류 502 `OCR_API_ERROR`. 시간 제한은 Java 제한(15초)보다 짧게 둔다 | AIM-008-06, AIM-010-01 | LJS | ReceiptOcrRequest | ReceiptOcrResponse |
 | POST | /internal/v1/character/generate | 사진과 등록 정보로 픽셀 캐릭터 PNG를 만든다. 응답 본문이 `image/png`(512×512, `ApiResponse` 껍데기 없음). 저장하지 않는다. 오류(`ApiResponse`): 사진을 이미지로 읽을 수 없음 400 `FILE_TYPE_NOT_ALLOWED`, 필드 누락·`petSeCd` 허용값(`PETC0001`·`PETC0002`) 밖 400 `INVALID_REQUEST`, 외부 API 오류 502 `CHARACTER_API_ERROR`, 규격을 맞추지 못함 502 `CHARACTER_SPEC_MISMATCH` | MYP-010-08·17 | LJS | CharacterGenerationRequest | (PNG) |
-| DELETE | /internal/v1/members/{mbrSn}/conversations | **폐지 예정(10-26)** — 대화 저장이 Java로 옮겨 가면 Java가 자기 테이블에서 직접 파기한다. 전환 전 코드에만 있다. 탈퇴 회원의 대화방·메시지를 물리 삭제한다. 대화가 없어도 200 | AIM-011-19 | LJS | - | - |
 
 ## Python → Java
 
-Java가 만드는 API다(백엔드 저장소 기준). 모두 브라우저에서 받은 `Cookie` 헤더를 그대로 보낸다. 키 헤더는 없다.
+Java가 만드는 API다(백엔드 저장소 기준). 키 헤더는 없다. 인증 확인과 대화 API 모두 브라우저에서 받은 `Cookie` 헤더를 그대로 보내고, 회원은 Java가 쿠키로 판정한다(`mbrSn`을 넘기지 않는다, 10-27 결정). Java `RequestedWithFilter`가 `/internal/**`에도 걸리므로 대화 API 요청에는 `X-Requested-With: XMLHttpRequest`를 붙인다. 대화 API의 인증 실패는 `/internal/auth/check`와 같은 401·403(`Set-Cookie` 포함)이다. Python은 대화 생성만 제목 생성(LLM) 전에 `/internal/auth/check`를 부르고, 나머지 대화 API 앞에서는 부르지 않는다. 대화 API의 암호화·본인 대화 판정·탈퇴 회원 파기(AIM-011-19)는 Java가 한다. Java 4xx 오류는 Python이 본문 그대로 React에 전달하고, 연결 실패·5xx·응답 모양이 다르면 Python이 502 `EXTERNAL_API_ERROR`로 답한다.
 
 | 메서드 | 경로 | 설명 | 기능 ID | 담당 | 요청 DTO | 응답 DTO |
 | --- | --- | --- | --- | --- | --- | --- |
 | GET | /internal/auth/check | 쿠키의 `access_token`으로 세션·정지·탈퇴·권한을 판정한다. 통과하면 200 `data { mbrSn: Long, mbrAuthrtCd: String }`. 실패하면 Java 인증 오류(401·403, `Set-Cookie` 포함)를 그대로 돌려준다 | AIM-011-03 | 백엔드 | - | `{mbrSn, mbrAuthrtCd}` |
-| (미정) | 대화 저장·조회 API | 대화방 생성, 메시지 추가(역할·본문·완료 여부·멱등 키, AI 역할은 내부 전용), 목록·단건 조회, 삭제, 최근 6턴·AI 설정값 조회. 경로·형식은 백엔드 설계 중 | AIM-011·002 | 백엔드 | 미정 | 미정 |
+| POST | /internal/ai/conversations | **확정(10-27, 정본은 백엔드 `docs/api/ai.md`)** 방과 첫 메시지(사용자 역할)를 한 트랜잭션으로 저장한다. 요청 `{petSn: Long?, cnvrsTtl: String(≤200), cnvrsCn: String(1~1,000)}`. 성공 201 | AIM-011-07·11·14 | 백엔드 | `{petSn, cnvrsTtl, cnvrsCn}` | ConversationSummary(`chat.md`) |
+| GET | /internal/ai/conversations?petSn= | 쿠키 회원의 대화 목록 최신순. `petSn`을 주면 그 태그만(태그 null인 "전체" 대화는 제외), 없으면 전부. 없거나 양육하지 않는 `petSn`은 404 `NOT_FOUND`(생성도 같음) | AIM-011-08·09 | 백엔드 | - | List<ConversationSummary> |
+| GET | /internal/ai/conversations/{aiCnvrsRoomSn} | 대화 하나와 메시지(`msgSeq` 오름차순). 남의 대화·없는 번호 404 `NOT_FOUND` | AIM-011-10 | 백엔드 | - | ConversationResponse(Java 이름, 필드는 `chat.md` ConversationDetail + 메시지별 `cmptnYn: boolean`) |
+| DELETE | /internal/ai/conversations/{aiCnvrsRoomSn} | 대화와 메시지 물리 삭제. 200. 남의 대화·없는 번호 404 `NOT_FOUND` | AIM-011-13 | 백엔드 | - | - |
+| POST | /internal/ai/conversations/{aiCnvrsRoomSn}/messages | 메시지 추가. 요청 `{roleCd(AIMG06: AIMC0024 사용자·AIMC0025 AI), cnvrsCn(1~1,000), cmptnYn: Boolean?(기본 true)}`, 201 ConversationMessageResponse. `msgSeq`는 Java가 매긴다. Python은 아직 쓰지 않음(SCR-AIM-002·012에서 사용) | AIM-002·012 | 백엔드 | `{roleCd, cnvrsCn, cmptnYn}` | ConversationMessageResponse |
+| (미정) | 미완료 메시지 완료 처리·최근 6턴·AI 설정값 조회 | 백엔드 `docs/api/ai.md`에 PATCH 설계만 있음. SCR-AIM-002에서 필요해지면 요청 | AIM-002 | 백엔드 | 미정 | 미정 |
 
 ## DTO
 
