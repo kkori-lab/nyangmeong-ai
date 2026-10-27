@@ -1,18 +1,16 @@
+import json
+
+import httpx2
 import pytest
 
-from app.core.crypto import FieldCrypto
-from tests.chat.conftest import AJAX, ENC_KEY_B64, FakeRepo, as_member
+from app.core.backend import get_backend_client
+from tests.chat.conftest import AJAX, as_member, fake_auth_check
 
 URL = "/ai/conversations"
-CRYPTO = FieldCrypto(ENC_KEY_B64)
 
 
-def _seed(repo: FakeRepo, mbr_sn: int, title: str, pet_sn: int | None = None, cn: str = "본문"):
-    return repo.add_room(mbr_sn, pet_sn, CRYPTO.encrypt(title), CRYPTO.encrypt(cn))
-
-
-def test_생성_암호화해서_저장하고_201(client, repo):
-    # FN-AIM-011-07·11·14
+def test_생성_Java에_쿠키와_평문으로_저장_요청하고_201(client, java):
+    # FN-AIM-011-07·11·14 : 암호화·회원 판정은 Java 몫, Python은 쿠키와 평문을 넘긴다
     as_member(client, 1)
     res = client.post(
         URL, json={"petSn": 5, "cnvrsCn": "강아지 예방접종 순서 알려줘"}, headers=AJAX
@@ -22,19 +20,20 @@ def test_생성_암호화해서_저장하고_201(client, repo):
     data = res.json()["data"]
     assert data["petSn"] == 5
     assert data["cnvrsTtl"] == "강아지 예방접종 순서 알려줘"
-    assert len(repo.rooms) == 1
-    mbr_sn, room = repo.rooms[data["aiCnvrsRoomSn"]]
-    assert mbr_sn == 1
-    assert "예방접종" not in room.ttl_enc
-    assert CRYPTO.decrypt(room.ttl_enc) == "강아지 예방접종 순서 알려줘"
-    (msg,) = repo.messages[room.room_sn]
-    assert msg.role_cd == "AIMC0024"
-    assert msg.msg_seq == 1
-    assert "예방접종" not in msg.cn_enc
-    assert CRYPTO.decrypt(msg.cn_enc) == "강아지 예방접종 순서 알려줘"
+    assert set(data) == {"aiCnvrsRoomSn", "petSn", "cnvrsTtl", "regDt"}
+    (sent,) = java.requests
+    assert sent.method == "POST"
+    assert sent.url.path == "/internal/ai/conversations"
+    assert sent.headers["cookie"] == "access_token=member-1"
+    assert sent.headers["x-requested-with"] == "XMLHttpRequest"  # 추가-2 : Java RequestedWithFilter
+    assert json.loads(sent.content) == {
+        "petSn": 5,
+        "cnvrsTtl": "강아지 예방접종 순서 알려줘",
+        "cnvrsCn": "강아지 예방접종 순서 알려줘",
+    }
 
 
-def test_생성_제목은_200자로_자른다(client):
+def test_생성_제목은_200자로_자른다(client, java):
     # FN-AIM-011-11
     from app.chat import clients
 
@@ -49,19 +48,20 @@ def test_생성_제목은_200자로_자른다(client):
     assert res.status_code == 201
     assert len(res.json()["data"]["cnvrsTtl"]) == 200
     assert res.json()["data"]["petSn"] is None  # 전체 태그
+    assert json.loads(java.requests[0].content)["petSn"] is None
 
 
 @pytest.mark.parametrize(
     "body", [{"cnvrsCn": "   "}, {"cnvrsCn": ""}, {"cnvrsCn": "가" * 1001}, {}]
 )
-def test_생성_본문_검증_실패는_400(client, repo, body):
+def test_생성_본문_검증_실패는_400(client, java, body):
     # 입력창 규칙 : 공백만 불가, 1~1,000자
     as_member(client, 1)
     res = client.post(URL, json=body, headers=AJAX)
 
     assert res.status_code == 400
     assert res.json()["code"] == "INVALID_REQUEST"
-    assert repo.rooms == {}
+    assert java.requests == []
 
 
 def test_생성_1000자는_통과(client):
@@ -69,27 +69,31 @@ def test_생성_1000자는_통과(client):
     assert client.post(URL, json={"cnvrsCn": "가" * 1000}, headers=AJAX).status_code == 201
 
 
-def test_생성_쿠키_없으면_401(client):
+def test_생성_쿠키_없으면_401(client, java):
     res = client.post(URL, json={"cnvrsCn": "안녕"}, headers=AJAX)
 
     assert res.status_code == 401
     assert res.json()["code"] == "UNAUTHORIZED"
+    assert java.requests == []
 
 
-def test_목록_내_대화만_최신순_필터(client, repo):
+def test_목록_내_대화만_최신순_필터(client, java):
     # FN-AIM-011-08·09 : A 목록에 B 방 없음, petSn 필터, 최신순, "전체"(null) 대화는 필터에서 제외
-    _seed(repo, 1, "초코 첫째", pet_sn=5)
-    _seed(repo, 2, "남의 대화", pet_sn=5)
-    _seed(repo, 1, "뭉치", pet_sn=6)
-    _seed(repo, 1, "전체", pet_sn=None)
-    _seed(repo, 1, "초코 둘째", pet_sn=5)
+    java.add_room(1, "초코 첫째", pet_sn=5)
+    java.add_room(2, "남의 대화", pet_sn=5)
+    java.add_room(1, "뭉치", pet_sn=6)
+    java.add_room(1, "전체", pet_sn=None)
+    java.add_room(1, "초코 둘째", pet_sn=5)
     as_member(client, 1)
 
     all_titles = [r["cnvrsTtl"] for r in client.get(URL).json()["data"]]
     assert all_titles == ["초코 둘째", "전체", "뭉치", "초코 첫째"]
+    assert dict(java.requests[-1].url.params) == {}
+    assert java.requests[-1].headers["cookie"] == "access_token=member-1"
 
     choco = [r["cnvrsTtl"] for r in client.get(URL, params={"petSn": 5}).json()["data"]]
     assert choco == ["초코 둘째", "초코 첫째"]
+    assert dict(java.requests[-1].url.params) == {"petSn": "5"}
 
 
 def test_목록_없으면_빈_배열(client):
@@ -100,11 +104,11 @@ def test_목록_없으면_빈_배열(client):
     assert res.json()["data"] == []
 
 
-def test_상세_본인_방_메시지_복호화(client, repo):
+def test_상세_본인_방_메시지(client, java):
     # FN-AIM-011-10
-    room = _seed(repo, 1, "제목", pet_sn=5, cn="질문입니다")
+    room_sn = java.add_room(1, "제목", pet_sn=5, cn="질문입니다")
     as_member(client, 1)
-    res = client.get(f"{URL}/{room.room_sn}")
+    res = client.get(f"{URL}/{room_sn}")
 
     assert res.status_code == 200
     data = res.json()["data"]
@@ -112,12 +116,13 @@ def test_상세_본인_방_메시지_복호화(client, repo):
     assert [(m["msgSeq"], m["roleCd"], m["cnvrsCn"]) for m in data["messages"]] == [
         (1, "AIMC0024", "질문입니다")
     ]
+    assert dict(java.requests[-1].url.params) == {}
 
 
 @pytest.mark.parametrize("room_sn", [999, 2])
-def test_상세_남의_방과_없는_방은_404(client, repo, room_sn):
-    _seed(repo, 1, "내 대화")
-    _seed(repo, 2, "남의 대화")
+def test_상세_남의_방과_없는_방은_Java_404_그대로(client, java, room_sn):
+    java.add_room(1, "내 대화")
+    java.add_room(2, "남의 대화")
     as_member(client, 1)
     res = client.get(f"{URL}/{room_sn}")
 
@@ -125,50 +130,126 @@ def test_상세_남의_방과_없는_방은_404(client, repo, room_sn):
     assert res.json()["code"] == "NOT_FOUND"
 
 
-def test_삭제_방과_메시지_모두_없어진다(client, repo):
+def test_삭제_Java에_삭제_요청(client, java):
     # FN-AIM-011-13
-    room = _seed(repo, 1, "지울 대화")
+    room_sn = java.add_room(1, "지울 대화")
     as_member(client, 1)
-    res = client.delete(f"{URL}/{room.room_sn}", headers=AJAX)
+    res = client.delete(f"{URL}/{room_sn}", headers=AJAX)
 
     assert res.status_code == 200
-    assert repo.rooms == {}
-    assert repo.messages == {}
+    assert java.rooms == {}
+    assert java.requests[-1].method == "DELETE"
+    assert java.requests[-1].headers["x-requested-with"] == "XMLHttpRequest"
+    assert java.requests[-1].url.path == f"/internal/ai/conversations/{room_sn}"
 
 
-def test_삭제_남의_방은_404이고_남아_있다(client, repo):
-    room = _seed(repo, 2, "남의 대화")
+def test_삭제_남의_방은_404이고_남아_있다(client, java):
+    room_sn = java.add_room(2, "남의 대화")
     as_member(client, 1)
-    res = client.delete(f"{URL}/{room.room_sn}", headers=AJAX)
+    res = client.delete(f"{URL}/{room_sn}", headers=AJAX)
 
     assert res.status_code == 404
-    assert room.room_sn in repo.rooms
+    assert res.json()["code"] == "NOT_FOUND"
+    assert room_sn in java.rooms
 
 
-def test_삭제_헤더_없으면_403이고_남아_있다(client, repo):
-    room = _seed(repo, 1, "내 대화")
+def test_삭제_헤더_없으면_403이고_남아_있다(client, java):
+    room_sn = java.add_room(1, "내 대화")
     as_member(client, 1)
-    res = client.delete(f"{URL}/{room.room_sn}")
+    res = client.delete(f"{URL}/{room_sn}")
 
     assert res.status_code == 403
     assert res.json()["code"] == "FORBIDDEN"
-    assert room.room_sn in repo.rooms
+    assert room_sn in java.rooms
 
 
-PURGE = "/internal/v1/members/{}/conversations"
+def test_목록_쿠키_없으면_Java_401_그대로이고_인증_확인은_부르지_않는다(client, java):
+    # 추가-1 : 대화 API는 Java 대화 내부 API가 쿠키로 회원을 판정한다
+    paths: list[str] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        paths.append(request.url.path)
+        return java(request)
+
+    _backend(client, handler)
+    res = client.get(URL)
+
+    assert res.status_code == 401
+    assert res.json()["code"] == "UNAUTHORIZED"
+    assert paths == ["/internal/ai/conversations"]
 
 
-def test_파기_대상_회원만_지운다(client, repo):
-    # FN-AIM-011-19
-    _seed(repo, 1, "A1")
-    _seed(repo, 1, "A2")
-    b = _seed(repo, 2, "B1")
-    res = client.delete(PURGE.format(1))
+def test_Java_403은_본문과_Set_Cookie를_그대로(client):
+    body = b'{"status":"error","httpCode":403,"code":"MEMBER_INACTIVE"}'
+    clear = "access_token=; Max-Age=0; Path=/; HttpOnly"
+    _backend(
+        client,
+        lambda r: httpx2.Response(
+            403, content=body, headers={"content-type": "application/json", "set-cookie": clear}
+        ),
+    )
+    as_member(client, 1)
+    res = client.get(f"{URL}/1")
 
-    assert res.status_code == 200
-    assert list(repo.rooms) == [b.room_sn]
-    assert list(repo.messages) == [b.room_sn]
+    assert res.status_code == 403
+    assert res.content == body
+    assert res.headers.get_list("set-cookie") == [clear]
 
 
-def test_파기_대화_없는_회원도_200(client):
-    assert client.delete(PURGE.format(77)).status_code == 200
+def test_Java_오류의_내부_경로는_ai_경로로_바꾼다(client):
+    # 추가-3 : /internal/** 경로를 React에 드러내지 않는다. 나머지 필드·Set-Cookie는 그대로
+    body = {
+        "status": "error",
+        "httpCode": 404,
+        "message": "요청한 정보를 찾을 수 없습니다.",
+        "path": "/internal/ai/conversations/7",
+        "code": "NOT_FOUND",
+    }
+    clear = "access_token=; Max-Age=0; Path=/; HttpOnly"
+    _backend(client, lambda r: httpx2.Response(404, json=body, headers={"set-cookie": clear}))
+    as_member(client, 1)
+    res = client.get(f"{URL}/7")
+
+    assert res.status_code == 404
+    assert res.json() == {**body, "path": "/ai/conversations/7"}
+    assert res.headers.get_list("set-cookie") == [clear]
+
+
+def _backend(client, handler) -> None:
+    backend = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+    client.app.dependency_overrides[get_backend_client] = lambda: backend
+
+
+def _auth_then(fail):
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        if request.url.path == "/internal/auth/check":
+            return fake_auth_check(request)
+        return fail(request)
+
+    return handler
+
+
+def _connect_error(request: httpx2.Request) -> httpx2.Response:
+    raise httpx2.ConnectError("refused", request=request)
+
+
+@pytest.mark.parametrize(
+    "fail",
+    [
+        _connect_error,
+        lambda r: httpx2.Response(500, json={"code": "INTERNAL_SERVER_ERROR"}),
+        lambda r: httpx2.Response(200, json={"data": {"모양": "다름"}}),
+    ],
+    ids=["연결 실패", "Java 5xx", "응답 모양 다름"],
+)
+def test_Java_대화_API_실패는_502(client, fail):
+    _backend(client, _auth_then(fail))
+    as_member(client, 1)
+
+    for res in (
+        client.get(URL),
+        client.get(f"{URL}/1"),
+        client.post(URL, json={"cnvrsCn": "안녕"}, headers=AJAX),
+    ):
+        assert res.status_code == 502
+        assert res.json()["code"] == "EXTERNAL_API_ERROR"

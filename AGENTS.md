@@ -11,14 +11,14 @@
 
 1. **비밀값을 커밋하지 않는다.** 이 저장소는 공개다. 키·비밀번호·토큰·서버 주소는 git에 올리지 않는 `.env.local`(디스코드로 공유)에만 넣는다. 영수증·반려동물 사진 원본도 올리지 않는다. (`docs/convention/config.md`)
 2. **Python은 상태 없는 AI 서버다.** 외부 AI 벤더 API(LLM·OCR·이미지 생성) 호출만 여기서 하고, 저장·인증·소유 검사는 Java가 한다(2026-10-26 결정). React는 AI 채팅만 `/ai/**`로 부르고, 영수증·캐릭터는 Java를 부른다(Java가 `/internal/v1/**`로 여기를 부름). 서버 간 호출은 키 없이 하고 nginx 밖에 둔다(2026-10-26 결정). (`docs/convention/architecture.md`)
-3. **DB에 붙지 않는다.** 읽기도 하지 않는다. 대화 저장·조회, 설정값은 Java 내부 API로 한다. 현재 `app/chat/repository.py`·`app/core/db.py`·`app/core/crypto.py`가 DB를 직접 쓰는 것은 전환 전 코드다 — 새 코드를 그 위에 쌓지 않는다.
+3. **DB에 붙지 않는다.** 읽기도 하지 않는다. 대화 저장·조회, 설정값은 Java 내부 API로 한다(`docs/api/internal.md` "Python → Java"). 대화 암호화도 Java가 한다.
 4. **백엔드와 맞춘 계약을 혼자 바꾸지 않는다.** OCR 응답(`ReceiptOcrResponse`), 캐릭터 규격(512×512, 얼굴 영역), 응답 껍데기(`ApiResponse`), `X-Requested-With` 검사, Java 인증 오류(본문·`Set-Cookie`)를 그대로 전달하는 규칙은 백엔드 코드와 같아야 한다. 어긋나면 오류 없이 조용히 깨진다. 바꾸려면 백엔드 PR과 함께 낸다. (`docs/api/README.md`)
 5. **외부 AI API는 `AI_MODE=mock`일 때 부르지 않는다.** 테스트와 CI는 mock으로 돈다. 테스트에서 실제 API를 부르지 않는다.
 6. **테스트를 끄거나 지워서 통과시키지 않는다.** (`docs/convention/test.md`)
 
 ## 기술 스택과 편집기
 
-Python 3.13, FastAPI, pydantic-settings, uv, ruff, pytest. Docker는 쓰지 않는다. SQLAlchemy·asyncmy·cryptography·pyjwt는 전환 전 코드가 쓰며, 전환이 끝나면 지운다.
+Python 3.13, FastAPI, pydantic-settings, uv, ruff, pytest. Docker는 쓰지 않는다. Java 호출은 httpx2.
 
 - VS Code로 작업한다. 저장할 때 Ruff로 포맷한다(`.vscode/settings.json`). 줄바꿈은 LF, 한 줄 100자다.
 - 의존성은 `uv add`·`uv remove`로만 바꾼다. `pyproject.toml`과 `uv.lock`을 같이 커밋한다.

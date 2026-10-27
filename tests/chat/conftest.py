@@ -1,103 +1,143 @@
+import json
 from datetime import datetime, timedelta
 
 import httpx2
 import pytest
 from fastapi.testclient import TestClient
 
-from app.chat.repository import MessageRow, RoomRow, get_conversation_repository
 from app.core.backend import get_backend_client
 from app.core.config import get_settings
 from app.main import create_app
 
-# 0~31 바이트 : 테스트 전용 키(운영 값 아님)
-ENC_KEY_B64 = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
 AJAX = {"X-Requested-With": "XMLHttpRequest"}
+CONVERSATIONS = "/internal/ai/conversations"
+ROLE_USER = "AIMC0024"
 
 
-def fake_auth_check(request: httpx2.Request) -> httpx2.Response:
-    """Java /internal/auth/check 흉내 : 쿠키 access_token=member-<번호>면 통과"""
+UNAUTHORIZED = {"status": "error", "httpCode": 401, "code": "UNAUTHORIZED"}
+
+
+def member_of(request: httpx2.Request) -> int | None:
+    """쿠키 access_token=member-<번호>면 그 회원 번호 (Java의 쿠키 판정 흉내)"""
     cookie = request.headers.get("cookie", "")
     token = dict(p.strip().split("=", 1) for p in cookie.split(";") if "=" in p).get(
         "access_token", ""
     )
-    if token.startswith("member-"):
-        return httpx2.Response(200, json={"data": {"mbrSn": int(token[7:]), "mbrAuthrtCd": "U"}})
-    return httpx2.Response(401, json={"status": "error", "httpCode": 401, "code": "UNAUTHORIZED"})
+    return int(token[7:]) if token.startswith("member-") else None
 
 
-class FakeRepo:
-    """ConversationRepository를 메모리로 흉내 낸다 (공용 DB에 붙지 않음)"""
+def fake_auth_check(request: httpx2.Request) -> httpx2.Response:
+    """Java /internal/auth/check 흉내"""
+    mbr_sn = member_of(request)
+    if mbr_sn is not None:
+        return httpx2.Response(200, json={"data": {"mbrSn": mbr_sn, "mbrAuthrtCd": "U"}})
+    return httpx2.Response(401, json=UNAUTHORIZED)
+
+
+class FakeJava:
+    """Java 대화 내부 API를 메모리로 흉내 낸다. 회원은 쿠키로 정한다
+
+    대화 API로 온 요청은 requests에 남긴다
+    """
 
     def __init__(self) -> None:
-        self.rooms: dict[int, tuple[int, RoomRow]] = {}  # room_sn -> (mbr_sn, row)
-        self.messages: dict[int, list[MessageRow]] = {}
+        self.rooms: dict[int, dict] = {}  # room_sn -> {mbrSn, petSn, cnvrsTtl, regDt, messages}
+        self.requests: list[httpx2.Request] = []
         self._next_room = 1
         self._next_msg = 1
         self._clock = datetime(2026, 10, 25, 9, 0, 0)
 
-    def _tick(self) -> datetime:
+    def _tick(self) -> str:
         self._clock += timedelta(minutes=1)
-        return self._clock
+        return self._clock.isoformat()
 
-    def add_room(
-        self, mbr_sn: int, pet_sn: int | None, ttl_enc: str, cn_enc: str, role: str = "AIMC0024"
-    ) -> RoomRow:
-        room = RoomRow(self._next_room, pet_sn, ttl_enc, self._tick())
+    def add_room(self, mbr_sn: int, title: str, pet_sn: int | None = None, cn: str = "본문") -> int:
+        room_sn = self._next_room
         self._next_room += 1
-        self.rooms[room.room_sn] = (mbr_sn, room)
-        self.messages[room.room_sn] = [MessageRow(self._next_msg, role, cn_enc, 1, self._tick())]
+        reg_dt = self._tick()
+        message = {
+            "aiCnvrsMsgSn": self._next_msg,
+            "roleCd": ROLE_USER,
+            "cnvrsCn": cn,
+            "msgSeq": 1,
+            "regDt": reg_dt,
+        }
         self._next_msg += 1
-        return room
+        self.rooms[room_sn] = {
+            "mbrSn": mbr_sn,
+            "petSn": pet_sn,
+            "cnvrsTtl": title,
+            "regDt": reg_dt,
+            "messages": [message],
+        }
+        return room_sn
 
-    async def create_room(self, mbr_sn, pet_sn, ttl_enc, first_cn_enc) -> RoomRow:
-        return self.add_room(mbr_sn, pet_sn, ttl_enc, first_cn_enc)
+    def __call__(self, request: httpx2.Request) -> httpx2.Response:
+        path = request.url.path
+        if path == "/internal/auth/check":
+            return fake_auth_check(request)
+        self.requests.append(request)
+        mbr_sn = member_of(request)
+        if mbr_sn is None:
+            return httpx2.Response(401, json=UNAUTHORIZED)
+        params = request.url.params
+        if path == CONVERSATIONS and request.method == "POST":
+            body = json.loads(request.content)
+            room_sn = self.add_room(mbr_sn, body["cnvrsTtl"], body.get("petSn"), body["cnvrsCn"])
+            return _ok(self._summary(room_sn), 201)
+        if path == CONVERSATIONS and request.method == "GET":
+            pet_sn = int(params["petSn"]) if "petSn" in params else None
+            mine = [
+                sn
+                for sn, r in self.rooms.items()
+                if r["mbrSn"] == mbr_sn and (pet_sn is None or r["petSn"] == pet_sn)
+            ]
+            mine.sort(key=lambda sn: (self.rooms[sn]["regDt"], sn), reverse=True)
+            return _ok([self._summary(sn) for sn in mine])
+        if path.startswith(f"{CONVERSATIONS}/"):
+            room_sn = int(path.rsplit("/", 1)[1])
+            room = self.rooms.get(room_sn)
+            if room is None or room["mbrSn"] != mbr_sn:
+                return httpx2.Response(
+                    404, json={"status": "error", "httpCode": 404, "code": "NOT_FOUND"}
+                )
+            if request.method == "GET":
+                return _ok({**self._summary(room_sn), "messages": room["messages"]})
+            if request.method == "DELETE":
+                del self.rooms[room_sn]
+                return _ok(None)
+        return httpx2.Response(404)
 
-    async def list_rooms(self, mbr_sn, pet_sn) -> list[RoomRow]:
-        rows = [
-            r
-            for m, r in self.rooms.values()
-            if m == mbr_sn and (pet_sn is None or r.pet_sn == pet_sn)
-        ]
-        return sorted(rows, key=lambda r: (r.reg_dt, r.room_sn), reverse=True)
+    def _summary(self, room_sn: int) -> dict:
+        r = self.rooms[room_sn]
+        return {
+            "aiCnvrsRoomSn": room_sn,
+            "petSn": r["petSn"],
+            "cnvrsTtl": r["cnvrsTtl"],
+            "regDt": r["regDt"],
+        }
 
-    async def get_room(self, mbr_sn, room_sn) -> RoomRow | None:
-        found = self.rooms.get(room_sn)
-        return found[1] if found and found[0] == mbr_sn else None
 
-    async def list_messages(self, room_sn) -> list[MessageRow]:
-        return sorted(self.messages.get(room_sn, []), key=lambda m: m.msg_seq)
-
-    async def delete_room(self, mbr_sn, room_sn) -> bool:
-        found = self.rooms.get(room_sn)
-        if not found or found[0] != mbr_sn:
-            return False
-        del self.rooms[room_sn]
-        self.messages.pop(room_sn, None)
-        return True
-
-    async def delete_member(self, mbr_sn) -> int:
-        mine = [sn for sn, (m, _) in self.rooms.items() if m == mbr_sn]
-        for sn in mine:
-            del self.rooms[sn]
-            self.messages.pop(sn, None)
-        return len(mine)
+def _ok(data, status: int = 200) -> httpx2.Response:
+    body = {"status": "success", "httpCode": status, "message": "ok"}
+    if data is not None:
+        body["data"] = data
+    return httpx2.Response(status, json=body)
 
 
 @pytest.fixture
-def repo() -> FakeRepo:
-    return FakeRepo()
+def java() -> FakeJava:
+    return FakeJava()
 
 
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch, repo: FakeRepo) -> TestClient:
-    # 각자 PC의 .env.local 값과 무관하게 mock 모드·고정 키로 기동
+def client(monkeypatch: pytest.MonkeyPatch, java: FakeJava) -> TestClient:
+    # 각자 PC의 .env.local 값과 무관하게 mock 모드로 기동. DB 설정은 없다
     monkeypatch.setenv("AI_MODE", "mock")
     monkeypatch.setenv("BACKEND_BASE_URL", "http://backend.test")
-    monkeypatch.setenv("CONVERSATION_ENC_KEY", ENC_KEY_B64)
     get_settings.cache_clear()
     app = create_app()
-    app.dependency_overrides[get_conversation_repository] = lambda: repo
-    backend = httpx2.AsyncClient(transport=httpx2.MockTransport(fake_auth_check))
+    backend = httpx2.AsyncClient(transport=httpx2.MockTransport(java))
     app.dependency_overrides[get_backend_client] = lambda: backend
     return TestClient(app)
 

@@ -24,7 +24,7 @@ Python ──▶ Java      내부 API  인증 확인(/internal/auth/check), 대�
 - 채팅으로 만든 일정·케어 항목은 여기서 저장하지 않는다. 미리보기 카드를 돌려주고, React가 Java 일정 등록 API(`schdlSrcCd`='AI 생성')를 부른 뒤 결과(등록됨·취소됨)를 대화에 기록한다.
 - **서버 간 호출**: 양방향 모두 키 없이 부른다(2026-10-26 결정). 내부 경로(`/internal/**`)는 외부(Nginx)에 열지 않는 것으로만 막는다.
 - 개인 데이터(반려동물 기록 등)는 외부 AI API에 보내지 않는다(POL-006, FN-AIM-011-16).
-- **전환 상태**: 지금 코드는 아직 DB 직접 접근(`app/chat/repository.py`, `app/core/db.py`·`crypto.py`)을 쓴다. 인증은 Java `/internal/auth/check` 호출로 바꿨다(2026-10-26). 대화 저장은 Java 대화 저장 API가 나온 뒤 교체한다. 탈퇴 회원 대화 파기 내부 API(`DELETE /internal/v1/members/{mbrSn}/conversations`)도 그때 지운다(Java가 자기 테이블에서 직접 파기).
+- **전환 상태**: Python은 DB에 붙지 않는다(2026-10-27). 인증은 Java `/internal/auth/check`, 대화 저장·조회·삭제는 Java `/internal/ai/conversations`(초안, `docs/api/internal.md`)를 부른다. Java에 대화 API가 생기기 전에는 가짜 Java(`scripts/fake_backend.py`)로 확인한다. 탈퇴 회원 대화 파기는 Java가 자기 테이블에서 직접 한다.
 
 ## 패키지 안
 
@@ -35,7 +35,7 @@ Python ──▶ Java      내부 API  인증 확인(/internal/auth/check), 대�
 | `router.py` | FastAPI 라우터, 요청 검증, 응답 껍데기 | 업무 분기 |
 | `service.py` | 흐름(판정 순서, 모델 호출, 저장 순서) | `Request` 객체 |
 | `schemas.py` | 요청·응답 pydantic 모델 | DB 행 매핑 |
-| `repository.py` | SQL(SQLAlchemy Core) | 업무 판단 |
+| `repository.py` | 저장 요청(Java 내부 API 호출). Python은 DB에 붙지 않는다 | 업무 판단 |
 | `clients.py` | 외부 AI API 호출. `AI_MODE`에 따라 실제 구현과 mock 구현을 고른다 | 프롬프트 밖의 업무 규칙 |
 | `rules.py` | 모델 없이 정해지는 규칙(키워드 매칭, 날짜 해석, 파싱) | 외부 호출 |
 
