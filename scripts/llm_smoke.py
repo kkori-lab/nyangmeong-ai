@@ -9,10 +9,13 @@ import logging
 import time
 
 from app.chat.clients import (
+    AnswerError,
+    AnthropicAnswerGenerator,
     AnthropicIntentClassifier,
     AnthropicTitleGenerator,
     get_anthropic_client,
 )
+from app.chat.repository import get_ai_settings
 from app.core.config import get_settings
 
 TITLES = [
@@ -25,6 +28,12 @@ INTENTS = [
     "강아지 포도 먹어도 돼?",
     "ㅁㄴㅇㄹ",
     "바보야",
+]
+# 이어지는 질문 : 앞 대화를 맥락으로 쓰는지 본다
+ANSWER_CONTEXT = [
+    {"role": "user", "content": "강아지 포도 먹어도 돼?"},
+    {"role": "assistant", "content": "포도는 강아지에게 위험해요. 소량이라도 먹이지 마세요."},
+    {"role": "user", "content": "그럼 건포도는?"},
 ]
 
 
@@ -44,6 +53,21 @@ async def main() -> None:
         detail = f" {result.scr_id} {result.param or ''}" if result.scr_id else ""
         elapsed = (time.monotonic() - started) * 1000
         print(f"[분류] {text} → {result.kind}{detail} ({elapsed:.0f}ms)")
+    # SCR-AIM-002 답변 스트리밍 : 첫 글자·전체 시간(제한 10초·60초)과 답변 길이
+    answers = AnthropicAnswerGenerator(client, settings.llm_model)
+    started = time.monotonic()
+    first_ms = None
+    chunks = []
+    try:
+        async for chunk in answers.stream(ANSWER_CONTEXT, get_ai_settings().max_tokens):
+            if first_ms is None:
+                first_ms = (time.monotonic() - started) * 1000
+            chunks.append(chunk)
+    except AnswerError as error:
+        print(f"[답변] 실패: {error.reason}")
+    text = "".join(chunks)
+    total_ms = (time.monotonic() - started) * 1000
+    print(f"[답변] 첫 글자 {first_ms or 0:.0f}ms · 전체 {total_ms:.0f}ms · {len(text)}자\n{text}")
 
 
 if __name__ == "__main__":
