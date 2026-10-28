@@ -1,33 +1,30 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-LLM real 연결 (SCR-AIM-011 FN-AIM-011-11 제목 생성 · SCR-AIM-004 FN-AIM-004-02 의도 분류) — 끝 (검증 통과, 사람 확인 2026-10-28. 들어간 SDK는 `anthropic` 2.3.0)
-기획 상태: 승인됨
-- 고른 이유: "다음에 할 것" 맨 위가 LLM real 연결(2026-10-28 사람 요청). 두 화면 절은 이미 `끝`이고 이 작업의 마일스톤 절이 없어 `milestone-status.sh`는 돌리지 않았다(연결 작업, 상태 바꿀 절 없음).
-- 범위: `app/chat/clients.py`의 real 분기 두 곳(지금 `NotImplementedError`)을 Anthropic 클라이언트로 채운다. mock 동작·`judge_intent`·`create_conversation` 흐름은 그대로. OCR·캐릭터 real은 이번 범위 밖(계속 `NotImplementedError`이라 `AI_MODE=real`이면 그 기능은 아직 500).
-- 기준: AI매니저 기능명세서 v0.9 FN-AIM-011-11(첫 메시지로 1회 생성, 200자 서버 검증), FN-AIM-011-16·POL-006(반려동물 기록은 AI API에 보내지 않음 — 사용자가 입력한 문장만 보낸다), FN-AIM-004-02(룰 매칭 실패 입력에만 보조 분류), FN-AIM-004-12(판단 못 하면 폴백). 부를 남의 API 없음(Java 계약 변경 없음).
-- 설정(`app/core/config.py`): 키 설정(`LLM_API_KEY`, SecretStr, 기본 빈 값), `llm_model: str = "claude-haiku-5-5"`(`LLM_MODEL`), `llm_timeout_sec: float = 10.0`(`LLM_TIMEOUT_SEC`). `.env.local.example`에 `LLM_MODEL`·`LLM_TIMEOUT_SEC` 추가(값 없는 키 목록만, `docs/convention/config.md` 규칙). real인데 키가 비면 의존성 함수에서 명확한 오류.
-- 모델: 기본 `claude-haiku-5-5`(2026-10-28 사람 결정 "일단 하이쿠"), `output_config.effort="low"`(분류·짧은 생성). 바꿀 때는 `LLM_MODEL`만 고친다.
-- 공통: `clients.py`에 `AsyncAnthropic(api_key, timeout=llm_timeout_sec, max_retries=1)`를 설정당 한 번 만드는 `get_anthropic_client`. 실패(시간 초과·API 오류·`stop_reason="refusal"`)는 요청을 깨지 않고 아래 대체값으로 간다. 로그는 길이·소요 시간·실패 종류만(원문 금지, architecture.md "로그와 예외").
-- FN-AIM-011-11 제목 생성: `AnthropicTitleGenerator.generate(first_message)` — 시스템 프롬프트 "대화 제목을 한국어 한 줄(30자 안팎)로, 따옴표·마침표 없이" + 사용자 메시지에 첫 메시지만. 응답 text를 한 줄로 정리해 돌려주고, 200자 자르기·빈 값 `DEFAULT_TITLE`은 기존 `service.create_conversation`이 한다. 실패하면 mock과 같은 첫 메시지 앞 30자(대화 생성을 막지 않는다).
-  - 완료 조건 `명령:` 가짜 Anthropic 응답(httpx2 MockTransport를 단 `AsyncAnthropic`)으로: 요청 본문의 `model`·`system`·`messages`에 첫 메시지 원문만 있음, 응답 text가 제목으로 나옴, 줄바꿈·따옴표 정리, 500·시간 초과·refusal이면 앞 30자 대체. real 모드 키 빈 값이면 오류.
-- FN-AIM-004-02 의도 분류: `AnthropicIntentClassifier.classify(text)` — `messages.parse(output_format=...)` 구조화 출력 `{kind: ROUTE|SEARCH|UNKNOWN, route_num: int|null}`. 시스템 프롬프트에 `rules.routing_table()`의 routable 행(num·화면명·키워드)을 넣는다(고정 내용이라 앞에 두고 매 요청 같게). `route_num`을 행으로 바꿔 `Classified(ROUTE, scr_id, param)`, 없는 번호·`ROUTE`인데 번호 없음은 `UNKNOWN`. 실패하면 `UNKNOWN`(→ 기존 흐름대로 `FALLBACK`). 등록 판정은 룰이 먼저 하므로 분류 대상에 없다.
-  - 완료 조건 `명령:` 가짜 응답으로: SEARCH·ROUTE(num → 매핑표의 scr_id·param)·UNKNOWN 각각, 없는 num → UNKNOWN, 500·시간 초과·refusal → UNKNOWN, 시스템 프롬프트에 routable 행만 들어감.
-- 테스트: `tests/chat/test_llm_clients.py`(실제 API를 부르지 않음, `AGENTS.md` 5번). 기존 테스트는 mock 그대로.
-- 완료 조건 `화면:` `scripts/llm_smoke.py`(사람만 돌리는 확인용, pytest가 모으지 않음): `.env.local`의 키로 제목 2건·분류 4건("병원 찾아줘 근처에"처럼 룰에 안 걸리는 이동·"강아지 포도 먹어도 돼?"·"ㅁㄴㅇㄹ"·"바보야")을 실제로 불러 결과와 소요 시간을 출력. 이어서 `AI_MODE=real` + 가짜 Java로 서버를 띄워 Postman `POST /ai/conversations` 응답의 제목이 LLM 생성인지 본다(README "사람 확인").
-- 공통 완료 조건 `명령:` `sh scripts/check.sh` 종료 코드 0.
-- 다음에 할 것에 남길 것: "연결 남음" 두 줄(제목 생성·의도 분류) 삭제. SCR-AIM-002 검색 응답에서 같은 `get_anthropic_client` 재사용.
-새 의존성: `anthropic` 1.x(`uv add anthropic`, 공식 SDK. 1.x는 이 저장소와 같은 `httpx2` 위에서 돈다). 이유: Anthropic API 호출.
+SCR-AIM-002 대화창 · 검색 질문/응답 · 연결 끊김 문서 정정과 회귀 테스트 — 끝 (검증 통과 1회차, 사람 확인 2026-10-29. 연결 끊김 문구 두 곳 정정, 끊겨도 완료 저장 회귀 테스트 추가)
+기획 상태: 승인됨 (2026-10-28 23:56)
+결정: 추천안대로 (질문 아님. 제목의 "질문" 글자를 impl-check.sh가 질문으로 읽음)
+- 고른 이유: "다음에 할 것" 맨 위. 직전 SCR-AIM-002(끝, 사람 확인 2026-10-28)의 구현 중 조정 "연결 끊김은 끝까지 생성·완료 저장"(`docs/convention/architecture.md` 22줄 "질문 한 번의 순서")이 문서 두 곳에 반영되지 않았고 테스트가 없다. 기능 변경 없음, 이전 기획은 git 이력(8fd1e31)에 있다.
+  - 결정: 추천안대로 (질문 아님. architecture.md 절 이름의 "질문" 글자를 impl-check.sh가 질문으로 읽음)
+- 범위 밖: `app/` 코드는 바꾸지 않는다(이미 `app/chat/service.py` `answer_turn`이 `asyncio.create_task`로 생성을 떼어 둠). 새 API·DTO 변경 없음.
+- FN-AIM-002-07 문서: `docs/api/chat.md` 메시지 API 행의 "첫 글자 뒤 60초 초과·오류·연결 끊김은 부분 답변을 미완료" → "첫 글자 뒤 60초 초과·오류는 부분 답변을 미완료(`cmptnYn=false`)로 저장. 연결이 끊겨도 생성·저장은 끝까지 한다(완료로 저장)". MessageEvent `done` 설명은 이미 "(60초 초과·도중 오류)"라 그대로.
+- FN-AIM-002-07 마일스톤: `milestones/LJS.md` SCR-AIM-002 완료 조건의 "전체 60초 초과·연결 끊김은 부분 답변을 미완료" → "전체 60초 초과·도중 오류는 부분 답변을 미완료(…)로 저장하고 이후 컨텍스트에서 빼며, 연결이 끊겨도 답변을 끝까지 만들어 완료로 저장한다".
+- FN-AIM-002-07 테스트: `tests/chat/test_messages.py`에 `test_연결이_끊겨도_답변을_끝까지_만들어_완료로_저장` 추가. HTTP `TestClient`는 스트림 중간 끊김을 흉내 내기 어려워 서비스 수준에서 부른다: `JavaConversationRepository`(가짜 Java `MockTransport`) + 조각 사이에 잠깐 쉬는 가짜 답변 생성기로 `service.answer_turn`을 만들고 → 첫 이벤트(`intent`)만 받고 `aclose()`(연결 끊김) → 떼어 둔 작업(`service._running`)이 끝나길 기다린 뒤 → 저장된 AI 메시지가 전체 답변 + 고지, `cmptnYn` true인지 본다. 생성이 스트림과 함께 취소되면(조정 전 설계) 저장이 없거나 미완료라 실패한다. pytest-asyncio가 없어 테스트 안에서 `asyncio.run`을 쓴다.
+- 완료 조건 `명령:` 위 테스트 통과, `sh scripts/check.sh` 종료 코드 0.
+- 완료 조건 `화면:` 없음(동작 변경 없음. 문서 두 곳의 문구를 diff로 확인).
+- 하네스(보고만, 이번에 고치지 않음): `scripts/milestone-status.sh`가 macOS BSD `sed -i`에서 실패해도 종료 코드 0이다(이번 세션 실측: "invalid command code m" 출력 뒤 exit 0). 이미 "다음에 할 것"의 하네스 수정 PR 후보에 BSD `sed` 항목이 있어 거기에 "실패해도 0" 을 덧붙인다.
+새 의존성: 없음
 
 ## 다음에 할 것
-- 다음 `/start`는 대기 맨 위 SCR-AIM-002(검색 응답은 `get_anthropic_client`·`LLM_MODEL` 재사용, Java "미정" API 3개 요청). 새 대기 마일스톤 4개(SCR-AIM-008 전환·SCR-AIM-013·SCR-MYP-010 전환·SCR-HLT-005)는 맨 뒤에 둠
-- SCR-AIM-002 메시지 전송에서 `judge_intent`를 부르고(화면 ID → 프론트 경로 변환은 그때 프론트 LJS와 맞춘다), 판정이 `FALLBACK`이면 `reply_fallback`(SCR-AIM-005)을 부르고 응답에 판정·저장된 AI 메시지를 담는다. 칩 재노출·연속 실패 카운트·FAQ 버튼(FN-AIM-005-03~06)은 프론트 몫. 프론트 연결은 엔드포인트와 한 번에
+- 다음 `/start`는 대기 맨 위 SCR-AIM-012(등록 카드). 메시지 API의 REGISTER 판정 뒤 흐름을 잇는다
+- 백엔드에 요청(LJS 백엔드): AI 설정값 조회 내부 API(SYS_STNG_AI_TKN_UPLMT_CNT·SYS_STNG_AI_CNVRS_TURN_CNT, 연결되면 가짜 `get_ai_settings` 교체), AI 역할 메시지 `cnvrsCn` 1,000자 상한 확대(상한 없이 저장 요청 중, 넘으면 저장 실패). `docs/api/internal.md` "미정" 행은 "설정값 조회"만 남긴다(최근 6턴은 GET 대화, 미완료 완료 처리는 불필요)
+- 프론트(LJS)와 맞출 것: 메시지 API SSE 이벤트(`intent`·`delta`·`done`·`error`, `chat.md` MessageEvent), 화면 ID → 프론트 경로 변환, 칩 재노출·연속 실패 카운트·FAQ 버튼(FN-AIM-005-03~06)은 프론트 몫
 - 백엔드에 요청(LJS 백엔드, 영수증·캐릭터 흐름 재설계): Python이 부를 원본 이미지·RECPT·영수증 상태(AIMG01) 저장, 캐릭터 작업 생성·결과·상태 보고, (PDF를 Java에서 받는 방법이면) 첨부 조회 내부 API. 계약은 이 저장소 `docs/api/internal.md`의 `/internal/v1/**` 삭제와 같은 때 병합
 - SCR-HLT-005 기획 때 정할 것: Python이 PDF를 받는 방법(React가 다시 올림 / 첨부 번호로 Java에서 받음), 인식 결과 모양(SCR-HLT-007 입력값)
 - 계약은 백엔드 PR과 함께 낸다(`AGENTS.md` 4번): 백엔드 LJS의 `ai` 도메인(대화 내부 API, 정본 백엔드 `docs/api/ai.md`, 10-27 PR 전)·서버 간 키 제거. 이 저장소 `docs/api/internal.md`와 같은 때 병합
 - 각자 `.env.local` 정리: `BACKEND_INTERNAL_KEY`·`INTERNAL_API_KEY`·`APP_PROFILE`·`*_DB_*`·`CONVERSATION_ENC_KEY` 삭제, `BACKEND_BASE_URL` 필수(없으면 `/ai/**` 전부 502). 운영 Nginx가 `/internal`을 막는지 확인
 - 연결 남음: SCR-MYP-010 real 이미지 생성 클라이언트와 얼굴 영역·샘플 10건 이상 검증 (OpenAI GPT 2026-10-28 결정, 키·모델 정한 뒤, LJS)
 - 연결 남음: SCR-AIM-008 real 모드 Google Vision 클라이언트 (서비스 계정 키 수령 후, LJS)
-- 하네스 수정 PR 후보(공용): `verify-collect.sh:18` `cut -c8-` 멀티바이트 문제, `start-check.sh` 수정분, macOS BSD `sed`(`milestone-status.sh`·`impl-check.sh`·`api-row.sh`), `verify-collect.sh:37-38` `case` 문법
+- 하네스 수정 PR 후보(공용): `verify-collect.sh:18` `cut -c8-` 멀티바이트 문제, `start-check.sh` 수정분, macOS BSD `sed`(`milestone-status.sh`·`impl-check.sh`·`api-row.sh`. `sed -i`가 실패해도 두 스크립트 모두 종료 코드 0이고 `impl-check.sh`는 "바꿈:"까지 출력한다, 2026-10-28 실측), `verify-collect.sh:37-38` `case` 문법, `impl-check.sh:18`이 "질문" 글자가 든 줄(제목 "검색 질문/응답" 등)을 모두 질문으로 읽음
 - `docs/api/internal.md` OCR mock은 고정 응답 1개(Java `FakeOcrClient` 시나리오 미구현). 필요해지면 구현
 - 이 PC는 애플리케이션 제어 정책이 `.venv\Scripts\*.exe`(uvicorn 등)를 막는다. `uv run python -m uvicorn ...`으로 띄운다

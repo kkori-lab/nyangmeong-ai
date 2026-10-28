@@ -1,6 +1,6 @@
 # AI 대화창 API·DTO (초안)
 
-React가 부르는 `/ai/**` API다. 공통 규칙은 `docs/api/README.md`에 있다. 이 문서는 대화 저장·조회·삭제(SCR-AIM-011)까지 다룬다. 질문 전송·AI 답변(SCR-AIM-001·002·004·005·012)은 해당 마일스톤에서 추가한다.
+React가 부르는 `/ai/**` API다. 공통 규칙은 `docs/api/README.md`에 있다. 이 문서는 대화 저장·조회·삭제(SCR-AIM-011)와 메시지 전송·AI 답변(SCR-AIM-002, 판정은 SCR-AIM-004·005)을 다룬다. 등록(SCR-AIM-012)·영수증(SCR-AIM-013) 이어 가기는 해당 마일스톤에서 추가한다.
 
 - 인증: 요청마다 쿠키 `access_token`을 Java `/internal/auth/check`로 확인한다(`docs/api/README.md`). 토큰이 없거나 틀리면 401 `UNAUTHORIZED`, 만료면 401 `TOKEN_EXPIRED`, 정지·탈퇴면 403 `MEMBER_INACTIVE`(쿠키 삭제 `Set-Cookie` 포함), Java에 닿지 못하면 502 `EXTERNAL_API_ERROR`.
 - POST·DELETE는 `X-Requested-With: XMLHttpRequest`가 없으면 403 `FORBIDDEN`이다.
@@ -17,6 +17,7 @@ React가 부르는 `/ai/**` API다. 공통 규칙은 `docs/api/README.md`에 있
 | GET | /ai/conversations | 내 대화 목록을 최신순으로 준다. 쿼리 `petSn`을 주면 그 태그의 대화만(태그가 null인 "전체" 대화는 나오지 않는다), 없으면 전부. 오늘·어제·지난 7일 그룹은 React가 `regDt`로 나눈다. 없으면 빈 배열 | AIM-011-08·09 | LJS | - | List<ConversationSummary> |
 | GET | /ai/conversations/{aiCnvrsRoomSn} | 대화 하나와 메시지를 순서대로 준다. 남의 대화·없는 번호 404 `NOT_FOUND` | AIM-011-10 | LJS | - | ConversationDetail |
 | DELETE | /ai/conversations/{aiCnvrsRoomSn} | 대화와 메시지를 물리 삭제한다(복구 불가). 남의 대화·없는 번호 404 `NOT_FOUND` | AIM-011-13 | LJS | - | - |
+| POST | /ai/conversations/{aiCnvrsRoomSn}/messages | 메시지를 보내고 판정·답변을 SSE(`text/event-stream`)로 받는다. `cnvrsCn`이 있으면 사용자 메시지로 저장하고 답한다. 없으면 저장 없이 방의 마지막 사용자 메시지에 답한다(첫 메시지 직후·[다시 시도]·[다시 생성]). 판정이 SEARCH면 LLM 답변을 흘리고 끝에 의료 고지를 붙여 저장, FALLBACK이면 안내 문구를 저장, ROUTE·REGISTER·RECEIPT는 판정만 준다. 컨텍스트는 현재 대화의 미완료를 뺀 최근 6턴. 첫 글자 10초 초과·오류는 `error` 이벤트(저장 없음), 첫 글자 뒤 60초 초과·오류는 부분 답변을 미완료(`cmptnYn=false`)로 저장. 연결이 끊겨도 생성·저장은 끝까지 한다(완료로 저장). 스트림 시작 전 오류는 JSON: 본문 공백만·1,000자 초과·답할 사용자 메시지 없음 400 `INVALID_REQUEST`, 남의 대화·없는 번호 404 `NOT_FOUND` | AIM-002-02·03·04·07·08·09·10·11, AIM-011-15·16 | LJS | MessageSendRequest | SSE 이벤트(아래 MessageEvent) |
 
 ## DTO
 
@@ -47,7 +48,7 @@ React가 부르는 `/ai/**` API다. 공통 규칙은 `docs/api/README.md`에 있
 | messages | List<ConversationMessage> | Y | `msgSeq` 오름차순 | AIM-011-10 |
 
 ### ConversationMessage
-쓰는 API: GET /ai/conversations/{aiCnvrsRoomSn}
+쓰는 API: GET /ai/conversations/{aiCnvrsRoomSn}, POST /ai/conversations/{aiCnvrsRoomSn}/messages(`done` 이벤트)
 | 필드 | 타입 | 필수 | 검증·설명 | 근거 |
 | --- | --- | --- | --- | --- |
 | aiCnvrsMsgSn | Long | Y | 메시지 번호 | AI_CNVRS_MSG.AI_CNVRS_MSG_SN |
@@ -55,3 +56,21 @@ React가 부르는 `/ai/**` API다. 공통 규칙은 `docs/api/README.md`에 있
 | cnvrsCn | String | Y | 복호화한 내용 | AI_CNVRS_MSG.CNVRS_CN_ENC |
 | msgSeq | Integer | Y | 대화 안 순서(1부터) | AI_CNVRS_MSG.MSG_SEQ |
 | regDt | LocalDateTime | Y | 메시지 일시 | AI_CNVRS_MSG.REG_DT |
+| cmptnYn | Boolean | Y | false면 미완료 답변("답변이 완료되지 않았어요" 표시, AI 컨텍스트에서 제외). Java가 주지 않으면 true | AI_CNVRS_MSG.AI_CNVRS_MSG_CMPTN_YN, AIM-002-07 |
+
+### MessageSendRequest
+쓰는 API: POST /ai/conversations/{aiCnvrsRoomSn}/messages
+| 필드 | 타입 | 필수 | 검증·설명 | 근거 |
+| --- | --- | --- | --- | --- |
+| cnvrsCn | String | N | 보낼 메시지. 공백만 불가, 1~1,000자. 생략·null이면 저장 없이 방의 마지막 사용자 메시지에 답한다 | AIM-011 입력창, AIM-002-07 |
+
+### MessageEvent
+쓰는 API: POST /ai/conversations/{aiCnvrsRoomSn}/messages (응답 본문)
+
+`ApiResponse` 껍데기 없이 SSE 이벤트가 차례로 온다. 각 이벤트는 `event: <이름>`과 `data: <JSON>` 두 줄이다. 순서는 `intent` → (`delta`…) → `done` 또는 `error`이고, `done`·`error`가 오면 스트림이 끝난다.
+| 이벤트 | data | 설명 | 근거 |
+| --- | --- | --- | --- |
+| intent | Intent `{kind, scrId, scrNm, param, moveType}` | 판정. `kind`: SEARCH·ROUTE·FALLBACK·REGISTER·RECEIPT. 화면 필드는 ROUTE일 때만 값이 있다(화면 ID → 프론트 경로 변환은 React) | AIM-001-05, AIM-004 |
+| delta | `{text: String}` | SEARCH 답변 조각. 이어 붙여 표시한다. 마지막 조각은 의료 고지(`\n\n※ 참고 정보이며 의료 진단이 아닙니다. …`), 미완료 답변에는 없다 | AIM-002-02·03 |
+| done | `{message: ConversationMessage?, shortcut: Intent?}` | 끝. `message`는 저장된 AI 메시지(SEARCH 답변·FALLBACK 안내). 저장하지 않았거나 저장에 실패하면 null. `message.cmptnYn=false`면 미완료(60초 초과·도중 오류): "답변이 완료되지 않았어요" + [다시 생성]. `shortcut`은 연관 바로가기(Intent ROUTE 모양, 저장 안 함), 없으면 null | AIM-002-04·07 |
+| error | `{code: "EXTERNAL_API_ERROR", message: "일시적으로 답변할 수 없어요"}` | 첫 글자 전 실패(10초 초과·오류). AI 메시지는 저장하지 않는다. [다시 시도]는 `cnvrsCn` 없이 다시 보낸다 | AIM-002-07 |

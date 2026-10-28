@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Annotated, Protocol
 
 import httpx2
@@ -25,7 +26,9 @@ class ConversationRepository(Protocol):
 
     async def delete_room(self, room_sn: int) -> None: ...
 
-    async def add_message(self, room_sn: int, role_cd: str, cn: str) -> ConversationMessage: ...
+    async def add_message(
+        self, room_sn: int, role_cd: str, cn: str, cmptn_yn: bool = True
+    ) -> ConversationMessage: ...
 
 
 class JavaConversationRepository:
@@ -60,9 +63,13 @@ class JavaConversationRepository:
     async def delete_room(self, room_sn: int) -> None:
         await self._call("DELETE", f"{CONVERSATIONS_PATH}/{room_sn}")
 
-    async def add_message(self, room_sn: int, role_cd: str, cn: str) -> ConversationMessage:
-        # msgSeq는 Java가 매긴다. 응답의 cmptnYn 등 모르는 필드는 무시
+    async def add_message(
+        self, room_sn: int, role_cd: str, cn: str, cmptn_yn: bool = True
+    ) -> ConversationMessage:
+        # msgSeq는 Java가 매긴다. cmptnYn은 Java 기본값이 true라 미완료 답변(FN-AIM-002-07)만 보낸다
         body = {"roleCd": role_cd, "cnvrsCn": cn}
+        if not cmptn_yn:
+            body["cmptnYn"] = False
         data = await self._call("POST", f"{CONVERSATIONS_PATH}/{room_sn}/messages", json=body)
         return _parse(ConversationMessage, data)
 
@@ -86,3 +93,16 @@ def get_conversation_repository(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> ConversationRepository:
     return JavaConversationRepository(client, settings, request.headers.get("cookie"))
+
+
+@dataclass(frozen=True)
+class AiSettings:
+    # SYS_STNG_AI_TKN_UPLMT_CNT : 답변 최대 생성 토큰(FN-AIM-002-02)
+    max_tokens: int = 4500
+    # SYS_STNG_AI_CNVRS_TURN_CNT : 컨텍스트 턴 수(FN-AIM-011-15)
+    context_turns: int = 6
+
+
+def get_ai_settings() -> AiSettings:
+    # 가짜 : Java 설정값 조회 내부 API가 생기면 그 값으로 바꾼다. 지금은 명세 기본값
+    return AiSettings()

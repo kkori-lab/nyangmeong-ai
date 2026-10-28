@@ -7,13 +7,18 @@ from anthropic import AsyncAnthropic, DefaultAsyncHttpxClient
 
 from app.chat import rules
 from app.chat.clients import (
+    ANSWER_SYSTEM,
+    AnswerError,
+    AnthropicAnswerGenerator,
     AnthropicIntentClassifier,
     AnthropicTitleGenerator,
     Classified,
     ClassifiedKind,
+    MockAnswerGenerator,
     MockIntentClassifier,
     MockTitleGenerator,
     classify_system,
+    get_answer_generator,
     get_anthropic_client,
     get_intent_classifier,
     get_title_generator,
@@ -191,3 +196,137 @@ def test_real_모드는_Anthropic_구현을_쓴다():
 def test_real_모드인데_키가_비면_오류():
     with pytest.raises(RuntimeError, match="LLM_API_KEY"):
         get_anthropic_client(settings(AiMode.REAL, ""))
+
+
+# FN-AIM-002-04 연관 바로가기
+
+
+def test_검색이면서_연관_화면이_있으면_매핑표의_화면으로_바꾼다():
+    row = next(r for r in rules.routing_table() if r.routable)
+    fake = replying(json.dumps({"kind": "SEARCH", "route_num": None, "related_num": row.no}))
+    result = classify(fake)
+    assert result.kind is ClassifiedKind.SEARCH
+    assert (result.related_scr_id, result.related_param) == (row.scr_id, row.param)
+
+
+def test_연관_화면이_매핑표에_없으면_바로가기_없는_검색():
+    missing = max(r.no for r in rules.routing_table()) + 1
+    fake = replying(json.dumps({"kind": "SEARCH", "route_num": None, "related_num": missing}))
+    assert classify(fake) == Classified(ClassifiedKind.SEARCH)
+
+
+# FN-AIM-002-02 답변 스트리밍
+
+
+def sse(texts, stop_reason: str = "end_turn") -> bytes:
+    """Anthropic 스트리밍 응답(SSE) 흉내"""
+    start = {
+        "type": "message_start",
+        "message": {
+            "id": "msg_test",
+            "type": "message",
+            "role": "assistant",
+            "model": MODEL,
+            "content": [],
+            "stop_reason": None,
+            "stop_sequence": None,
+            "usage": {"input_tokens": 10, "output_tokens": 1},
+        },
+    }
+    events = [
+        ("message_start", start),
+        (
+            "content_block_start",
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "text", "text": ""},
+            },
+        ),
+    ]
+    for text in texts:
+        delta = {"type": "text_delta", "text": text}
+        events.append(
+            ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": delta})
+        )
+    events += [
+        ("content_block_stop", {"type": "content_block_stop", "index": 0}),
+        (
+            "message_delta",
+            {
+                "type": "message_delta",
+                "delta": {"stop_reason": stop_reason, "stop_sequence": None},
+                "usage": {"output_tokens": 5},
+            },
+        ),
+        ("message_stop", {"type": "message_stop"}),
+    ]
+    body = "".join(f"event: {n}\ndata: {json.dumps(d, ensure_ascii=False)}\n\n" for n, d in events)
+    return body.encode()
+
+
+def streaming(texts, stop_reason: str = "end_turn") -> FakeAnthropic:
+    return FakeAnthropic(
+        lambda _: httpx2.Response(
+            200, headers={"content-type": "text/event-stream"}, content=sse(texts, stop_reason)
+        )
+    )
+
+
+CONTEXT = [
+    {"role": "user", "content": "강아지 포도 먹어도 돼?"},
+    {"role": "assistant", "content": "안 돼요."},
+    {"role": "user", "content": "건포도는?"},
+]
+
+
+def answer(fake: FakeAnthropic, messages=CONTEXT, max_tokens: int = 4500) -> list[str]:
+    async def collect():
+        generator = AnthropicAnswerGenerator(fake.client(), MODEL)
+        return [chunk async for chunk in generator.stream(messages, max_tokens)]
+
+    return asyncio.run(collect())
+
+
+def test_답변은_조각을_차례로_내고_대화_텍스트만_보낸다():
+    fake = streaming(["건포도도 ", "위험해요."])
+    assert answer(fake) == ["건포도도 ", "위험해요."]
+    body = fake.requests[0]
+    assert body["model"] == MODEL
+    assert body["stream"] is True
+    assert body["max_tokens"] == 4500
+    # FN-AIM-011-16 : 대화 메시지 텍스트만. 시스템 프롬프트는 고정 문구
+    assert body["messages"] == CONTEXT
+    assert body["system"] == ANSWER_SYSTEM
+
+
+def test_답변_시스템_프롬프트는_개인_데이터와_진단을_제한한다():
+    # FN-AIM-002-08·09
+    assert "개인 데이터" in ANSWER_SYSTEM
+    assert "진단" in ANSWER_SYSTEM
+    assert "수의사" in ANSWER_SYSTEM
+
+
+@pytest.mark.parametrize("respond", [server_error, timeout])
+def test_답변_호출이_실패하면_AnswerError(respond):
+    with pytest.raises(AnswerError):
+        answer(FakeAnthropic(respond))
+
+
+def test_답변이_거절되면_AnswerError():
+    with pytest.raises(AnswerError, match="refusal"):
+        answer(streaming(["부분"], stop_reason="refusal"))
+
+
+def test_mock_답변은_LLM_없이_조각을_낸다():
+    async def collect():
+        return [c async for c in MockAnswerGenerator().stream(CONTEXT, 4500)]
+
+    chunks = asyncio.run(collect())
+    assert len(chunks) >= 3
+    assert "3개" in "".join(chunks)
+
+
+def test_답변_생성기도_모드별로_고른다():
+    assert isinstance(get_answer_generator(settings(AiMode.MOCK, "")), MockAnswerGenerator)
+    assert isinstance(get_answer_generator(settings(AiMode.REAL)), AnthropicAnswerGenerator)

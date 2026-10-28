@@ -1,12 +1,14 @@
 import logging
 import re
 import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import lru_cache
 from typing import Annotated, Protocol
 
 import anthropic
+import httpx2
 from anthropic import AsyncAnthropic
 from fastapi import Depends
 from pydantic import BaseModel, ValidationError
@@ -130,6 +132,9 @@ class Classified:
     # ROUTE일 때 매핑표의 화면 ID·파라미터. 매핑표에 없으면 서비스가 버린다
     scr_id: str | None = None
     param: str | None = None
+    # SEARCH일 때 답과 관련된 화면(FN-AIM-002-04 연관 바로가기). 매핑표에 있는 행만
+    related_scr_id: str | None = None
+    related_param: str | None = None
 
 
 class IntentClassifier(Protocol):
@@ -149,6 +154,8 @@ class ClassifyOutput(BaseModel):
     # 구조화 출력 모양. route_num은 매핑표(data/routing.yaml)의 num
     kind: ClassifiedKind
     route_num: int | None = None
+    # SEARCH일 때 답과 관련된 화면 번호(FN-AIM-002-04)
+    related_num: int | None = None
 
 
 @lru_cache
@@ -165,17 +172,31 @@ def classify_system() -> str:
         "- SEARCH: 반려동물이나 앱에 관해 답을 찾아 줘야 하는 질문.\n"
         "- UNKNOWN: 그 밖의 입력(뜻 없는 글자, 욕설, 판단하기 어려운 것). "
         "확실하지 않으면 UNKNOWN.\n"
-        "ROUTE가 아니면 route_num은 null.\n\n"
+        "ROUTE가 아니면 route_num은 null.\n"
+        "SEARCH이고 답과 관련된 화면이 아래에 있으면 related_num에 그 번호를, "
+        "없으면 null을 쓴다.\n\n"
         f"화면 목록(번호. 화면명: 키워드)\n{screens}"
     )
 
 
+def _routable_row(num: int | None) -> rules.RouteRow | None:
+    return next((row for row in rules.routing_table() if row.no == num and row.routable), None)
+
+
 def _route_of(num: int | None) -> Classified:
     # 매핑표에 없는 번호나 라우팅 대상이 아닌 행은 판단 못 함으로 본다
-    row = next((row for row in rules.routing_table() if row.no == num and row.routable), None)
+    row = _routable_row(num)
     if row is None:
         return Classified(ClassifiedKind.UNKNOWN)
     return Classified(ClassifiedKind.ROUTE, scr_id=row.scr_id, param=row.param)
+
+
+def _search_of(related_num: int | None) -> Classified:
+    # 연관 화면 번호가 매핑표에 없으면 바로가기 없이 검색
+    row = _routable_row(related_num)
+    if row is None:
+        return Classified(ClassifiedKind.SEARCH)
+    return Classified(ClassifiedKind.SEARCH, related_scr_id=row.scr_id, related_param=row.param)
 
 
 class AnthropicIntentClassifier:
@@ -214,6 +235,8 @@ class AnthropicIntentClassifier:
         )
         if output.kind is ClassifiedKind.ROUTE:
             return _route_of(output.route_num)
+        if output.kind is ClassifiedKind.SEARCH:
+            return _search_of(output.related_num)
         return Classified(output.kind)
 
 
@@ -223,3 +246,90 @@ def get_intent_classifier(
     if settings.ai_mode is AiMode.MOCK:
         return MockIntentClassifier()
     return AnthropicIntentClassifier(get_anthropic_client(settings), settings.llm_model)
+
+
+class AnswerError(Exception):
+    """답변 생성 실패. reason은 로그용 실패 종류(원문 없음)"""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+class AnswerGenerator(Protocol):
+    # FN-AIM-002-02 : 답변을 생성되는 대로 조각으로 낸다. 실패하면 AnswerError
+    def stream(self, messages: list[dict], max_tokens: int) -> AsyncIterator[str]: ...
+
+
+class MockAnswerGenerator:
+    # AI_MODE=mock 전용 : LLM 없이 받은 컨텍스트 크기를 알려 주는 고정 문장을 몇 조각으로 낸다
+    async def stream(self, messages: list[dict], max_tokens: int) -> AsyncIterator[str]:
+        for chunk in (
+            "(mock 답변) ",
+            f"대화 메시지 {len(messages)}개를 받았습니다. ",
+            "실제 답변은 AI_MODE=real에서 나옵니다.",
+        ):
+            yield chunk
+
+
+# FN-AIM-002-08·09 : 개인 데이터는 모른다고 보고 화면 안내, 진단 대신 수의사 상담 안내.
+# 의료 고지 문구는 서비스가 붙이므로 여기서 쓰게 하지 않는다
+ANSWER_SYSTEM = (
+    "너는 반려동물 케어 앱의 AI 매니저다. 반려동물 보호자의 질문에 한국어로 답한다.\n"
+    "- 너는 사용자의 반려동물 기록, 일정, 다녀온 병원 같은 앱 안의 개인 데이터를 볼 수 없다. "
+    "그런 내용을 물으면 추측하지 말고 앱의 해당 화면(케어 캘린더, 건강 기록 등)에서 "
+    "확인하라고 안내한다.\n"
+    "- 진단이나 처방을 하지 않는다. 증상을 물으면 일반적인 정보를 주고 "
+    "수의사 상담을 권한다. 응급으로 보이면 바로 동물병원에 가라고 먼저 말한다.\n"
+    "- 답 끝에 의료 고지 문구를 따로 쓰지 않는다."
+)
+
+
+class AnthropicAnswerGenerator:
+    # FN-AIM-002-02 : 대화 메시지 텍스트만 보낸다(FN-AIM-011-16 반려동물 기록은 보내지 않음)
+    def __init__(self, client: AsyncAnthropic, model: str):
+        self.client = client
+        self.model = model
+
+    async def stream(self, messages: list[dict], max_tokens: int) -> AsyncIterator[str]:
+        started = time.monotonic()
+        length = 0
+        try:
+            async with self.client.messages.stream(
+                model=self.model,
+                max_tokens=max_tokens,
+                system=ANSWER_SYSTEM,
+                messages=messages,
+                output_config={"effort": LLM_EFFORT},
+            ) as stream:
+                async for text in stream.text_stream:
+                    length += len(text)
+                    yield text
+                final = await stream.get_final_message()
+        except anthropic.APIError as error:
+            reason = _failure_reason(error)
+            _log_failure("답변", started, reason)
+            raise AnswerError(reason) from None
+        except httpx2.HTTPError as error:
+            # 스트림 도중 끊김은 SDK 오류로 감싸이지 않고 올라올 수 있다
+            reason = "timeout" if isinstance(error, httpx2.TimeoutException) else "network"
+            _log_failure("답변", started, reason)
+            raise AnswerError(reason) from None
+        if final.stop_reason == "refusal":
+            _log_failure("답변", started, "refusal")
+            raise AnswerError("refusal")
+        logger.info(
+            "LLM 답변: 메시지 %d개 → %d자 %s (%.0fms)",
+            len(messages),
+            length,
+            final.stop_reason,
+            (time.monotonic() - started) * 1000,
+        )
+
+
+def get_answer_generator(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> AnswerGenerator:
+    if settings.ai_mode is AiMode.MOCK:
+        return MockAnswerGenerator()
+    return AnthropicAnswerGenerator(get_anthropic_client(settings), settings.llm_model)

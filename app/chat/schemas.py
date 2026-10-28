@@ -28,6 +28,18 @@ class ConversationCreateRequest(_Camel):
         return value
 
 
+class MessageSendRequest(_Camel):
+    # 없으면 저장 없이 방의 마지막 사용자 메시지에 답한다(첫 메시지 직후·다시 시도·다시 생성)
+    cnvrs_cn: str | None = Field(default=None, min_length=1, max_length=MAX_MESSAGE_LENGTH)
+
+    @field_validator("cnvrs_cn")
+    @classmethod
+    def _not_blank(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("공백만 입력할 수 없습니다.")
+        return value
+
+
 class ConversationSummary(_Camel):
     ai_cnvrs_room_sn: int
     pet_sn: int | None = None
@@ -41,6 +53,8 @@ class ConversationMessage(_Camel):
     cnvrs_cn: str
     msg_seq: int
     reg_dt: datetime
+    # FN-AIM-002-07 : false면 미완료 답변(AI 컨텍스트에서 뺀다)
+    cmptn_yn: bool = True
 
 
 class ConversationDetail(ConversationSummary):
@@ -68,3 +82,16 @@ class Intent(_Camel):
     scr_nm: str | None = None
     param: str | None = None
     move_type: MoveType | None = None
+
+
+class AnswerDone(_Camel):
+    # SSE done 이벤트. message는 저장된 AI 메시지(없거나 저장 실패면 null)
+    message: ConversationMessage | None = None
+    # FN-AIM-002-04 : 연관 바로가기(ROUTE 모양). 저장하지 않는다
+    shortcut: Intent | None = None
+
+
+class StreamError(_Camel):
+    # SSE error 이벤트 : 첫 글자 전 실패(FN-AIM-002-07)
+    code: str
+    message: str

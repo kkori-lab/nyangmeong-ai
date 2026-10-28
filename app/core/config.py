@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     # 2026-10-28 결정 : 일단 Haiku. 바꿀 때는 LLM_MODEL만 고친다
     llm_model: str = "claude-haiku-5-5"
     llm_timeout_sec: float = 10.0
+    # FN-AIM-002-07 : 답변 첫 글자 제한·전체 제한(초)
+    answer_first_token_sec: float = 10.0
+    answer_total_sec: float = 60.0
 
 
 @lru_cache
