@@ -21,7 +21,6 @@ LLM real 연결 (SCR-AIM-011 FN-AIM-011-11 제목 생성 · SCR-AIM-004 FN-AIM-0
 
 ## 다음에 할 것
 - 다음 `/start`는 대기 맨 위 SCR-AIM-002(검색 응답은 `get_anthropic_client`·`LLM_MODEL` 재사용, Java "미정" API 3개 요청). 새 대기 마일스톤 4개(SCR-AIM-008 전환·SCR-AIM-013·SCR-MYP-010 전환·SCR-HLT-005)는 맨 뒤에 둠
-- 공용 하네스 PR로 따로: `scripts/llm_smoke.py`(LLM 실제 호출 사람 확인용, 이번 커밋에서 뺌)
 - SCR-AIM-002 메시지 전송에서 `judge_intent`를 부르고(화면 ID → 프론트 경로 변환은 그때 프론트 LJS와 맞춘다), 판정이 `FALLBACK`이면 `reply_fallback`(SCR-AIM-005)을 부르고 응답에 판정·저장된 AI 메시지를 담는다. 칩 재노출·연속 실패 카운트·FAQ 버튼(FN-AIM-005-03~06)은 프론트 몫. 프론트 연결은 엔드포인트와 한 번에
 - 백엔드에 요청(LJS 백엔드, 영수증·캐릭터 흐름 재설계): Python이 부를 원본 이미지·RECPT·영수증 상태(AIMG01) 저장, 캐릭터 작업 생성·결과·상태 보고, (PDF를 Java에서 받는 방법이면) 첨부 조회 내부 API. 계약은 이 저장소 `docs/api/internal.md`의 `/internal/v1/**` 삭제와 같은 때 병합
 - SCR-HLT-005 기획 때 정할 것: Python이 PDF를 받는 방법(React가 다시 올림 / 첨부 번호로 Java에서 받음), 인식 결과 모양(SCR-HLT-007 입력값)
