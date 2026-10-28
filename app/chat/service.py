@@ -2,8 +2,10 @@ from app.chat import rules
 from app.chat.clients import ClassifiedKind, IntentClassifier, TitleGenerator
 from app.chat.repository import ConversationRepository
 from app.chat.schemas import (
+    ROLE_AI,
     ConversationCreateRequest,
     ConversationDetail,
+    ConversationMessage,
     ConversationSummary,
     Intent,
     IntentKind,
@@ -11,6 +13,8 @@ from app.chat.schemas import (
 
 MAX_TITLE_LENGTH = 200
 DEFAULT_TITLE = "새 대화"
+# FN-AIM-005-02 : 화면설계서 SCR-AIM-005 ② 문구
+FALLBACK_MESSAGE = "질문을 이해하지 못했어요. 다시 입력하거나 아래에서 선택해 주세요."
 
 
 async def create_conversation(
@@ -60,3 +64,8 @@ async def judge_intent(text: str, has_image: bool, classifier: IntentClassifier)
             return row.to_intent()
     # ④ FN-AIM-004-12·005-01 : 어디에도 해당하지 않으면 폴백
     return Intent(kind=IntentKind.FALLBACK)
+
+
+async def reply_fallback(repo: ConversationRepository, room_sn: int) -> ConversationMessage:
+    # FN-AIM-005-02·07 : 실패 사유는 묻지 않고, 부적절 입력도 같은 문구. AI 역할 메시지로 저장
+    return await repo.add_message(room_sn, ROLE_AI, FALLBACK_MESSAGE)

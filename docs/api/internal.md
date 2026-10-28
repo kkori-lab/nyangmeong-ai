@@ -20,7 +20,7 @@ Java가 만드는 API다(백엔드 저장소 기준). 키 헤더는 없다. 인�
 | GET | /internal/ai/conversations?petSn= | 쿠키 회원의 대화 목록 최신순. `petSn`을 주면 그 태그만(태그 null인 "전체" 대화는 제외), 없으면 전부. 없거나 양육하지 않는 `petSn`은 404 `NOT_FOUND`(생성도 같음) | AIM-011-08·09 | 백엔드 | - | List<ConversationSummary> |
 | GET | /internal/ai/conversations/{aiCnvrsRoomSn} | 대화 하나와 메시지(`msgSeq` 오름차순). 남의 대화·없는 번호 404 `NOT_FOUND` | AIM-011-10 | 백엔드 | - | ConversationResponse(Java 이름, 필드는 `chat.md` ConversationDetail + 메시지별 `cmptnYn: boolean`) |
 | DELETE | /internal/ai/conversations/{aiCnvrsRoomSn} | 대화와 메시지 물리 삭제. 200. 남의 대화·없는 번호 404 `NOT_FOUND` | AIM-011-13 | 백엔드 | - | - |
-| POST | /internal/ai/conversations/{aiCnvrsRoomSn}/messages | 메시지 추가. 요청 `{roleCd(AIMG06: AIMC0024 사용자·AIMC0025 AI), cnvrsCn(1~1,000), cmptnYn: Boolean?(기본 true)}`, 201 ConversationMessageResponse. `msgSeq`는 Java가 매긴다. Python은 아직 쓰지 않음(SCR-AIM-002·012에서 사용) | AIM-002·012 | 백엔드 | `{roleCd, cnvrsCn, cmptnYn}` | ConversationMessageResponse |
+| POST | /internal/ai/conversations/{aiCnvrsRoomSn}/messages | 메시지 추가. 요청 `{roleCd(AIMG06: AIMC0024 사용자·AIMC0025 AI), cnvrsCn(1~1,000), cmptnYn: Boolean?(기본 true)}`, 201 ConversationMessageResponse. `msgSeq`는 Java가 매긴다. SCR-AIM-005 폴백 문구 저장에서 사용(SCR-AIM-002·012도 사용 예정) | AIM-002·012 | 백엔드 | `{roleCd, cnvrsCn, cmptnYn}` | ConversationMessageResponse |
 | (미정) | 미완료 메시지 완료 처리·최근 6턴·AI 설정값 조회 | 백엔드 `docs/api/ai.md`에 PATCH 설계만 있음. SCR-AIM-002에서 필요해지면 요청 | AIM-002 | 백엔드 | 미정 | 미정 |
 
 ## DTO

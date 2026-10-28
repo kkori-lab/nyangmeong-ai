@@ -5,6 +5,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
 
 MAX_MESSAGE_LENGTH = 1000
+# 대화 역할 코드(공통코드 AIMG06)
+ROLE_USER = "AIMC0024"
+ROLE_AI = "AIMC0025"
 
 
 class _Camel(BaseModel):

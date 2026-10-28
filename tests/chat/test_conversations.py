@@ -1,9 +1,14 @@
+import asyncio
 import json
 
 import httpx2
 import pytest
 
-from app.core.backend import get_backend_client
+from app.chat.repository import JavaConversationRepository
+from app.chat.schemas import ROLE_AI
+from app.core.backend import BackendError, get_backend_client
+from app.core.config import Settings
+from app.core.response import AppError
 from tests.chat.conftest import AJAX, as_member, fake_auth_check
 
 URL = "/ai/conversations"
@@ -253,3 +258,54 @@ def test_Java_대화_API_실패는_502(client, fail):
     ):
         assert res.status_code == 502
         assert res.json()["code"] == "EXTERNAL_API_ERROR"
+
+
+def _add_message(handler, cookie: str | None = "access_token=member-1"):
+    client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+    settings = Settings(_env_file=None, backend_base_url="http://backend.test")
+    repo = JavaConversationRepository(client, settings, cookie)
+    return asyncio.run(repo.add_message(3, ROLE_AI, "안내"))
+
+
+def test_메시지_추가_Java에_역할과_본문으로_저장_요청():
+    # FN-AIM-005-02 : POST /internal/ai/conversations/{roomSn}/messages
+    seen: list[httpx2.Request] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen.append(request)
+        data = {
+            "aiCnvrsMsgSn": 21,
+            "roleCd": ROLE_AI,
+            "cnvrsCn": "안내",
+            "msgSeq": 2,
+            "cmptnYn": True,
+            "regDt": "2026-10-28T10:00:00",
+        }
+        return httpx2.Response(201, json={"status": "success", "httpCode": 201, "data": data})
+
+    saved = _add_message(handler)
+
+    req = seen[0]
+    assert req.method == "POST"
+    assert req.url.path == "/internal/ai/conversations/3/messages"
+    assert json.loads(req.content) == {"roleCd": ROLE_AI, "cnvrsCn": "안내"}
+    assert req.headers["X-Requested-With"] == "XMLHttpRequest"
+    assert req.headers["Cookie"] == "access_token=member-1"
+    assert (saved.ai_cnvrs_msg_sn, saved.role_cd, saved.msg_seq) == (21, ROLE_AI, 2)
+
+
+@pytest.mark.parametrize("status", [401, 404])
+def test_메시지_추가_Java_4xx는_그대로(status):
+    body = {"status": "error", "httpCode": status, "code": "X"}
+    with pytest.raises(BackendError) as exc:
+        _add_message(lambda r: httpx2.Response(status, json=body))
+
+    assert exc.value.status_code == status
+    assert json.loads(exc.value.body) == body
+
+
+def test_메시지_추가_응답_모양이_다르면_502():
+    with pytest.raises(AppError) as exc:
+        _add_message(lambda r: httpx2.Response(201, json={"data": {"모양": "다름"}}))
+
+    assert (exc.value.code, exc.value.http_code) == ("EXTERNAL_API_ERROR", 502)
