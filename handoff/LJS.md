@@ -51,8 +51,8 @@ SCR-AIM-011 AI 대화창 (새 창) · 대화 저장 전환 (Java 내부 API) —
   - 정할 것: (1) 원본 이미지·RECPT·영수증 상태(AIMG01)와 캐릭터 이미지·생성 작업 상태를 Python이 Java에 저장하는 내부 API(백엔드에 요청) (2) 캐릭터 생성이 동기 응답인지 작업 번호 + 상태 조회인지 (3) Java `PythonOcrClient`·`PythonCharacterGenerator` 경유 흐름과 `/internal/v1/ocr`·`/internal/v1/character` 폐기 여부(백엔드 PR과 함께) (4) 검사결과지 PDF 분석(건강기록 SCR-HLT-005)을 Python으로 가져올지
 - 계약은 백엔드 PR과 함께 낸다(`AGENTS.md` 4번): 백엔드 LJS의 `ai` 도메인(대화 내부 API, 정본 백엔드 `docs/api/ai.md`, 10-27 PR 전)·서버 간 키 제거. 이 저장소 `docs/api/internal.md`와 같은 때 병합
 - 각자 `.env.local` 정리: `BACKEND_INTERNAL_KEY`·`INTERNAL_API_KEY`·`APP_PROFILE`·`*_DB_*`·`CONVERSATION_ENC_KEY` 삭제, `BACKEND_BASE_URL` 필수(없으면 `/ai/**` 전부 502). 운영 Nginx가 `/internal`을 막는지 확인
-- 연결 남음: SCR-AIM-011 FN-AIM-011-11 제목 생성 real 클라이언트 (LLM 제공자·키·모델 결정 뒤, LJS. OpenAI 확정 여부 확인)
-- 연결 남음: SCR-MYP-010 real 이미지 생성 클라이언트와 얼굴 영역·샘플 10건 이상 검증 (API·키 팀 결정 뒤, LJS)
+- 연결 남음: SCR-AIM-011 FN-AIM-011-11 제목 생성 real 클라이언트 (LLM 제공자 Anthropic 2026-10-28 결정, 키·모델 정한 뒤, LJS)
+- 연결 남음: SCR-MYP-010 real 이미지 생성 클라이언트와 얼굴 영역·샘플 10건 이상 검증 (OpenAI GPT 2026-10-28 결정, 키·모델 정한 뒤, LJS)
 - 연결 남음: SCR-AIM-008 real 모드 Google Vision 클라이언트 (서비스 계정 키 수령 후, LJS)
 - `scripts/doctor.py`(DB 점검 삭제)·`scripts/fake_backend.py`(대화 API 가짜)는 이번 기획의 변경인데 end-check가 공용 하네스로 분류함. 커밋 방법은 사람이 정함(doctor.py를 빼면 삭제된 `app.core.db`를 import해 setup이 깨짐)
 - 하네스 수정 PR 후보(공용): `verify-collect.sh:18` `cut -c8-` 멀티바이트 문제, `start-check.sh` 수정분, macOS BSD `sed`(`milestone-status.sh`·`impl-check.sh`·`api-row.sh`), `verify-collect.sh:37-38` `case` 문법

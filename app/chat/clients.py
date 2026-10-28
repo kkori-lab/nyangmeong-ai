@@ -20,5 +20,5 @@ class MockTitleGenerator:
 def get_title_generator(settings: Annotated[Settings, Depends(get_settings)]) -> TitleGenerator:
     if settings.ai_mode is AiMode.MOCK:
         return MockTitleGenerator()
-    # LLM 제공자·키 미정 : 결정 후 연결
+    # LLM 제공자는 Anthropic(2026-10-28 결정) : 키·모델 정한 뒤 연결
     raise NotImplementedError("제목 생성 real 모드는 아직 연결되지 않았습니다")
