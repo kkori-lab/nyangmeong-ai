@@ -4,7 +4,7 @@ import json
 import httpx2
 import pytest
 
-from app.chat import clients, repository
+from app.chat import clients, repository, service
 from app.chat.clients import AnswerError, Classified, ClassifiedKind
 from app.chat.schemas import ROLE_AI, ConversationMessage
 from app.chat.service import (
@@ -371,6 +371,44 @@ def test_전체_시간_초과는_부분_답변을_미완료로_저장(client, ja
     assert saved[0]["cmptnYn"] is False
     # 미완료 답변에는 고지를 붙이지 않는다
     assert DISCLAIMER not in saved[0]["cnvrsCn"]
+
+
+class SlowAnswers(Answers):
+    """조각 사이에 잠깐 쉰다. 연결이 끊긴 뒤에도 생성이 남아 있게 한다"""
+
+    async def stream(self, messages, max_tokens):
+        async for chunk in super().stream(messages, max_tokens):
+            await asyncio.sleep(0.05)
+            yield chunk
+
+
+def test_연결이_끊겨도_답변을_끝까지_만들어_완료로_저장(client, java):
+    # architecture.md "질문 한 번의 순서" : 브라우저 연결이 끊겨도 생성·저장은 끝까지 한다.
+    # TestClient로는 스트림 중간에 끊을 수 없어 서비스를 직접 부른다(client는 설정값용)
+    room = java.add_room(1, "제목", cn=SEARCH_TEXT)
+    settings = get_settings()
+    limits = service.AnswerLimits(settings.answer_first_token_sec, settings.answer_total_sec)
+    answers = SlowAnswers(chunks=("끝까지 ", "만든 ", "답변"))
+
+    async def disconnect_after_intent():
+        backend = httpx2.AsyncClient(transport=httpx2.MockTransport(java))
+        repo = repository.JavaConversationRepository(backend, settings, "access_token=member-1")
+        turn = await service.prepare_turn(repo, room, None)
+        events = service.answer_turn(
+            turn, repo, clients.MockIntentClassifier(), answers, repository.AiSettings(), limits
+        )
+        first = await anext(events)
+        # StreamingResponse는 연결이 끊기면 이벤트 제너레이터를 닫는다
+        await events.aclose()
+        await asyncio.gather(*service._running)
+        return first
+
+    first = asyncio.run(disconnect_after_intent())
+
+    assert first[0] == "intent"
+    saved = java.ai_messages(room)
+    assert saved[0]["cnvrsCn"] == "끝까지 만든 답변" + DISCLAIMER
+    assert saved[0]["cmptnYn"] is True
 
 
 def test_답변_저장이_실패해도_스트림은_끝나고_message는_null(client, java, answers):
