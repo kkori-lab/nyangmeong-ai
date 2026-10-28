@@ -1,27 +1,36 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-LLM real 연결 (SCR-AIM-011 FN-AIM-011-11 제목 생성 · SCR-AIM-004 FN-AIM-004-02 의도 분류) — 끝 (검증 통과, 사람 확인 2026-10-28. 들어간 SDK는 `anthropic` 2.3.0)
+SCR-AIM-002 대화창 · 검색 질문/응답 — 끝 (검증 통과 1회차, 사람 확인 2026-10-28. 메시지 전송 SSE API와 LLM 답변 스트리밍)
 기획 상태: 승인됨
-- 고른 이유: "다음에 할 것" 맨 위가 LLM real 연결(2026-10-28 사람 요청). 두 화면 절은 이미 `끝`이고 이 작업의 마일스톤 절이 없어 `milestone-status.sh`는 돌리지 않았다(연결 작업, 상태 바꿀 절 없음).
-- 범위: `app/chat/clients.py`의 real 분기 두 곳(지금 `NotImplementedError`)을 Anthropic 클라이언트로 채운다. mock 동작·`judge_intent`·`create_conversation` 흐름은 그대로. OCR·캐릭터 real은 이번 범위 밖(계속 `NotImplementedError`이라 `AI_MODE=real`이면 그 기능은 아직 500).
-- 기준: AI매니저 기능명세서 v0.9 FN-AIM-011-11(첫 메시지로 1회 생성, 200자 서버 검증), FN-AIM-011-16·POL-006(반려동물 기록은 AI API에 보내지 않음 — 사용자가 입력한 문장만 보낸다), FN-AIM-004-02(룰 매칭 실패 입력에만 보조 분류), FN-AIM-004-12(판단 못 하면 폴백). 부를 남의 API 없음(Java 계약 변경 없음).
-- 설정(`app/core/config.py`): 키 설정(`LLM_API_KEY`, SecretStr, 기본 빈 값), `llm_model: str = "claude-haiku-5-5"`(`LLM_MODEL`), `llm_timeout_sec: float = 10.0`(`LLM_TIMEOUT_SEC`). `.env.local.example`에 `LLM_MODEL`·`LLM_TIMEOUT_SEC` 추가(값 없는 키 목록만, `docs/convention/config.md` 규칙). real인데 키가 비면 의존성 함수에서 명확한 오류.
-- 모델: 기본 `claude-haiku-5-5`(2026-10-28 사람 결정 "일단 하이쿠"), `output_config.effort="low"`(분류·짧은 생성). 바꿀 때는 `LLM_MODEL`만 고친다.
-- 공통: `clients.py`에 `AsyncAnthropic(api_key, timeout=llm_timeout_sec, max_retries=1)`를 설정당 한 번 만드는 `get_anthropic_client`. 실패(시간 초과·API 오류·`stop_reason="refusal"`)는 요청을 깨지 않고 아래 대체값으로 간다. 로그는 길이·소요 시간·실패 종류만(원문 금지, architecture.md "로그와 예외").
-- FN-AIM-011-11 제목 생성: `AnthropicTitleGenerator.generate(first_message)` — 시스템 프롬프트 "대화 제목을 한국어 한 줄(30자 안팎)로, 따옴표·마침표 없이" + 사용자 메시지에 첫 메시지만. 응답 text를 한 줄로 정리해 돌려주고, 200자 자르기·빈 값 `DEFAULT_TITLE`은 기존 `service.create_conversation`이 한다. 실패하면 mock과 같은 첫 메시지 앞 30자(대화 생성을 막지 않는다).
-  - 완료 조건 `명령:` 가짜 Anthropic 응답(httpx2 MockTransport를 단 `AsyncAnthropic`)으로: 요청 본문의 `model`·`system`·`messages`에 첫 메시지 원문만 있음, 응답 text가 제목으로 나옴, 줄바꿈·따옴표 정리, 500·시간 초과·refusal이면 앞 30자 대체. real 모드 키 빈 값이면 오류.
-- FN-AIM-004-02 의도 분류: `AnthropicIntentClassifier.classify(text)` — `messages.parse(output_format=...)` 구조화 출력 `{kind: ROUTE|SEARCH|UNKNOWN, route_num: int|null}`. 시스템 프롬프트에 `rules.routing_table()`의 routable 행(num·화면명·키워드)을 넣는다(고정 내용이라 앞에 두고 매 요청 같게). `route_num`을 행으로 바꿔 `Classified(ROUTE, scr_id, param)`, 없는 번호·`ROUTE`인데 번호 없음은 `UNKNOWN`. 실패하면 `UNKNOWN`(→ 기존 흐름대로 `FALLBACK`). 등록 판정은 룰이 먼저 하므로 분류 대상에 없다.
-  - 완료 조건 `명령:` 가짜 응답으로: SEARCH·ROUTE(num → 매핑표의 scr_id·param)·UNKNOWN 각각, 없는 num → UNKNOWN, 500·시간 초과·refusal → UNKNOWN, 시스템 프롬프트에 routable 행만 들어감.
-- 테스트: `tests/chat/test_llm_clients.py`(실제 API를 부르지 않음, `AGENTS.md` 5번). 기존 테스트는 mock 그대로.
-- 완료 조건 `화면:` `scripts/llm_smoke.py`(사람만 돌리는 확인용, pytest가 모으지 않음): `.env.local`의 키로 제목 2건·분류 4건("병원 찾아줘 근처에"처럼 룰에 안 걸리는 이동·"강아지 포도 먹어도 돼?"·"ㅁㄴㅇㄹ"·"바보야")을 실제로 불러 결과와 소요 시간을 출력. 이어서 `AI_MODE=real` + 가짜 Java로 서버를 띄워 Postman `POST /ai/conversations` 응답의 제목이 LLM 생성인지 본다(README "사람 확인").
+- 고른 이유: "다음에 할 것" 맨 위. 기준은 AI매니저 기능명세서 v0.9(FN-AIM-002-01~11, FN-AIM-011-15·16), 화면설계서 v0.11 SCR-AIM-002 처리 조건.
+- 범위: 메시지 전송 API 하나로 사용자 메시지 저장 → `judge_intent` → 판정별 응답. SEARCH는 LLM 답변 스트리밍(SSE), FALLBACK은 `reply_fallback`, ROUTE·REGISTER·RECEIPT는 판정만 돌려준다(이동은 React, 등록 SCR-AIM-012·영수증 SCR-AIM-013은 그 마일스톤). FN-AIM-002-01·05·06(말풍선·이동·로딩·중복 전송 차단)은 React 몫.
+- 새 API(React, LJS): `POST /ai/conversations/{aiCnvrsRoomSn}/messages`, 요청 `MessageSendRequest {cnvrsCn: String?(공백만 불가, 1~1,000)}`. `cnvrsCn`이 있으면 사용자 메시지로 저장하고 답한다. 없으면 저장 없이 방의 마지막 사용자 메시지에 답한다(첫 메시지 직후 — `POST /ai/conversations`가 이미 저장, [다시 시도], [다시 생성]). 사용자 메시지가 없는 방은 400 `INVALID_REQUEST`. 인증은 LLM 전에 `require_member`, `X-Requested-With` 필수.
+  - 응답은 `text/event-stream`(이 API만 `ApiResponse` 껍데기 예외, `docs/api/README.md`에 적는다). 스트림 시작 전 오류(400·401·403·404·502)는 지금과 같은 JSON `ApiResponse`. 이벤트: `intent`(Intent), `delta`(`{text}`, SEARCH만), `done`(`{message: ConversationMessage|null, shortcut: Intent|null}`), `error`(`{code: "EXTERNAL_API_ERROR", message: "일시적으로 답변할 수 없어요"}`).
+  - `docs/api/chat.md`에 행·`MessageSendRequest`·이벤트 DTO 추가, `ConversationMessage`에 `cmptnYn: Boolean` 추가(Java GET 대화가 이미 주는 값. 다시 열었을 때 미완료 표시용). 머리말의 "SCR-AIM-001·002… 해당 마일스톤에서 추가" 문장 고침.
+- FN-AIM-002-02·11, FN-AIM-011-15 컨텍스트: Java `GET /internal/ai/conversations/{sn}`(이미 있음, 메시지별 `cmptnYn`)로 방을 읽어 `cmptnYn=false`를 빼고 답할 사용자 메시지까지의 최근 6턴(12메시지)만 보낸다. 맨 앞이 AI 메시지면 버린다. 다른 대화는 읽지 않는다. → Java "미정" 3개 중 "최근 6턴"은 이것으로 대신하므로 요청하지 않는다.
+- 설정값(SYS_STNG_AI_TKN_UPLMT_CNT 4500·SYS_STNG_AI_CNVRS_TURN_CNT 6): Java 설정 조회 API가 없어 가짜로 먼저 만들고 나중에 연결. `app/chat/repository.py`에 `AiSettings`(max_tokens·turns) + 기본값을 주는 `get_ai_settings` 의존성. 연결은 "다음에 할 것"에.
+- FN-AIM-002-07 시간 제한: `config.py`에 `ANSWER_FIRST_TOKEN_SEC=10`·`ANSWER_TOTAL_SEC=60`(테스트에서 줄인다). 첫 글자 전 시간 초과·API 오류·거절 → `error` 이벤트, AI 메시지는 저장하지 않음(사용자 메시지는 남아 [다시 시도]가 `cnvrsCn` 없이 다시 부른다). 첫 글자 뒤 60초 초과·API 오류 → 부분 답변을 `cmptnYn=false`로 저장하고 `done`. 클라이언트 연결 끊김 → 부분 답변을 `cmptnYn=false`로 저장(취소에 휩쓸리지 않게 `asyncio.shield`). [다시 생성]은 새 메시지를 덧붙이고 미완료 메시지는 그대로 둔다(컨텍스트에서 빠지므로 Java "미완료 완료 처리" PATCH는 필요 없음 — 요청하지 않는다). 완료 답변은 `cmptnYn=true`로 저장. `repository.add_message`에 `cmptn_yn` 인자 추가(기존 내부 API 요청 필드 그대로).
+  - 구현 중 조정(2026-10-28, 사람 확인 필요): 클라이언트 연결 끊김은 `docs/convention/architecture.md` "질문 한 번의 순서"(브라우저 연결이 끊겨도 생성·저장은 끝까지)를 따라 답변 생성을 별도 작업으로 끝까지 하고 완료(`cmptnYn=true`)로 저장한다. 위의 "부분 답변을 미완료로 저장(shield)"은 하지 않는다. 미완료 저장은 60초 초과·도중 오류만. `cmptnYn`은 Java 기본값이 true라 false일 때만 보낸다(기존 테스트의 요청 본문 유지).
+- FN-AIM-002-03 의료 고지: SEARCH 답변 끝에 화면설계서 문구 "※ 참고 정보이며 의료 진단이 아닙니다. 이상 징후가 있다면 수의사와 상담하세요."를 마지막 `delta`로 보내고 본문에 포함해 저장. 건강 관련 여부를 따로 판정하지 않고 모든 검색 답변에 붙인다(검색 범위 D-003 미결, 판정 실수로 고지가 빠지는 쪽이 더 위험). 미완료 답변에는 붙이지 않는다.
+- FN-AIM-002-08·09, FN-AIM-011-16: 답변 시스템 프롬프트에 "앱 안의 내 기록·내 병원 같은 개인 데이터는 알 수 없으니 해당 화면을 안내", "진단·처방은 하지 않고 일반 정보 + 수의사 상담 안내", "한국어로 답한다"를 넣는다(길이 제한 없음, 아래 결정). AI에는 대화 메시지 텍스트만 보낸다(펫 번호·기록 없음).
+- FN-AIM-002-04 연관 바로가기: 의도 분류 구조화 출력에 `related_num`(SEARCH일 때 관련 화면 번호, 없으면 null) 추가 → `Classified`에 실어 `done.shortcut`(Intent ROUTE 모양, 저장 안 함). 호출을 늘리지 않는다. mock 분류기는 null.
+- FN-AIM-002-10: 룰 라우팅은 LLM 앞에서 끝나고 분류 실패는 UNKNOWN→FALLBACK이라 이미 독립. LLM 오류 상태에서 라우팅 문장이 ROUTE로 나오는 테스트로 확인.
+- 클라이언트(`app/chat/clients.py`): `AnswerGenerator` Protocol(`stream(messages, max_tokens) -> AsyncIterator[str]`), `MockAnswerGenerator`(고정 문장을 몇 조각으로), `AnthropicAnswerGenerator`(`get_anthropic_client` 재사용, `messages.stream`, `LLM_MODEL`, refusal은 오류로), `get_answer_generator`. 로그는 길이·소요 시간·실패 종류만.
+- 서비스(`app/chat/service.py`): `build_context`, `send_message`(이벤트를 내는 async generator). 라우터(`app/chat/router.py`): `StreamingResponse`.
+- 완료 조건 `명령:` `tests/chat/test_messages.py`(가짜 Java·가짜 답변 생성기): `cnvrsCn` 있음/없음, 사용자 메시지 없는 방 400, SEARCH 스트림(intent→delta…→고지 delta→done, 저장 본문 끝에 고지, cmptnYn true), ROUTE·FALLBACK·REGISTER 이벤트, 컨텍스트 12메시지 상한·미완료 제외·맨 앞 AI 제거, 첫 글자 시간 초과·오류 → error 이벤트·저장 없음, 전체 시간 초과·중간 오류 → 부분 답변 cmptnYn false 저장, LLM 오류여도 룰 라우팅 ROUTE, 로그인 안 함 401·`X-Requested-With` 없음 403(LLM 안 부름). `tests/chat/test_llm_clients.py`에 Anthropic 스트리밍 가짜 응답으로 요청 본문(system·messages에 대화 텍스트만, max_tokens), refusal·500 처리, `related_num` → shortcut.
+- 완료 조건 `화면:` mock 모드로 서버를 띄워 Postman(또는 `curl -N`)으로 대화 생성 → `cnvrsCn` 없이 메시지 전송 → 이벤트가 차례로 흘러오고 끝에 고지, 이어서 GET 대화에 AI 메시지가 저장됨. `scripts/llm_smoke.py`에 답변 스트리밍 1건 추가해 real 첫 글자·전체 시간 출력.
 - 공통 완료 조건 `명령:` `sh scripts/check.sh` 종료 코드 0.
-- 다음에 할 것에 남길 것: "연결 남음" 두 줄(제목 생성·의도 분류) 삭제. SCR-AIM-002 검색 응답에서 같은 `get_anthropic_client` 재사용.
-새 의존성: `anthropic` 1.x(`uv add anthropic`, 공식 SDK. 1.x는 이 저장소와 같은 `httpx2` 위에서 돈다). 이유: Anthropic API 호출.
+- 확인 필요(Java, 백엔드 LJS): 메시지 내부 API `cnvrsCn` 1~1,000자 제한이 AI 답변(최대 4500토큰)에 너무 짧다. AI 역할 메시지 상한을 늘려 달라고 요청한다.
+  - 결정: 상한을 두지 않고 받아 본다(2026-10-28 사람). Python은 프롬프트로 길이를 유도하지 않고 자르지도 않는다. 답변 전체를 그대로 저장 요청한다(Java가 1,000자 넘는 답을 거절하면 지금은 저장 실패 → 그 응답의 `done.message`는 null, 로그에 길이만).
+- 다음에 할 것에 남길 것: Java AI 설정값 조회 API 요청·연결(가짜 `get_ai_settings` 교체), AI 메시지 길이 상한 변경 요청(실제 답변 길이 분포를 보고), internal.md "미정" 행을 "설정값 조회"만으로 줄임.
+새 의존성: 없음
 
 ## 다음에 할 것
-- 다음 `/start`는 대기 맨 위 SCR-AIM-002(검색 응답은 `get_anthropic_client`·`LLM_MODEL` 재사용, Java "미정" API 3개 요청). 새 대기 마일스톤 4개(SCR-AIM-008 전환·SCR-AIM-013·SCR-MYP-010 전환·SCR-HLT-005)는 맨 뒤에 둠
-- SCR-AIM-002 메시지 전송에서 `judge_intent`를 부르고(화면 ID → 프론트 경로 변환은 그때 프론트 LJS와 맞춘다), 판정이 `FALLBACK`이면 `reply_fallback`(SCR-AIM-005)을 부르고 응답에 판정·저장된 AI 메시지를 담는다. 칩 재노출·연속 실패 카운트·FAQ 버튼(FN-AIM-005-03~06)은 프론트 몫. 프론트 연결은 엔드포인트와 한 번에
+- 문서 정정: 연결 끊김은 구현 중 조정대로 끝까지 생성·완료 저장한다(architecture.md). `docs/api/chat.md` 메시지 API 행과 `milestones/LJS.md` SCR-AIM-002 완료 조건에 남은 "연결 끊김 → 미완료 저장" 문구를 뺀다. 연결 끊김 테스트도 없음
+- 다음 `/start`는 대기 맨 위 SCR-AIM-012(등록 카드). 메시지 API의 REGISTER 판정 뒤 흐름을 잇는다
+- 백엔드에 요청(LJS 백엔드): AI 설정값 조회 내부 API(SYS_STNG_AI_TKN_UPLMT_CNT·SYS_STNG_AI_CNVRS_TURN_CNT, 연결되면 가짜 `get_ai_settings` 교체), AI 역할 메시지 `cnvrsCn` 1,000자 상한 확대(상한 없이 저장 요청 중, 넘으면 저장 실패). `docs/api/internal.md` "미정" 행은 "설정값 조회"만 남긴다(최근 6턴은 GET 대화, 미완료 완료 처리는 불필요)
+- 프론트(LJS)와 맞출 것: 메시지 API SSE 이벤트(`intent`·`delta`·`done`·`error`, `chat.md` MessageEvent), 화면 ID → 프론트 경로 변환, 칩 재노출·연속 실패 카운트·FAQ 버튼(FN-AIM-005-03~06)은 프론트 몫
 - 백엔드에 요청(LJS 백엔드, 영수증·캐릭터 흐름 재설계): Python이 부를 원본 이미지·RECPT·영수증 상태(AIMG01) 저장, 캐릭터 작업 생성·결과·상태 보고, (PDF를 Java에서 받는 방법이면) 첨부 조회 내부 API. 계약은 이 저장소 `docs/api/internal.md`의 `/internal/v1/**` 삭제와 같은 때 병합
 - SCR-HLT-005 기획 때 정할 것: Python이 PDF를 받는 방법(React가 다시 올림 / 첨부 번호로 Java에서 받음), 인식 결과 모양(SCR-HLT-007 입력값)
 - 계약은 백엔드 PR과 함께 낸다(`AGENTS.md` 4번): 백엔드 LJS의 `ai` 도메인(대화 내부 API, 정본 백엔드 `docs/api/ai.md`, 10-27 PR 전)·서버 간 키 제거. 이 저장소 `docs/api/internal.md`와 같은 때 병합
