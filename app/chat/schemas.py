@@ -1,4 +1,5 @@
 from datetime import datetime
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
@@ -41,3 +42,26 @@ class ConversationMessage(_Camel):
 
 class ConversationDetail(ConversationSummary):
     messages: list[ConversationMessage]
+
+
+class IntentKind(StrEnum):
+    # FN-AIM-001-05 : 의도 분기 결과. 괄호는 이어지는 화면
+    REGISTER = "REGISTER"  # 일정 생성 확인(SCR-AIM-012)
+    ROUTE = "ROUTE"  # 페이지 라우팅(SCR-AIM-004)
+    SEARCH = "SEARCH"  # 검색 질문/응답(SCR-AIM-002)
+    FALLBACK = "FALLBACK"  # 매칭 실패 폴백(SCR-AIM-005)
+    RECEIPT = "RECEIPT"  # 영수증 분석(SCR-AIM-013)
+
+
+class MoveType(StrEnum):
+    PAGE = "PAGE"  # 본창 이동
+    MODAL = "MODAL"  # 본창에서 모달 열기(SCR-COM-009)
+
+
+class Intent(_Camel):
+    kind: IntentKind
+    # ROUTE일 때만. 화면 ID → 프론트 경로 변환은 프론트가 한다
+    scr_id: str | None = None
+    scr_nm: str | None = None
+    param: str | None = None
+    move_type: MoveType | None = None

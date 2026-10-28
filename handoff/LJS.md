@@ -1,31 +1,36 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-영수증·캐릭터 프론트 직접 호출 결정 반영(규칙 문서·마일스톤 재작성) — 끝 (검증 통과 1회차, 사람 확인 2026-10-27. 문서만, 코드 변경 없음. FN-AIM-013-02·09는 별도 SCR-AIM-013 마일스톤으로 넣음)
+SCR-AIM-004 대화창 · 페이지 라우팅 (의도 판정) — 끝 (검증 통과 1회차, 사람 확인 2026-10-28 pytest 목록 기준. 판정 함수까지, 엔드포인트는 SCR-AIM-002)
 기획 상태: 승인됨
-- 고른 이유: "다음에 할 것" 맨 위. 그 항목이 "다음 `/start`에서 마일스톤을 다시 만든다. 그 전에 규칙 문서를 고친다"고 순서를 정했다. 대기 맨 위 SCR-AIM-004는 이 뒤.
-- 경로: 한 세션. 큰 변경 조건 중 "바꿀 파일 3개 이상"에 해당하지만 문서만 바꾼다(`.sap/config` 없음).
-- 범위: 문서만. `app/ocr`·`app/character`의 경로를 `/ai/...`로 옮기는 코드, `docs/api/` 계약(`internal.md` OCR·캐릭터 행)은 바꾸지 않는다. 계약은 백엔드 PR과 함께 내야 하므로(`AGENTS.md` 4번) 새 마일스톤에서 기획한다.
-- 바꿀 파일:
-  - `AGENTS.md` 2번: "React는 AI 채팅만 `/ai/**`, 영수증·캐릭터는 Java 경유" → "React는 AI 채팅·영수증 OCR·캐릭터 생성을 `/ai/**`로 부른다(2026-10-27 결정). 원본·결과·상태 저장은 Python이 Java 내부 API로 요청한다". 패키지 구조의 `ocr/`·`character/` 줄도 같게.
-  - `docs/convention/architecture.md`: 경계 그림 8·10·11행(React → Java 목록에서 영수증·캐릭터 빼기, Java → Python 줄 처리, Python → Java 줄에 원본·상태 저장 추가), 23행 "영수증·캐릭터" 항목.
-  - `docs/convention/milestone.md`: "Python 몫" 표의 영수증·캐릭터 행, "먼저 나와야 하는 것"의 `PythonOcrClient`·`PythonCharacterGenerator` 행 → Java 원본·상태 저장 내부 API 행.
-  - `README.md` 7~12행 표와 12행 문장, 62행 "사람 확인"의 `/internal/v1/**` 안내.
-  - `milestones/LJS.md`: 통째로 다시 쓰지 않고 바뀌는 절만 고친다(사람 승인 2026-10-27, `— 끝` 절의 연결 남음 기록 보존). DMS 기능명세서(읽기만, 명세서는 고치지 않음) 기능 목록으로 대조한다. SCR-AIM-008을 새 마일스톤으로 다시 열고(FN-AIM-008-05·06·07 서버 부분, 010-01, 013-02·04·09, 원본 보관 008-09·010-06·013-08의 저장 요청), SCR-MYP-010도 결정 (2)에 따라 다시 연다.
-- 확인한 현황(2026-10-27, 백엔드·프론트 origin/develop): Java는 `OcrClient`·`CharacterGenerator`를 가짜 구현(`FakeOcrClient`·`FakeCharacterGenerator`)으로 직접 쓰고 Python 클라이언트는 없다. Python `/internal/v1/**`를 부르는 곳 없음. Java 영수증 흐름(`/api/receipts` 업로드·OCR·재분석·취소·저장)과 캐릭터 생성(`/api/pets/{petSn}/pixel-characters`, `@Async` 작업)이 Java에 있다. 프론트의 영수증 인식 3곳·캐릭터 생성은 가짜 응답이고 어느 서버에도 연결되지 않았다.
-- 결정(사람, 2026-10-27 재확인): 프론트 → Python 직접 호출 유지. 백엔드 영수증·캐릭터 흐름은 백엔드에서 재설계한다. 따라서 Java → Python `/internal/v1/**`는 문서에서 폐기 예정으로 적는다(코드·`docs/api/internal.md` 삭제는 백엔드 PR과 함께, 새 마일스톤에서).
-- 백엔드 재설계는 이 저장소 범위 밖. 마일스톤의 "기다리는 것"과 milestone.md "먼저 나와야 하는 것"에 "Java 영수증·캐릭터 저장·상태 내부 API(재설계, LJS 백엔드)"로 적는다.
-- 결정(사람, 2026-10-27): 캐릭터 생성은 A안 — Java가 작업 상태를 갖는다. 프론트 → Python 생성 요청 → Python이 Java에 작업 생성 요청 후 202·작업 번호 반환 → Python이 백그라운드에서 생성하고 결과·상태를 Java 내부 API로 보냄 → 프론트는 Java에서 상태 조회. 생성 중 Python이 죽어 멈춘 작업의 타임아웃 정리는 Java 몫.
-- 결정(사람, 2026-10-27): 검사결과지 PDF 분석(SCR-HLT-005)도 Python 몫. 건강기록_기능명세서_v1.1_20261026(DMS)에서 Python 몫은 FN-HLT-005-04 PDF 분석의 인식 부분만(결과는 SCR-HLT-007 입력값). 버튼 노출·SCR-HLT-007 이동은 프론트, 첨부 파일 보관·검사 수치 저장은 Java. 현재 Java에는 오류 코드 `CHECKUP_ATTACHMENT_NOT_ANALYZABLE`만 있고 분석 API는 없다. 프론트 `api.js`에도 없다.
-  - 새 마일스톤에서 정할 것: PDF 원본이 Java 첨부 자료에 있으므로 Python이 받는 방법(프론트가 파일을 다시 올림 / Python이 첨부 번호로 Java 내부 API에서 받음).
-- 추가로 바꿀 곳: `docs/convention/milestone.md` "담당" 표의 읽을 기능명세서에 "건강기록(SCR-HLT-005만)", "Python 몫" 표에 검사결과지 PDF 행. 마일스톤 "대조"에 건강기록 명세 건수 줄.
-- 완료 조건 `명령:` `grep -rn "internal/v1" AGENTS.md README.md docs/convention`의 결과가 "폐기 예정" 문장뿐.
-- 완료 조건 `명령:` `milestones/LJS.md` "대조"에서 AI매니저 147 = 마일스톤 + 제외, 마이페이지 116 = 마일스톤 + 제외, 건강기록 명세 전체 = 마일스톤 + 제외.
-- 공통: 코드 변경 없음(`sh scripts/check.sh` 생략 사유).
-새 의존성: 없음
+- 고른 이유: "다음에 할 것" 맨 위가 "다음 `/start`는 대기 맨 위 SCR-AIM-004".
+- 범위: 입력 한 건 → 의도 판정 함수까지. 메시지 전송 엔드포인트(`/ai/**` 메시지·스트리밍)는 SCR-AIM-002에서 만들고 이 함수를 부른다. 그래서 이번에는 API 행·DTO가 없다(`api-row.sh SCR-AIM-004` 결과 없음). 3초 유예·[취소]·본창 이동·창 닫힘(FN-AIM-004-03~07)은 프론트 몫.
+- 기준: AI매니저 기능명세서 v0.9 기능 목록·부록 A(라우팅 매핑표 45행)·부록 B(등록 판정 사전), 화면설계서 v0.11 SCR-AIM-004.
+- 판정 결과 모양(`app/chat/schemas.py` `Intent`): `kind` = `REGISTER`(SCR-AIM-012) / `ROUTE`(SCR-AIM-004) / `SEARCH`(SCR-AIM-002) / `FALLBACK`(SCR-AIM-005) / `RECEIPT`(SCR-AIM-013), `ROUTE`면 `scrId`·`param`(예: `?cat=hospital`, 없으면 null)·`moveType`(`PAGE` / `MODAL` — SCR-COM-009만 모달)·`scrNm`(안내 문구용 화면명). 화면 ID → 프론트 경로 변환은 프론트 몫(SCR-AIM-002 연결 때 프론트 LJS와 맞춤).
+- FN-AIM-004-09 매핑표 관리: `data/routing.yaml`에 부록 A를 옮긴다(No·구분·대상 화면·화면 ID·파라미터·키워드·이동 방식, 버전 `v0.9` 표기). '라우팅 대상 아님'·'제외'·'보류' 행은 `routable: false`로 남겨 키워드 없이 둔다. 부록 B는 `data/register_dict.yaml`(등록 동사·날짜·시간·주기 표현). 로드는 `app/chat/rules.py`에서 한 번(`lru_cache`).
+  - 해석 하나: 부록 A No.3(플레이스, `?cat=…` "아래 행 참조")의 미용·용품·호텔·동반은 No.17~20과 길이가 같아 위쪽 행 우선 규칙이면 파라미터 없는 No.3이 이긴다. yaml에서 No.3 키워드를 '플레이스'만 두고 나머지는 No.17~20 탭으로 가게 한다(결과는 매핑표 의도와 같음). 명세는 고치지 않는다.
+  - 완료 조건 `명령:` 매핑표 로드 테스트 — No 45개, 라우팅 가능 행의 화면 ID가 `SCR-` 형식, 대표 칩 7행이 모두 있음, 결번(SCR-HLT-000·001 등)·SCR-AIM-0xx가 라우팅 대상에 없음.
+- FN-AIM-012-01 등록 요청 판정 + FN-AIM-004-13 등록 분기 우선: `rules.py` `is_register_request(text)` — 공백을 뺀 문장에 등록 동사(잡아·등록해·넣어·추가해·예약해·만들어 + 줘/주세요 계열)와 날짜·시간·주기 표현이 둘 다 있으면 참.
+  - 완료 조건 `명령:` "내일 3시 병원 일정 잡아줘"·"다음 주 화요일 병원 일정 잡아줘"·"매일 산책 추가해 주세요"·"2주마다 구충 넣어줘" → `REGISTER`, "일정 등록할래"(날짜 없음) → `ROUTE` SCR-HLT-003, "내일 병원"(동사 없음) → 등록 아님.
+- FN-AIM-004-01 룰 기반 매칭 + FN-AIM-004-10 파라미터: `rules.py` `match_route(text)` — 공백을 뺀 문장·키워드로 포함 여부를 보고, 여러 개면 가장 긴 키워드, 길이가 같으면 매핑표 위쪽 행.
+  - 완료 조건 `명령:` "병원 찾아줘" → SCR-HOS-001 `?cat=hospital`, "근처 애견미용실" → SCR-HOS-001 `?cat=beauty`, "이번 달 병원비 얼마 썼어" → SCR-MYP-030(병원비가 병원보다 김), "채팅 보여줘" → SCR-COM-009 `MODAL`, "알림 꺼줘" → SCR-COM-008, 화면설계서 예시 11개 전부 기대 화면.
+- FN-AIM-004-11 데이터 컨텍스트 미수용: 반려동물 이름 등은 해석하지 않고 화면 단위로만 매칭.
+  - 완료 조건 `명령:` "초코 체중 그래프 보여줘" → SCR-HLT-002, 파라미터 없음.
+- FN-AIM-004-08 라우팅 대상 범위: 매핑표의 라우팅 가능 행 전체가 대상(칩 7종 한정 아님).
+  - 완료 조건 `명령:` 매핑표의 라우팅 가능 행마다 첫 키워드를 넣으면 그 행 화면이 나온다(표 전체 반복 테스트, 최장 일치로 다른 행이 이기는 키워드는 예외 목록에 이유와 함께).
+- FN-AIM-004-02 AI 의도 분류: `app/chat/clients.py`에 `IntentClassifier` Protocol + `MockIntentClassifier`. 룰 매칭이 실패한 입력에만 부른다. 결과는 `ROUTE`(매핑표의 라우팅 가능 화면 ID만 인정, 아니면 버림) / `SEARCH` / `UNKNOWN`. mock은 물음표·의문 표현(뭐·왜·어떻게·알려줘 등)이 있으면 `SEARCH`, 아니면 `UNKNOWN`. real은 Anthropic(키 받은 뒤, "다음에 할 것"). `get_intent_classifier`는 제목 생성기와 같은 방식(real이면 `NotImplementedError`).
+  - 완료 조건 `명령:` mock에서 "강아지가 포도 먹어도 돼?" → `SEARCH`, "ㅁㄴㅇㄹ" → `FALLBACK`. 가짜 분류기가 매핑표에 없는 화면 ID를 주면 `FALLBACK`.
+- FN-AIM-004-12 매칭 실패 분기: 등록·룰·AI 모두 판단 못 하면 `FALLBACK`.
+- FN-AIM-001-05 의도 분기 처리: `app/chat/service.py` `judge_intent(text, has_image, classifier)` — 이미지가 있으면 바로 `RECEIPT`, 아니면 ① 등록 → ② 룰 라우팅 → ③ AI 분류(`ROUTE`/`SEARCH`) → ④ `FALLBACK`. AI 분류는 ①②가 실패한 경우에만 부른다.
+  - 완료 조건 `명령:` 순서 테스트 — 등록과 라우팅 키워드가 함께 있으면 `REGISTER`, 룰이 맞으면 분류기를 부르지 않음(호출 횟수 0), 이미지 첨부면 문장과 관계없이 `RECEIPT`.
+- 테스트: `tests/chat/test_intent.py`(판정 순서·예시 입력), `tests/chat/test_routing_table.py`(매핑표 로드·표 전체 반복).
+- 완료 조건 `화면:` 엔드포인트가 없어 Postman 대신 README "사람 확인" 6번 방식: `uv run python -m pytest tests/chat/test_intent.py -v`의 예시 입력·결과 목록을 사람이 훑어본다(부록 A·B와 다른 판정이 있는지).
+- 공통 완료 조건 `명령:` `sh scripts/check.sh` 종료 코드 0.
+새 의존성: `pyyaml` 6.0.3 (`uv add pyyaml`). 매핑표·사전을 `data/*.yaml`로 두는 규칙(`architecture.md`) 때문. 이미 `uvicorn[standard]`를 통해 `uv.lock`에 같은 버전이 있어 새로 내려받는 것은 없고, 직접 의존성으로 명시만 한다.
 
 ## 다음에 할 것
-- 다음 `/start`는 대기 맨 위 SCR-AIM-004. 새 대기 마일스톤 4개(SCR-AIM-008 전환·SCR-AIM-013·SCR-MYP-010 전환·SCR-HLT-005)는 맨 뒤에 둠
+- 다음 `/start`는 대기 맨 위 SCR-AIM-005. 새 대기 마일스톤 4개(SCR-AIM-008 전환·SCR-AIM-013·SCR-MYP-010 전환·SCR-HLT-005)는 맨 뒤에 둠
+- 연결 남음: SCR-AIM-004 FN-AIM-004-02 AI 의도 분류 real 클라이언트 (Anthropic 키·모델 정한 뒤, LJS). 판정 함수 `judge_intent`는 SCR-AIM-002 메시지 전송에서 부른다. 화면 ID → 프론트 경로 변환은 그때 프론트 LJS와 맞춘다
 - 백엔드에 요청(LJS 백엔드, 영수증·캐릭터 흐름 재설계): Python이 부를 원본 이미지·RECPT·영수증 상태(AIMG01) 저장, 캐릭터 작업 생성·결과·상태 보고, (PDF를 Java에서 받는 방법이면) 첨부 조회 내부 API. 계약은 이 저장소 `docs/api/internal.md`의 `/internal/v1/**` 삭제와 같은 때 병합
 - SCR-HLT-005 기획 때 정할 것: Python이 PDF를 받는 방법(React가 다시 올림 / 첨부 번호로 Java에서 받음), 인식 결과 모양(SCR-HLT-007 입력값)
 - 계약은 백엔드 PR과 함께 낸다(`AGENTS.md` 4번): 백엔드 LJS의 `ai` 도메인(대화 내부 API, 정본 백엔드 `docs/api/ai.md`, 10-27 PR 전)·서버 간 키 제거. 이 저장소 `docs/api/internal.md`와 같은 때 병합

@@ -1,6 +1,13 @@
-from app.chat.clients import TitleGenerator
+from app.chat import rules
+from app.chat.clients import ClassifiedKind, IntentClassifier, TitleGenerator
 from app.chat.repository import ConversationRepository
-from app.chat.schemas import ConversationCreateRequest, ConversationDetail, ConversationSummary
+from app.chat.schemas import (
+    ConversationCreateRequest,
+    ConversationDetail,
+    ConversationSummary,
+    Intent,
+    IntentKind,
+)
 
 MAX_TITLE_LENGTH = 200
 DEFAULT_TITLE = "새 대화"
@@ -30,3 +37,26 @@ async def get_conversation(repo: ConversationRepository, room_sn: int) -> Conver
 async def delete_conversation(repo: ConversationRepository, room_sn: int) -> None:
     # FN-AIM-011-13 : 물리 삭제
     await repo.delete_room(room_sn)
+
+
+async def judge_intent(text: str, has_image: bool, classifier: IntentClassifier) -> Intent:
+    # FN-AIM-001-05 : 이미지 첨부면 판정 없이 영수증 분석(SCR-AIM-013)
+    if has_image:
+        return Intent(kind=IntentKind.RECEIPT)
+    # ① 등록 판정 — FN-AIM-004-13 : 라우팅 키워드가 있어도 등록이 먼저
+    if rules.is_register_request(text):
+        return Intent(kind=IntentKind.REGISTER)
+    # ② 룰 기반 라우팅
+    row = rules.match_route(text)
+    if row is not None:
+        return row.to_intent()
+    # ③ AI 분류(①②가 실패한 입력만, FN-AIM-004-02)
+    classified = await classifier.classify(text)
+    if classified.kind is ClassifiedKind.SEARCH:
+        return Intent(kind=IntentKind.SEARCH)
+    if classified.kind is ClassifiedKind.ROUTE and classified.scr_id is not None:
+        row = rules.find_route(classified.scr_id, classified.param)
+        if row is not None:
+            return row.to_intent()
+    # ④ FN-AIM-004-12·005-01 : 어디에도 해당하지 않으면 폴백
+    return Intent(kind=IntentKind.FALLBACK)
