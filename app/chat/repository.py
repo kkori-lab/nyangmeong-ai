@@ -2,9 +2,9 @@ from typing import Annotated, Protocol
 
 import httpx2
 from fastapi import Depends, Request
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
-from app.chat.schemas import ConversationDetail, ConversationSummary
+from app.chat.schemas import ConversationDetail, ConversationMessage, ConversationSummary
 from app.core.auth import REQUESTED_WITH
 from app.core.backend import call_backend, external_error, get_backend_client
 from app.core.config import Settings, get_settings
@@ -24,6 +24,8 @@ class ConversationRepository(Protocol):
     async def get_room(self, room_sn: int) -> ConversationDetail: ...
 
     async def delete_room(self, room_sn: int) -> None: ...
+
+    async def add_message(self, room_sn: int, role_cd: str, cn: str) -> ConversationMessage: ...
 
 
 class JavaConversationRepository:
@@ -58,13 +60,19 @@ class JavaConversationRepository:
     async def delete_room(self, room_sn: int) -> None:
         await self._call("DELETE", f"{CONVERSATIONS_PATH}/{room_sn}")
 
+    async def add_message(self, room_sn: int, role_cd: str, cn: str) -> ConversationMessage:
+        # msgSeq는 Java가 매긴다. 응답의 cmptnYn 등 모르는 필드는 무시
+        body = {"roleCd": role_cd, "cnvrsCn": cn}
+        data = await self._call("POST", f"{CONVERSATIONS_PATH}/{room_sn}/messages", json=body)
+        return _parse(ConversationMessage, data)
+
     async def _call(self, method: str, path: str, **kwargs):
         return await call_backend(
             self._client, self._settings, method, path, headers=self._headers, **kwargs
         )
 
 
-def _parse[T: ConversationSummary](model: type[T], data) -> T:
+def _parse[T: BaseModel](model: type[T], data) -> T:
     # Java 응답 모양이 다르면 502 : 받은 값을 그대로 React에 넘기지 않는다
     try:
         return model.model_validate(data)
