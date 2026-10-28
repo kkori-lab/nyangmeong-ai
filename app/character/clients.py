@@ -68,5 +68,5 @@ def _mock_png() -> bytes:
 def get_character_client(settings: Annotated[Settings, Depends(get_settings)]) -> CharacterClient:
     if settings.ai_mode is AiMode.MOCK:
         return MockCharacterClient()
-    # 이미지 생성 API·키 미정 : 결정 후 연결
+    # 이미지 생성은 OpenAI GPT(2026-10-28 결정) : 키·모델 정한 뒤 연결
     raise NotImplementedError("캐릭터 real 모드는 아직 연결되지 않았습니다")
