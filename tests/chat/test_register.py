@@ -446,3 +446,41 @@ def test_남의_대화에_결과를_저장하면_404(client, java, extractor):
 
     assert res.status_code == 404
     assert java.ai_messages(others) == []
+
+
+# Java 등록 맥락 내부 API(GET /internal/ai/register-context, 백엔드 #54)
+
+
+def test_반려동물_목록은_Java에_쿠키와_X_Requested_With로_요청한다(client, java, extractor):
+    as_member(client, 7)
+    room = java.add_room(7, "제목")
+    send(client, room, "초코 " + HOSPITAL_TEXT)
+
+    sent = [r for r in java.requests if r.url.path == "/internal/ai/register-context"]
+    assert len(sent) == 1
+    assert sent[0].method == "GET"
+    assert "access_token=member-7" in sent[0].headers["cookie"]
+    assert sent[0].headers["x-requested-with"] == "XMLHttpRequest"
+
+
+def test_Java가_준_반려동물로_카드의_반려동물을_정한다(client, java, extractor):
+    # FN-AIM-012-04 : 1마리 회원이면 그 반려동물
+    java.pets = [{"petSn": 9, "petNm": "보리", "careArtclNms": []}]
+    as_member(client, 1)
+    room = java.add_room(1, "제목")
+    card = done(send(client, room, HOSPITAL_TEXT))["card"]
+
+    assert (card["petSn"], card["petNm"]) == (9, "보리")
+
+
+@pytest.mark.parametrize("status", [401, 500, 0])
+def test_Java_등록_맥락이_실패하면_SSE_error(client, java, extractor, status):
+    # 스트림 시작 뒤라 Java 본문을 그대로 전달하지 못한다(0은 연결 실패)
+    java.context_status = status
+    as_member(client, 1)
+    room = java.add_room(1, "제목")
+    evs = send(client, room, HOSPITAL_TEXT)
+
+    assert names(evs) == ["intent", "error"]
+    assert evs[-1][1]["code"] == "EXTERNAL_API_ERROR"
+    assert java.ai_messages(room) == []

@@ -39,7 +39,7 @@ Java   ──▶ Python    /internal/v1/**  폐기 예정(2026-10-27). 코드·�
 | `service.py` | 흐름(판정 순서, 모델 호출, 저장 순서) | `Request` 객체 |
 | `schemas.py` | 요청·응답 pydantic 모델 | DB 행 매핑 |
 | `repository.py` | 저장 요청(Java 내부 API 호출). Python은 DB에 붙지 않는다 | 업무 판단 |
-| `clients.py` | 외부 AI API 호출. `AI_MODE`에 따라 실제 구현과 mock 구현을 고른다 | 프롬프트 밖의 업무 규칙 |
+| `clients.py` | 외부 AI API 호출. 실제 구현만 둔다(mock 없음). 키가 없거나 연결 전이면 502 `EXTERNAL_API_ERROR`. 테스트 가짜는 `tests/`에 | 프롬프트 밖의 업무 규칙 |
 | `rules.py` | 모델 없이 정해지는 규칙(키워드 매칭, 날짜 해석, 파싱) | 외부 호출 |
 
 - 부록처럼 명세에서 오는 기준 데이터(라우팅 매핑표, 등록 판정 사전)는 코드가 아니라 `data/*.yaml`로 둔다. 명세가 바뀌면 그 파일만 고친다.

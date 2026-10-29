@@ -2,10 +2,11 @@ import asyncio
 
 import pytest
 
-from app.chat.clients import Classified, ClassifiedKind, MockIntentClassifier
+from app.chat.clients import Classified, ClassifiedKind
 from app.chat.rules import is_register_request
 from app.chat.schemas import IntentKind, MoveType
 from app.chat.service import judge_intent
+from tests.chat.fakes import FakeIntentClassifier
 
 
 class FakeClassifier:
@@ -19,7 +20,7 @@ class FakeClassifier:
 
 
 def judge(text: str, has_image: bool = False, classifier=None):
-    return asyncio.run(judge_intent(text, has_image, classifier or MockIntentClassifier()))
+    return asyncio.run(judge_intent(text, has_image, classifier or FakeIntentClassifier()))
 
 
 @pytest.mark.parametrize(

@@ -1,11 +1,9 @@
-# PR마다 검증 명령(scripts/check.sh)을 돌린다. .env.local이 없으면 AI_MODE=mock으로 뜨므로 비밀값을 넣지 않는다
+# PR마다 검증 명령(scripts/check.sh)을 돌린다. 테스트는 가짜 클라이언트로 돌므로 비밀값을 넣지 않는다
 name: build
 
 on:
   pull_request:
-    branches: [develop, main]
-  push:
-    branches: [develop, main]
+    branches: [develop]
 
 jobs:
   build:

@@ -3,9 +3,9 @@ from datetime import datetime
 
 import pytest
 
-from app.chat.clients import MockIntentClassifier
 from app.chat.schemas import ROLE_AI, ConversationMessage, IntentKind
 from app.chat.service import FALLBACK_MESSAGE, judge_intent, reply_fallback
+from tests.chat.fakes import FakeIntentClassifier
 
 
 class FakeRepository:
@@ -25,7 +25,7 @@ class FakeRepository:
 
 def fallback_flow(text: str, repo: FakeRepository, room_sn: int = 1):
     # SCR-AIM-002 메시지 전송이 할 순서 : 판정이 FALLBACK이면 안내 문구 저장
-    intent = asyncio.run(judge_intent(text, False, MockIntentClassifier()))
+    intent = asyncio.run(judge_intent(text, False, FakeIntentClassifier()))
     saved = None
     if intent.kind is IntentKind.FALLBACK:
         saved = asyncio.run(reply_fallback(repo, room_sn))

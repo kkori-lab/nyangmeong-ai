@@ -110,15 +110,10 @@ def env_setup() -> dict[str, str]:
         skip(".env.local")
     else:
         shutil.copyfile(ENV_EXAMPLE, ENV_FILE)
-        ok(".env.local (예시 복사, AI_MODE=mock). 실제 값은 디스코드에서 받아 바꿔 주세요")
+        ok(".env.local (예시 복사). 실제 값은 디스코드에서 받아 바꿔 주세요")
     env = read_env()
 
-    mode = env.get("AI_MODE", "mock")
-    if mode not in ("mock", "real"):
-        todo(f".env.local 의 AI_MODE={mode} 는 mock 또는 real 이어야 합니다")
-    skip(f"AI_MODE = {mode}")
-
-    # 비어 있는 키는 그 기능을 붙일 때 채운다. real 모드에서 외부 API 키가 비면 할 일로 남긴다
+    # mock 모드는 없다. LLM 키가 비면 할 일, 아직 연결 전인 키는 비어 있다고만 보여 준다
     groups = {
         "인증": ("BACKEND_BASE_URL",),
         "LLM": ("LLM_API_KEY",),
@@ -129,8 +124,10 @@ def env_setup() -> dict[str, str]:
         empty = [key for key in keys if not env.get(key)]
         if not empty:
             skip(f"{name} 값 있음")
-        elif mode == "real" and name in ("LLM", "이미지 생성", "Google Vision"):
-            todo(f"AI_MODE=real 인데 {name} 값이 없습니다: {', '.join(empty)}")
+        elif name == "LLM":
+            todo(
+                f"{name} 값이 없습니다: {', '.join(empty)} (디스코드에서 받기, 없으면 AI 대화 502)"
+            )
         else:
             print(f"  [비움] {name}: {', '.join(empty)}")
 

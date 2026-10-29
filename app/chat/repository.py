@@ -3,7 +3,7 @@ from typing import Annotated, Protocol
 
 import httpx2
 from fastapi import Depends, Request
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from app.chat.schemas import ConversationDetail, ConversationMessage, ConversationSummary
 from app.core.auth import REQUESTED_WITH
@@ -12,6 +12,8 @@ from app.core.config import Settings, get_settings
 
 # Java 대화 내부 API (2026-10-26 결정 : 저장·암호화·본인 대화 판정은 Java)
 CONVERSATIONS_PATH = "/internal/ai/conversations"
+# Java 등록 맥락 내부 API (SCR-AIM-012 반려동물 결정·같은 이름 케어 항목 안내)
+REGISTER_CONTEXT_PATH = "/internal/ai/register-context"
 REQUESTED_WITH_HEADER = "X-Requested-With"
 
 
@@ -121,13 +123,35 @@ class RegisterContextRepository(Protocol):
     async def get_pets(self) -> list[PetInfo]: ...
 
 
-class FakeRegisterContextRepository:
-    # 가짜 : Java GET /internal/ai/register-context가 생기면 Java 호출로 바꾼다
-    PETS = (PetInfo(1, "초코"), PetInfo(2, "뭉치", ("발톱 깎기",)))
+class RegisterContextItem(BaseModel):
+    # Java GET /internal/ai/register-context 응답 원소(백엔드 #54)
+    pet_sn: int = Field(alias="petSn")
+    pet_nm: str = Field(alias="petNm")
+    care_artcl_nms: list[str] = Field(default_factory=list, alias="careArtclNms")
+
+
+class JavaRegisterContextRepository:
+    # 회원은 Java가 브라우저 Cookie로 판정한다. careArtclNms는 케어 항목 API가 생길 때까지 빈 배열
+    def __init__(self, client: httpx2.AsyncClient, settings: Settings, cookie: str | None) -> None:
+        self._client = client
+        self._settings = settings
+        self._headers = {REQUESTED_WITH_HEADER: REQUESTED_WITH}
+        if cookie:
+            self._headers["Cookie"] = cookie
 
     async def get_pets(self) -> list[PetInfo]:
-        return list(self.PETS)
+        data = await call_backend(
+            self._client, self._settings, "GET", REGISTER_CONTEXT_PATH, headers=self._headers
+        )
+        if not isinstance(data, list):
+            raise external_error()
+        items = [_parse(RegisterContextItem, item) for item in data]
+        return [PetInfo(i.pet_sn, i.pet_nm, tuple(i.care_artcl_nms)) for i in items]
 
 
-def get_register_context_repository() -> RegisterContextRepository:
-    return FakeRegisterContextRepository()
+def get_register_context_repository(
+    request: Request,
+    client: Annotated[httpx2.AsyncClient, Depends(get_backend_client)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> RegisterContextRepository:
+    return JavaRegisterContextRepository(client, settings, request.headers.get("cookie"))

@@ -21,7 +21,7 @@ Java가 만드는 API다(백엔드 저장소 기준). 키 헤더는 없다. 인�
 | GET | /internal/ai/conversations/{aiCnvrsRoomSn} | 대화 하나와 메시지(`msgSeq` 오름차순). 남의 대화·없는 번호 404 `NOT_FOUND` | AIM-011-10 | 백엔드 | - | ConversationResponse(Java 이름, 필드는 `chat.md` ConversationDetail + 메시지별 `cmptnYn: boolean`) |
 | DELETE | /internal/ai/conversations/{aiCnvrsRoomSn} | 대화와 메시지 물리 삭제. 200. 남의 대화·없는 번호 404 `NOT_FOUND` | AIM-011-13 | 백엔드 | - | - |
 | POST | /internal/ai/conversations/{aiCnvrsRoomSn}/messages | 메시지 추가. 요청 `{roleCd(AIMG06: AIMC0024 사용자·AIMC0025 AI), cnvrsCn(1~1,000), cmptnYn: Boolean?(기본 true)}`, 201 ConversationMessageResponse. `msgSeq`는 Java가 매긴다. SCR-AIM-005 폴백 문구 저장에서 사용(SCR-AIM-002·012도 사용 예정) | AIM-002·012 | 백엔드 | `{roleCd, cnvrsCn, cmptnYn}` | ConversationMessageResponse |
-| GET | /internal/ai/register-context | **미정(백엔드에 요청)** 쿠키 회원이 양육하는 반려동물과 각자의 케어 항목 이름. 응답 `data [{petSn: Long, petNm: String, careArtclNms: [String]}]`. SCR-AIM-012 반려동물 결정·같은 이름 케어 항목 안내에서 사용. 생기기 전까지 Python은 가짜(`app/chat/repository.py` FakeRegisterContextRepository)를 쓴다 | AIM-012-04·08 | 백엔드 | - | `[{petSn, petNm, careArtclNms}]` |
+| GET | /internal/ai/register-context | **확정(백엔드 #54)** 쿠키 회원이 양육하는 반려동물과 각자의 케어 항목 이름. 응답 `data [{petSn: Long, petNm: String, careArtclNms: [String]}]`, `careArtclNms`는 케어 항목 API가 생길 때까지 빈 배열. SCR-AIM-012 반려동물 결정·같은 이름 케어 항목 안내에서 사용(`app/chat/repository.py` JavaRegisterContextRepository). `X-Requested-With`를 붙인다. 실패하면 메시지 스트림의 `error` `EXTERNAL_API_ERROR` | AIM-012-04·08 | 백엔드 | - | `[{petSn, petNm, careArtclNms}]` |
 | (미정) | 미완료 메시지 완료 처리·최근 6턴·AI 설정값 조회 | 백엔드 `docs/api/ai.md`에 PATCH 설계만 있음. SCR-AIM-002에서 필요해지면 요청 | AIM-002 | 백엔드 | 미정 | 미정 |
 
 ## DTO
@@ -75,6 +75,6 @@ Java가 만드는 API다(백엔드 저장소 기준). 키 헤더는 없다. 인�
 | colrNm | String | N | 털색 | MYP-010-08 |
 | chrcCn | String | N | 특징 | MYP-010-08 |
 
-## mock 모드
+## 외부 AI 키가 없을 때
 
-`AI_MODE=mock`이면 외부 API를 부르지 않는다. OCR은 Java `FakeOcrClient`와 같은 시나리오를 돌려준다(어떻게 고르는지는 OCR 마일스톤 기획 때 정한다: `fake` 2마리, `fake-single`, `fake-partial`, `fake-empty`, `fake-fail`, `fake-timeout`). 캐릭터는 규격(512×512, 얼굴 영역 128·64·256·256)을 지킨 고정 PNG를 돌려준다.
+mock 모드는 없다(2026-10-29). 키가 없거나 클라이언트가 연결되기 전이면 OCR·캐릭터 API는 502 `EXTERNAL_API_ERROR`다. 테스트는 가짜 클라이언트를 끼운다.
