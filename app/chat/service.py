@@ -1,9 +1,12 @@
 import asyncio
 import logging
+import re
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
+from datetime import date
 
 from pydantic import BaseModel
+from pydantic.alias_generators import to_camel
 
 from app.chat import rules
 from app.chat.clients import (
@@ -13,19 +16,31 @@ from app.chat.clients import (
     ClassifiedKind,
     ClassifyError,
     IntentClassifier,
+    RegisterExtractor,
     TitleGenerator,
 )
-from app.chat.repository import AiSettings, ConversationRepository
+from app.chat.repository import (
+    AiSettings,
+    ConversationRepository,
+    PetInfo,
+    RegisterContextRepository,
+)
 from app.chat.schemas import (
     ROLE_AI,
     ROLE_USER,
     AnswerDone,
+    CardType,
     ConversationCreateRequest,
     ConversationDetail,
     ConversationMessage,
     ConversationSummary,
     Intent,
     IntentKind,
+    PetChoice,
+    RegisterCard,
+    RegisterDraft,
+    RegisterResult,
+    RegisterResultRequest,
     StreamError,
 )
 from app.core.backend import BackendError
@@ -133,6 +148,10 @@ class Turn:
     # 답할 사용자 메시지
     question: ConversationMessage
     messages: list[ConversationMessage]
+    # 대화의 펫 태그(FN-AIM-012-04). null이면 "전체"
+    pet_sn: int | None = None
+    # FN-AIM-012-05·10 : React가 돌려보낸 가장 최근 카드
+    draft: RegisterDraft | None = None
 
 
 @dataclass(frozen=True)
@@ -142,7 +161,12 @@ class AnswerLimits:
     total_sec: float
 
 
-async def prepare_turn(repo: ConversationRepository, room_sn: int, cn: str | None) -> Turn:
+async def prepare_turn(
+    repo: ConversationRepository,
+    room_sn: int,
+    cn: str | None,
+    draft: RegisterDraft | None = None,
+) -> Turn:
     # ① 사용자 메시지를 먼저 저장한다. 여기서 실패하면(남의 방·없는 방 포함) LLM을 부르지 않는다
     if cn is not None:
         await repo.add_message(room_sn, ROLE_USER, cn)
@@ -150,7 +174,7 @@ async def prepare_turn(repo: ConversationRepository, room_sn: int, cn: str | Non
     question = next((m for m in reversed(room.messages) if m.role_cd == ROLE_USER), None)
     if question is None:
         raise AppError("INVALID_REQUEST", 400, "답할 메시지가 없습니다.")
-    return Turn(room_sn, question, room.messages)
+    return Turn(room_sn, question, room.messages, room.pet_sn, draft)
 
 
 def build_context(messages: list[ConversationMessage], question_seq: int, turns: int) -> list[dict]:
@@ -177,10 +201,11 @@ async def answer_turn(
     answers: AnswerGenerator,
     ai: AiSettings,
     limits: AnswerLimits,
+    register: "RegisterDeps | None" = None,
 ) -> AsyncIterator[Event]:
     queue: asyncio.Queue[Event | None] = asyncio.Queue()
     task = asyncio.create_task(
-        _run_turn(turn, repo, classifier, answers, ai, limits, queue.put_nowait)
+        _run_turn(turn, repo, classifier, answers, ai, limits, queue.put_nowait, register)
     )
     _running.add(task)
     task.add_done_callback(_running.discard)
@@ -196,9 +221,19 @@ async def _run_turn(
     ai: AiSettings,
     limits: AnswerLimits,
     emit: Callable[[Event | None], None],
+    register: "RegisterDeps | None" = None,
 ) -> None:
     try:
-        judged = await judge(turn.question.cnvrs_cn, False, classifier)
+        text = turn.question.cnvrs_cn
+        card = None
+        if register is not None and turn.draft is not None:
+            # FN-AIM-012-05·10 : 초안이 있으면 이 메시지로 칸을 채우거나 고친다.
+            # 뽑힌 칸이 없으면 일반 판정
+            card = await build_card(text, turn.pet_sn, turn.draft, register)
+        if card is not None:
+            judged = Judged(Intent(kind=IntentKind.REGISTER))
+        else:
+            judged = await judge(text, False, classifier)
         emit(("intent", judged.intent))
         kind = judged.intent.kind
         if kind is IntentKind.SEARCH:
@@ -207,10 +242,13 @@ async def _run_turn(
             emit(("done", AnswerDone(message=await reply_fallback(repo, turn.room_sn))))
         elif kind is IntentKind.ROUTE:
             # 이동은 React가 한다. 다시 열어도 답이 남게 이동 안내를 저장한다(2026-10-29 결정)
-            text = route_message(judged.intent.scr_nm or "")
-            emit(("done", AnswerDone(message=await _save(repo, turn.room_sn, text, True))))
+            move = route_message(judged.intent.scr_nm or "")
+            emit(("done", AnswerDone(message=await _save(repo, turn.room_sn, move, True))))
+        elif kind is IntentKind.REGISTER and register is not None:
+            card = card or await build_card(text, turn.pet_sn, None, register)
+            await _register_reply(repo, turn.room_sn, card, emit)
         else:
-            # REGISTER·RECEIPT는 SCR-AIM-012·013에서 잇는다
+            # RECEIPT는 SCR-AIM-013에서 잇는다
             emit(("done", AnswerDone()))
     except ClassifyError:
         # 분류 LLM 장애는 폴백이 아니라 일시 오류(2026-10-29 결정). 원인 로그는 분류기가 남긴다
@@ -280,3 +318,217 @@ async def _save(
             "AI 답변 저장 실패: %d자 cmptnYn=%s (%s)", len(text), complete, type(error).__name__
         )
         return None
+
+
+@dataclass(frozen=True)
+class RegisterDeps:
+    contexts: RegisterContextRepository
+    extractor: RegisterExtractor
+    today: date
+
+
+# 카드 종류별로 남기는 칸
+_SCHEDULE_FIELDS = (
+    "schdl_knd_cd",
+    "schdl_ymd",
+    "schdl_tm",
+    "ckup_type_cd",
+    "hsptl_nm",
+    "schdl_nm",
+    "memo_cn",
+)
+_CARE_FIELDS = ("care_artcl_nm", "care_zone_cd", "care_cycle_cd", "cycle_days", "last_cmptn_ymd")
+_DRAFT_FIELDS = _SCHEDULE_FIELDS + _CARE_FIELDS
+# FN-AIM-012-08 : 같은 이름 케어 항목 안내(10-01 확정 문구)
+DUPLICATE_NOTICE = "{pet}에게 '{name}' 항목이 이미 있어요. 그래도 새로 등록할까요?"
+# FN-AIM-012-11 : 화면설계서 SCR-AIM-012 ④ 문구(디자인 v5)
+CANCELED_MESSAGE = "취소됨 — 등록하지 않았어요."
+_CYCLE_LABELS = {
+    rules.CYCLE_1W: "1주마다",
+    rules.CYCLE_2W: "2주마다",
+    rules.CYCLE_MONTH: "한달마다",
+    rules.CYCLE_YEAR: "1년마다",
+}
+
+
+def _missing(values: dict) -> list[str]:
+    # FN-AIM-012-05 : 필수 칸. 병원 = 검진유형·병원명, 그 외 = 일정명(FN-AIM-012-12와 같은 기준)
+    if values.get("care_zone_cd"):
+        required = ["care_artcl_nm"]
+        if values["care_zone_cd"] == rules.ZONE_PERIODIC:
+            required.append("care_cycle_cd")
+            if values.get("care_cycle_cd") == rules.CYCLE_CUSTOM:
+                required.append("cycle_days")
+    else:
+        required = ["schdl_knd_cd", "schdl_ymd"]
+        if values.get("schdl_knd_cd") == rules.SCHEDULE_HOSPITAL:
+            required += ["ckup_type_cd", "hsptl_nm"]
+        elif values.get("schdl_knd_cd"):
+            required.append("schdl_nm")
+    return [name for name in required if not values.get(name)]
+
+
+def _draft_values(draft: RegisterDraft) -> dict:
+    return draft.model_dump(include=set(_DRAFT_FIELDS), exclude_none=True)
+
+
+def _answer_fill(text: str, draft: RegisterDraft, pet_names: list[str]) -> dict:
+    # 되물음에 답만 한 경우("발톱 깎기", "산책", "기타") : 물었던 이름 칸을 이 답으로 채운다
+    missing = _missing(_draft_values(draft))
+    answer = rules.care_item_name(text, 0, pet_names)
+    if not answer:
+        return {}
+    if "care_artcl_nm" in missing:
+        return {"care_artcl_nm": answer}
+    if "schdl_knd_cd" in missing and answer.startswith("기타"):
+        return {"schdl_knd_cd": rules.SCHEDULE_ETC}
+    if "schdl_nm" in missing:
+        return {"schdl_nm": answer}
+    return {}
+
+
+def _pick_pet(
+    pets: list[PetInfo], named: list[PetInfo], draft_pet: int | None, room_pet: int | None
+) -> PetInfo | None:
+    # FN-AIM-012-04 : 반려동물은 항상 서버 규칙으로 정한다. None이면 이름 칩으로 되묻는다
+    if len(named) == 1:
+        return named[0]
+    if named:
+        return None
+    by_sn = {pet.pet_sn: pet for pet in pets}
+    if draft_pet in by_sn:
+        return by_sn[draft_pet]
+    if len(pets) == 1:
+        return pets[0]
+    return by_sn.get(room_pet)
+
+
+async def build_card(
+    text: str, room_pet: int | None, draft: RegisterDraft | None, deps: RegisterDeps
+) -> RegisterCard | None:
+    # FN-AIM-012-02~08·10. 초안이 있는데 이 메시지에서 뽑힌 칸이 없으면 None(일반 판정으로)
+    pets = await deps.contexts.get_pets()
+    names = [pet.pet_nm for pet in pets]
+    compact = re.sub(r"\s+", "", text)
+    named = [pet for pet in pets if pet.pet_nm in compact]
+    parsed = rules.parse_register(text, deps.today, names).values()
+    if draft is None:
+        values = parsed
+    else:
+        found = parsed or _answer_fill(text, draft, names)
+        if not found and not named:
+            return None
+        values = _draft_values(draft) | found
+    if _missing(values):
+        # FN-AIM-012-03 : 빈 칸만 AI로 채운다. 반려동물 목록은 보내지 않는다
+        try:
+            raw = await deps.extractor.extract(text, deps.today)
+        except Exception:
+            logger.exception("등록 칸 추출 실패")
+            raw = {}
+        for name, value in rules.clean_ai_fields(raw).values().items():
+            values.setdefault(name, value)
+    if values.get("schdl_knd_cd") == rules.SCHEDULE_HOSPITAL:
+        values.pop("schdl_nm", None)
+    care = bool(values.get("care_zone_cd"))
+    keep = _CARE_FIELDS if care else _SCHEDULE_FIELDS
+    values = {name: value for name, value in values.items() if name in keep}
+    pet = _pick_pet(pets, named, draft.pet_sn if draft else None, room_pet)
+    missing = (["pet_sn"] if pet is None else []) + _missing(values)
+    card = RegisterCard(
+        card_type=CardType.ASK if missing else CardType.CARE_ITEM if care else CardType.SCHEDULE,
+        pet_sn=pet.pet_sn if pet else None,
+        pet_nm=pet.pet_nm if pet else None,
+        pet_choices=[] if pet else [PetChoice(pet_sn=p.pet_sn, pet_nm=p.pet_nm) for p in pets],
+        missing=[to_camel(name) for name in missing],
+        **values,
+    )
+    if care:
+        last = card.last_cmptn_ymd or deps.today
+        card.nxtm_prnmnt_ymd = rules.next_due(
+            card.care_zone_cd, card.care_cycle_cd, card.cycle_days, last
+        )
+        if pet is not None and _same_name(card.care_artcl_nm, pet.care_artcl_nms):
+            card.duplicate_name = True
+            card.notice = DUPLICATE_NOTICE.format(pet=pet.pet_nm, name=card.care_artcl_nm)
+    return card
+
+
+def _same_name(name: str | None, existing: tuple[str, ...]) -> bool:
+    # 띄어쓰기만 다른 이름도 같은 이름으로 본다("발톱깎기" = "발톱 깎기")
+    if not name:
+        return False
+    return re.sub(r"\s+", "", name) in {re.sub(r"\s+", "", n) for n in existing}
+
+
+def ask_message(card: RegisterCard) -> str:
+    # FN-AIM-012-05 : 빈 칸만 묻는다. 병원 문구는 화면설계서 SCR-AIM-012 ⑦
+    missing = set(card.missing)
+    parts = []
+    if "petSn" in missing:
+        target = "케어 항목" if card.care_zone_cd else "일정"
+        parts.append(f"어느 아이의 {target}인가요? 아래에서 골라 주세요.")
+    if "careArtclNm" in missing:
+        parts.append("어떤 케어 항목인가요?")
+    if missing & {"careCycleCd", "cycleDays"}:
+        parts.append("얼마나 자주 하나요? (예: 매주, 2주마다, 한달마다)")
+    if "schdlKndCd" in missing:
+        parts.append("어떤 일정인가요? (병원 / 미용·목욕 / 케어·투약 / 기타)")
+    if "schdlYmd" in missing:
+        parts.append("날짜는 언제인가요?")
+    if {"hsptlNm", "ckupTypeCd"} <= missing:
+        parts.append("어느 병원인가요? 검진 종류도 알려 주세요. (예: 정기검진, 예방접종)")
+    elif "hsptlNm" in missing:
+        parts.append("어느 병원인가요?")
+    elif "ckupTypeCd" in missing:
+        parts.append("검진 종류를 알려 주세요. (예: 정기검진, 예방접종)")
+    if "schdlNm" in missing:
+        parts.append("일정 이름을 알려 주세요.")
+    return " ".join(parts)
+
+
+async def _register_reply(
+    repo: ConversationRepository,
+    room_sn: int,
+    card: RegisterCard,
+    emit: Callable[[Event | None], None],
+) -> None:
+    # FN-AIM-012-05·06·07 : 되물음은 AI 메시지로 저장한다. 미리보기 카드는 저장하지 않는다
+    # (결과만 텍스트 요약으로 남긴다, FN-AIM-012-16)
+    message = None
+    if card.card_type is CardType.ASK:
+        message = await _save(repo, room_sn, ask_message(card), True)
+    emit(("done", AnswerDone(message=message, card=card)))
+
+
+def _md(day: date) -> str:
+    return f"{day:%m-%d}({rules.WEEKDAYS[day.weekday()]})"
+
+
+def result_message(request: RegisterResultRequest) -> str:
+    # FN-AIM-012-16 : 카드 결과를 담은 텍스트 요약. 다시 열면 버튼 없이 이 글만 보인다
+    card = request.card
+    if card.card_type is CardType.ASK or not card.pet_nm or _missing(_draft_values(card)):
+        raise AppError("INVALID_REQUEST", 400, "등록 카드의 칸이 비어 있습니다.")
+    if request.result is RegisterResult.CANCELED:
+        return CANCELED_MESSAGE
+    if card.card_type is CardType.SCHEDULE:
+        hospital = card.schdl_knd_cd == rules.SCHEDULE_HOSPITAL
+        label = rules.code_name(card.ckup_type_cd) if hospital else card.schdl_nm
+        when = _md(card.schdl_ymd) + (f" {card.schdl_tm}" if card.schdl_tm else "")
+        return f"✔ 등록됨 — {card.pet_nm} {label} · {when}"
+    if card.care_zone_cd == rules.ZONE_DAILY:
+        cycle = "매일"
+    else:
+        cycle = _CYCLE_LABELS.get(card.care_cycle_cd) or f"{card.cycle_days}일마다"
+    text = f"✔ 등록됨 — {card.pet_nm} {card.care_artcl_nm} · {cycle}"
+    if card.nxtm_prnmnt_ymd:
+        text += f" · 다음 예정일 {_md(card.nxtm_prnmnt_ymd)}"
+    return text
+
+
+async def save_register_result(
+    repo: ConversationRepository, room_sn: int, request: RegisterResultRequest
+) -> ConversationMessage:
+    # FN-AIM-012-11·16 : 등록(React → Java)과 취소의 결과를 AI 메시지로 저장한다
+    return await repo.add_message(room_sn, ROLE_AI, result_message(request))

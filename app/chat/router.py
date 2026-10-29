@@ -7,22 +7,30 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from app.chat import service
+from app.chat import rules, service
 from app.chat.clients import (
     AnswerGenerator,
     IntentClassifier,
+    RegisterExtractor,
     TitleGenerator,
     get_answer_generator,
     get_intent_classifier,
+    get_register_extractor,
     get_title_generator,
 )
 from app.chat.repository import (
     AiSettings,
     ConversationRepository,
+    RegisterContextRepository,
     get_ai_settings,
     get_conversation_repository,
+    get_register_context_repository,
 )
-from app.chat.schemas import ConversationCreateRequest, MessageSendRequest
+from app.chat.schemas import (
+    ConversationCreateRequest,
+    MessageSendRequest,
+    RegisterResultRequest,
+)
 from app.core import response
 from app.core.auth import require_member, require_requested_with
 from app.core.config import Settings, get_settings
@@ -88,13 +96,27 @@ async def send_message(
     answers: Annotated[AnswerGenerator, Depends(get_answer_generator)],
     ai: Annotated[AiSettings, Depends(get_ai_settings)],
     settings: Annotated[Settings, Depends(get_settings)],
+    contexts: Annotated[RegisterContextRepository, Depends(get_register_context_repository)],
+    extractor: Annotated[RegisterExtractor, Depends(get_register_extractor)],
     room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
 ) -> StreamingResponse:
     # 스트림 시작 전 오류(400·401·403·404·502)는 다른 API와 같은 JSON 응답
-    turn = await service.prepare_turn(repo, room_sn, body.cnvrs_cn)
+    turn = await service.prepare_turn(repo, room_sn, body.cnvrs_cn, body.draft)
     limits = service.AnswerLimits(settings.answer_first_token_sec, settings.answer_total_sec)
-    events = service.answer_turn(turn, repo, classifier, answers, ai, limits)
+    register = service.RegisterDeps(contexts, extractor, rules.today_kst())
+    events = service.answer_turn(turn, repo, classifier, answers, ai, limits, register)
     return StreamingResponse(_sse(events), media_type="text/event-stream")
+
+
+@router.post("/{aiCnvrsRoomSn}/register-result")
+async def save_register_result(
+    body: RegisterResultRequest,
+    repo: Repo,
+    room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
+) -> JSONResponse:
+    # FN-AIM-012-11·16 : 등록 카드의 결과(등록됨·취소됨)를 텍스트 요약으로 저장한다
+    result = await service.save_register_result(repo, room_sn, body)
+    return response.success(result.model_dump(by_alias=True), http_code=201)
 
 
 async def _sse(events: AsyncIterator[service.Event]) -> AsyncIterator[str]:
