@@ -35,3 +35,8 @@ class ReceiptOcrResponse(_Camel):
     recpt_amt: int | None = None
     btm_dscnt_amt: int | None = None
     sections: list[Section] = []
+
+
+class ReceiptAnalyzeResponse(_Camel):
+    recpt_sn: int
+    ocr: ReceiptOcrResponse

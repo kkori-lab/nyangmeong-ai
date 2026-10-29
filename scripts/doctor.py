@@ -18,6 +18,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 ENV_FILE = ROOT / ".env.local"
 ENV_EXAMPLE = ROOT / ".env.local.example"
+# 연결된 AI 키가 비었을 때 502가 나는 기능
+AI_KEY_EFFECTS = {"LLM": "AI 대화·영수증 분석", "Google Vision": "영수증 분석"}
 
 todo_count = 0
 
@@ -113,44 +115,24 @@ def env_setup() -> dict[str, str]:
         ok(".env.local (예시 복사). 실제 값은 디스코드에서 받아 바꿔 주세요")
     env = read_env()
 
-    # mock 모드는 없다. LLM 키가 비면 할 일, 아직 연결 전인 키는 비어 있다고만 보여 준다
+    # mock 모드는 없다. 연결된 AI 키가 비면 할 일, 아직 연결 전인 키는 비어 있다고만 보여 준다
     groups = {
         "인증": ("BACKEND_BASE_URL",),
         "LLM": ("LLM_API_KEY",),
         "이미지 생성": ("OPENAI_API_KEY",),
-        "Google Vision": ("GOOGLE_APPLICATION_CREDENTIALS",),
+        "Google Vision": ("GOOGLE_VISION_API_KEY",),
     }
     for name, keys in groups.items():
         empty = [key for key in keys if not env.get(key)]
         if not empty:
             skip(f"{name} 값 있음")
-        elif name == "LLM":
-            todo(
-                f"{name} 값이 없습니다: {', '.join(empty)} (디스코드에서 받기, 없으면 AI 대화 502)"
-            )
+        elif name in AI_KEY_EFFECTS:
+            effect = AI_KEY_EFFECTS[name]
+            keys = ", ".join(empty)
+            todo(f"{name} 값이 없습니다: {keys} (디스코드에서 받기, 없으면 {effect} 502)")
         else:
             print(f"  [비움] {name}: {', '.join(empty)}")
-
-    credentials = env.get("GOOGLE_APPLICATION_CREDENTIALS")
-    if credentials:
-        check_google_credentials(Path(credentials))
     return env
-
-
-def check_google_credentials(path: Path) -> None:
-    if not path.is_absolute():
-        path = ROOT / path
-    if not path.exists():
-        todo(f"GOOGLE_APPLICATION_CREDENTIALS 파일이 없습니다: {path}")
-        return
-    try:
-        kind = json.loads(path.read_text(encoding="utf-8")).get("type")
-    except (ValueError, OSError):
-        kind = None
-    if kind == "service_account":
-        skip("Google 서비스 계정 키 파일")
-    else:
-        todo(f"Google 서비스 계정 키 파일 형식이 아닙니다: {path}")
 
 
 def vscode_cli() -> str | None:

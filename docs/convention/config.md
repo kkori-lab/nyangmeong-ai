@@ -12,7 +12,7 @@
   - `BACKEND_BASE_URL`: Python이 Java 내부 API(인증 확인, 대화 저장)를 부를 주소. 서버 주소라 공개 저장소에 적지 않는다.
   - 키를 추가·변경하면 `.env.local.example`과 `Settings`도 같은 PR에서 고친다.
 - Python은 DB에 붙지 않는다(2026-10-27 전환). 예전 `APP_PROFILE`·`LOCAL_DB_*`·`PROD_DB_*`·`CONVERSATION_ENC_KEY`는 읽지 않으니 `.env.local`에서 지워도 된다.
-- Google 서비스 계정 키 같은 파일은 저장소 밖이나 git 제외 경로에 두고 `.env.local`에는 경로만 적는다.
+- Google Vision은 API 키(`GOOGLE_VISION_API_KEY`)를 쓴다(2026-10-29). 서비스 계정 키 파일이 필요해지면 저장소 밖이나 git 제외 경로에 두고 `.env.local`에는 경로만 적는다.
 - DMS MCP 서버 주소(`DMS_MCP_URL`)도 `.env.local`에 둔다. setup이 읽어 감지한 AI 도구(Claude Code·Codex)에 등록한다.
 - 로그에 비밀번호와 토큰을 남기지 않는다. Java로 넘기는 사용자 `Cookie` 헤더도 로그·오류 응답·예외 메시지에 남기지 않는다(새면 그 사용자로 Java API를 부를 수 있다).
 - 작업 기록은 `handoff/<이름>.md`에 사람마다 한 파일로 두고 커밋한다. 다른 PC에서도 이어서 작업하기 위해서다. 공개 저장소이므로 비밀값과 개인 PC 경로를 쓰지 않는다.
