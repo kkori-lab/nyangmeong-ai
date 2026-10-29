@@ -1,15 +1,12 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 
-from app.core.image import detect_image_type
+from app.core.image import detect_image_type, validate_upload
 from app.core.response import AppError
 from app.ocr.clients import OcrApiError, OcrClient
 from app.ocr.repository import ReceiptRepository, ReceiptStatus
 from app.ocr.schemas import ReceiptAnalyzeResponse, ReceiptOcrResponse
 
-# FN-AIM-008-05 : 업로드 제약(REQ-NFR-003)
-MAX_IMAGE_BYTES = 10 * 1024 * 1024
-EXTENSION_TYPES = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png", "webp": "webp"}
 # 요청 출처(AIMG07) : 건강 일지, AI 대화창(SCR-AIM-013). 가계부(AIMC0027)는 받지 않는다
 SOURCE_CODES = frozenset({"AIMC0026", "AIMC0031"})
 # 연결 끊김(취소) 확인 간격(초)
@@ -32,16 +29,6 @@ async def recognize_receipt(
         raise _timeout_error() from None
     except OcrApiError:
         raise _api_error() from None
-
-
-def validate_upload(image: bytes, file_name: str | None) -> None:
-    """FN-AIM-008-05 : 확장자와 실제 형식을 함께 검증, 10MB 이하. PDF는 받지 않는다"""
-    if len(image) > MAX_IMAGE_BYTES:
-        raise AppError("FILE_SIZE_EXCEEDED", 400, "파일 용량은 10MB 이하여야 합니다.")
-    _, dot, extension = (file_name or "").rpartition(".")
-    expected = EXTENSION_TYPES.get(extension.lower()) if dot else None
-    if expected is None or detect_image_type(image) != expected:
-        raise AppError("FILE_TYPE_NOT_ALLOWED", 400, "jpg·jpeg·png·webp 이미지만 올릴 수 있습니다.")
 
 
 def validate_source(src_cd: str) -> None:

@@ -1,24 +1,32 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Form, Response, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, UploadFile
+from fastapi.responses import JSONResponse
 
 from app.character import service
-from app.character.clients import CharacterClient, CharacterRequest, get_character_client
-from app.character.schemas import PetSeCd
+from app.character.clients import CharacterClient, get_character_client
+from app.character.repository import CharacterJobRepository, get_character_job_repository
+from app.character.schemas import CharacterCreateResponse
+from app.core import response
+from app.core.auth import require_member, require_requested_with
+from app.core.image import MAX_IMAGE_BYTES
 
-router = APIRouter(prefix="/internal/v1/character")
+router = APIRouter(prefix="/ai/characters", dependencies=[Depends(require_requested_with)])
 
 
-@router.post("/generate")
-async def generate_character(
+# 인증을 먼저 : 쿠키 없는 요청은 생성기와 관계없이 401.
+# 생성기가 없으면 업로드 검증 뒤, Java 작업을 만들기 전에 502
+@router.post("", dependencies=[Depends(require_member)])
+async def create_character(
+    background_tasks: BackgroundTasks,
     photo: UploadFile,
-    pet_se_cd: Annotated[PetSeCd, Form(alias="petSeCd")],
-    client: Annotated[CharacterClient, Depends(get_character_client)],
-    vrty_nm: Annotated[str | None, Form(alias="vrtyNm")] = None,
-    colr_nm: Annotated[str | None, Form(alias="colrNm")] = None,
-    chrc_cn: Annotated[str | None, Form(alias="chrcCn")] = None,
-) -> Response:
-    request = CharacterRequest(await photo.read(), pet_se_cd, vrty_nm, colr_nm, chrc_cn)
-    image = await service.generate_character(client, request)
-    # 성공 응답 = ApiResponse 껍데기 없이 PNG 본문
-    return Response(content=image, media_type="image/png")
+    pet_sn: Annotated[int, Form(alias="petSn")],
+    client: Annotated[CharacterClient | None, Depends(get_character_client)],
+    repo: Annotated[CharacterJobRepository, Depends(get_character_job_repository)],
+) -> JSONResponse:
+    # 10MB를 넘는 부분은 읽지 않는다(1바이트만 더 읽어 초과 판정)
+    image = await photo.read(MAX_IMAGE_BYTES + 1)
+    job = await service.create_job(client, repo, image, photo.filename or "", pet_sn)
+    # FN-MYP-010-09 : 생성은 응답 뒤에 한다. 상태 조회는 React가 Java에서 한다
+    background_tasks.add_task(service.generate_and_report, client, repo, job, image)
+    return response.success(CharacterCreateResponse(chrc_job_sn=job.chrc_job_sn), 202)

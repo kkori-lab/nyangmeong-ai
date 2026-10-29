@@ -6,9 +6,10 @@ AI 서버(이 저장소)의 API와 요청·응답 DTO다. **팀 확인 전 초�
 
 | 영역 | 파일 | 호출자 | 담당 |
 | --- | --- | --- | --- |
-| 내부 API(OCR, 캐릭터 생성, Python이 부르는 Java API) | [`internal.md`](internal.md) | Java ↔ Python | LJS |
+| 내부 API(OCR, Python이 부르는 Java API) | [`internal.md`](internal.md) | Java ↔ Python | LJS |
 | AI 대화창 | [`chat.md`](chat.md) | React | LJS |
 | 영수증 분석 | [`ocr.md`](ocr.md) | React | LJS |
+| 캐릭터 생성 | [`character.md`](character.md) | React | LJS |
 
 ## 공통 규칙
 

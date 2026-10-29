@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from app.core import response
 from app.core.auth import require_member, require_requested_with
 from app.core.config import Settings, get_settings
+from app.core.image import MAX_IMAGE_BYTES
 from app.ocr import service
 from app.ocr.clients import OcrClient, get_ocr_client
 from app.ocr.repository import ReceiptRepository, get_receipt_repository
@@ -37,7 +38,7 @@ async def analyze_receipt(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> JSONResponse:
     # 10MB를 넘는 부분은 읽지 않는다(1바이트만 더 읽어 초과 판정)
-    image = await file.read(service.MAX_IMAGE_BYTES + 1)
+    image = await file.read(MAX_IMAGE_BYTES + 1)
     result = await service.analyze_receipt(
         client,
         repo,
