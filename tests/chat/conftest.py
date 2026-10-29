@@ -5,12 +5,20 @@ import httpx2
 import pytest
 from fastapi.testclient import TestClient
 
+from app.chat import clients
 from app.core.backend import get_backend_client
 from app.core.config import get_settings
 from app.main import create_app
+from tests.chat.fakes import (
+    FakeAnswerGenerator,
+    FakeIntentClassifier,
+    FakeRegisterExtractor,
+    FakeTitleGenerator,
+)
 
 AJAX = {"X-Requested-With": "XMLHttpRequest"}
 CONVERSATIONS = "/internal/ai/conversations"
+REGISTER_CONTEXT = "/internal/ai/register-context"
 ROLE_USER = "AIMC0024"
 
 
@@ -46,6 +54,13 @@ class FakeJava:
         self._next_room = 1
         self._next_msg = 1
         self._clock = datetime(2026, 10, 25, 9, 0, 0)
+        # GET /internal/ai/register-context 응답(회원과 관계없이 같은 목록)
+        self.pets: list[dict] = [
+            {"petSn": 1, "petNm": "초코", "careArtclNms": []},
+            {"petSn": 2, "petNm": "뭉치", "careArtclNms": ["발톱 깎기"]},
+        ]
+        # register-context 실패 흉내 : 응답 상태 코드, 0이면 연결 실패
+        self.context_status: int | None = None
 
     def _tick(self) -> str:
         self._clock += timedelta(minutes=1)
@@ -81,6 +96,12 @@ class FakeJava:
         if mbr_sn is None:
             return httpx2.Response(401, json=UNAUTHORIZED)
         params = request.url.params
+        if path == REGISTER_CONTEXT and request.method == "GET":
+            if self.context_status == 0:
+                raise httpx2.ConnectError("down")
+            if self.context_status is not None:
+                return httpx2.Response(self.context_status, json={"status": "error"})
+            return _ok(self.pets)
         if path == CONVERSATIONS and request.method == "POST":
             body = json.loads(request.content)
             room_sn = self.add_room(mbr_sn, body["cnvrsTtl"], body.get("petSn"), body["cnvrsCn"])
@@ -132,13 +153,16 @@ def java() -> FakeJava:
 
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch, java: FakeJava) -> TestClient:
-    # 각자 PC의 .env.local 값과 무관하게 mock 모드로 기동. DB 설정은 없다
-    monkeypatch.setenv("AI_MODE", "mock")
+    # 외부 AI는 가짜를 끼운다. 테스트가 따로 바꿔 끼울 수 있다
     monkeypatch.setenv("BACKEND_BASE_URL", "http://backend.test")
     get_settings.cache_clear()
     app = create_app()
     backend = httpx2.AsyncClient(transport=httpx2.MockTransport(java))
     app.dependency_overrides[get_backend_client] = lambda: backend
+    app.dependency_overrides[clients.get_title_generator] = FakeTitleGenerator
+    app.dependency_overrides[clients.get_intent_classifier] = FakeIntentClassifier
+    app.dependency_overrides[clients.get_answer_generator] = FakeAnswerGenerator
+    app.dependency_overrides[clients.get_register_extractor] = FakeRegisterExtractor
     return TestClient(app)
 
 

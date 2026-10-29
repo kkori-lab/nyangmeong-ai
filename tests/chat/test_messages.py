@@ -16,6 +16,7 @@ from app.chat.service import (
 )
 from app.core.config import get_settings
 from tests.chat.conftest import AJAX, ROLE_USER, FakeJava, _ok, as_member, member_of
+from tests.chat.fakes import FakeIntentClassifier
 
 SEARCH_TEXT = "강아지 포도 먹어도 돼?"
 
@@ -428,7 +429,7 @@ def test_연결이_끊겨도_답변을_끝까지_만들어_완료로_저장(clie
         repo = repository.JavaConversationRepository(backend, settings, "access_token=member-1")
         turn = await service.prepare_turn(repo, room, None)
         events = service.answer_turn(
-            turn, repo, clients.MockIntentClassifier(), answers, repository.AiSettings(), limits
+            turn, repo, FakeIntentClassifier(), answers, repository.AiSettings(), limits
         )
         first = await anext(events)
         # StreamingResponse는 연결이 끊기면 이벤트 제너레이터를 닫는다
@@ -563,3 +564,44 @@ def test_mock_모드는_LLM_없이_조각을_흘린다(client, java):
     assert names(evs).count("delta") >= 3
     assert "대화 메시지 2개" in deltas(evs)
     assert deltas(evs).endswith(DISCLAIMER)
+
+
+# 키 없는 PC·CI : 가짜를 끼우지 않으면 실제 API 대신 502
+
+
+@pytest.mark.parametrize("getter", [clients.get_intent_classifier, clients.get_answer_generator])
+def test_LLM_키가_없으면_메시지_전송은_502(client, java, getter):
+    del client.app.dependency_overrides[getter]
+    as_member(client, 1)
+    room = java.add_room(1, "제목")
+    res = client.post(f"/ai/conversations/{room}/messages", json={"cnvrsCn": "안녕"}, headers=AJAX)
+
+    assert res.status_code == 502
+    assert res.json()["code"] == "EXTERNAL_API_ERROR"
+
+
+def test_LLM_키가_없어도_쿠키가_없으면_401(client, java):
+    del client.app.dependency_overrides[clients.get_intent_classifier]
+    room = java.add_room(1, "제목")
+    res = client.post(f"/ai/conversations/{room}/messages", json={"cnvrsCn": "안녕"}, headers=AJAX)
+
+    assert res.status_code == 401
+
+
+def test_LLM_키가_없으면_대화_생성은_502(client):
+    del client.app.dependency_overrides[clients.get_title_generator]
+    as_member(client, 1)
+    res = client.post("/ai/conversations", json={"cnvrsCn": "안녕"}, headers=AJAX)
+
+    assert res.status_code == 502
+    assert res.json()["code"] == "EXTERNAL_API_ERROR"
+
+
+def test_LLM_키가_없어도_대화_목록은_된다(client, java):
+    as_member(client, 1)
+    java.add_room(1, "제목")
+    for getter in (clients.get_title_generator, clients.get_intent_classifier):
+        del client.app.dependency_overrides[getter]
+    res = client.get("/ai/conversations", headers=AJAX)
+
+    assert res.status_code == 200

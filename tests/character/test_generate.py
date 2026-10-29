@@ -41,11 +41,12 @@ class _FakeClient:
 
 
 @pytest.fixture
-def app(monkeypatch: pytest.MonkeyPatch):
-    # 각자 PC의 .env.local 값과 무관하게 mock 모드로 기동
-    monkeypatch.setenv("AI_MODE", "mock")
+def app():
     get_settings.cache_clear()
-    return create_app()
+    app = create_app()
+    # 규격(512×512) PNG를 돌려주는 가짜 생성기
+    app.dependency_overrides[get_character_client] = lambda: _FakeClient(_png(512, 512))
+    return app
 
 
 @pytest.fixture
@@ -62,7 +63,7 @@ def _post(
     return client.post(URL, files=files, data=FORM if data is None else data)
 
 
-def test_mock_요청하면_512x512_PNG를_껍데기_없이_돌려준다(client: TestClient) -> None:
+def test_요청하면_512x512_PNG를_껍데기_없이_돌려준다(client: TestClient) -> None:
     response = _post(client)
 
     assert response.status_code == 200
@@ -123,3 +124,12 @@ def test_규격_검증은_캔버스_크기가_512x512인_PNG만_통과시킨다(
     assert matches_spec(_png(512, 512))
     assert not matches_spec(_png(512, 511))
     assert not matches_spec(b"\x89PNG\r\n\x1a\n")
+
+
+def test_생성_클라이언트가_연결되기_전에는_502_EXTERNAL_API_ERROR(app, client: TestClient) -> None:
+    del app.dependency_overrides[get_character_client]
+
+    response = _post(client)
+
+    assert response.status_code == 502
+    assert response.json()["code"] == "EXTERNAL_API_ERROR"

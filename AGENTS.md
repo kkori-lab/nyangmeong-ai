@@ -13,7 +13,7 @@
 2. **Python은 상태 없는 AI 서버다.** 외부 AI 벤더 API(LLM·OCR·이미지 생성) 호출만 여기서 하고, 저장·인증·소유 검사는 Java가 한다(2026-10-26 결정). React는 AI 채팅·영수증 OCR·캐릭터 생성·검사결과지 PDF 분석을 `/ai/**`로 부르고, 원본·결과·작업 상태 저장은 Python이 Java 내부 API로 요청한다(2026-10-27 결정). Java가 부르던 `/internal/v1/**`는 폐기 예정이다(코드·계약 삭제는 백엔드 PR과 함께). 서버 간 호출은 키 없이 하고 nginx 밖에 둔다(2026-10-26 결정). (`docs/convention/architecture.md`)
 3. **DB에 붙지 않는다.** 읽기도 하지 않는다. 대화 저장·조회, 설정값은 Java 내부 API로 한다(`docs/api/internal.md` "Python → Java"). 대화 암호화도 Java가 한다.
 4. **백엔드와 맞춘 계약을 혼자 바꾸지 않는다.** OCR 응답(`ReceiptOcrResponse`), 캐릭터 규격(512×512, 얼굴 영역), 응답 껍데기(`ApiResponse`), `X-Requested-With` 검사, Java 인증 오류(본문·`Set-Cookie`)를 그대로 전달하는 규칙은 백엔드 코드와 같아야 한다. 어긋나면 오류 없이 조용히 깨진다. 바꾸려면 백엔드 PR과 함께 낸다. (`docs/api/README.md`)
-5. **외부 AI API는 `AI_MODE=mock`일 때 부르지 않는다.** 테스트와 CI는 mock으로 돈다. 테스트에서 실제 API를 부르지 않는다.
+5. **테스트에서 외부 AI API를 부르지 않는다.** 앱에는 실제 클라이언트만 두고, 테스트는 `tests/`의 가짜 객체를 끼운다(`tests/conftest.py`가 키를 비운다). 키가 없는 CI에서도 통과해야 한다.
 6. **테스트를 끄거나 지워서 통과시키지 않는다.** (`docs/convention/test.md`)
 
 ## 기술 스택과 편집기

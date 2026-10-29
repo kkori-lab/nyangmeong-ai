@@ -11,20 +11,20 @@ from app.chat.clients import (
     AnswerError,
     AnthropicAnswerGenerator,
     AnthropicIntentClassifier,
+    AnthropicRegisterExtractor,
     AnthropicTitleGenerator,
     Classified,
     ClassifiedKind,
     ClassifyError,
-    MockAnswerGenerator,
-    MockIntentClassifier,
-    MockTitleGenerator,
     classify_system,
     get_answer_generator,
     get_anthropic_client,
     get_intent_classifier,
+    get_register_extractor,
     get_title_generator,
 )
-from app.core.config import AiMode, Settings
+from app.core.config import Settings
+from app.core.response import AppError
 
 MODEL = "claude-haiku-5-5"
 FIRST_MESSAGE = "우리 강아지가 어제부터 밥을 안 먹어요. 병원에 가야 할까요?"
@@ -192,27 +192,32 @@ def test_분류_프롬프트에는_라우팅_대상_행만_들어간다():
         assert (line in system) is row.routable
 
 
-# 모드별 선택
+# 키에 따른 선택 : 앱에는 실제 구현만 있다
 
 
-def settings(mode: AiMode, key: str = "test-key") -> Settings:
-    return Settings(_env_file=None, ai_mode=mode, llm_api_key=key, llm_model=MODEL)
+def settings(key: str = "test-key") -> Settings:
+    return Settings(_env_file=None, llm_api_key=key, llm_model=MODEL)
 
 
-def test_mock_모드는_LLM을_부르지_않는_구현을_쓴다():
-    assert isinstance(get_title_generator(settings(AiMode.MOCK, "")), MockTitleGenerator)
-    assert isinstance(get_intent_classifier(settings(AiMode.MOCK, "")), MockIntentClassifier)
+@pytest.mark.parametrize(
+    "getter",
+    [get_title_generator, get_intent_classifier, get_answer_generator, get_register_extractor],
+)
+def test_키가_비면_LLM_클라이언트를_만들지_않고_502(getter):
+    with pytest.raises(AppError) as raised:
+        getter(settings(""))
+    assert (raised.value.code, raised.value.http_code) == ("EXTERNAL_API_ERROR", 502)
 
 
-def test_real_모드는_Anthropic_구현을_쓴다():
-    real = settings(AiMode.REAL)
+def test_키가_있으면_Anthropic_구현을_쓴다():
+    real = settings()
     assert isinstance(get_title_generator(real), AnthropicTitleGenerator)
     assert isinstance(get_intent_classifier(real), AnthropicIntentClassifier)
 
 
-def test_real_모드인데_키가_비면_오류():
-    with pytest.raises(RuntimeError, match="LLM_API_KEY"):
-        get_anthropic_client(settings(AiMode.REAL, ""))
+def test_키가_비면_Anthropic_클라이언트도_502():
+    with pytest.raises(AppError, match="외부 서비스"):
+        get_anthropic_client(settings(""))
 
 
 # FN-AIM-002-04 연관 바로가기
@@ -335,15 +340,9 @@ def test_답변이_거절되면_AnswerError():
         answer(streaming(["부분"], stop_reason="refusal"))
 
 
-def test_mock_답변은_LLM_없이_조각을_낸다():
-    async def collect():
-        return [c async for c in MockAnswerGenerator().stream(CONTEXT, 4500)]
-
-    chunks = asyncio.run(collect())
-    assert len(chunks) >= 3
-    assert "3개" in "".join(chunks)
+def test_등록_추출기도_키가_있으면_Anthropic_구현():
+    assert isinstance(get_register_extractor(settings()), AnthropicRegisterExtractor)
 
 
-def test_답변_생성기도_모드별로_고른다():
-    assert isinstance(get_answer_generator(settings(AiMode.MOCK, "")), MockAnswerGenerator)
-    assert isinstance(get_answer_generator(settings(AiMode.REAL)), AnthropicAnswerGenerator)
+def test_답변_생성기도_키가_있으면_Anthropic_구현():
+    assert isinstance(get_answer_generator(settings()), AnthropicAnswerGenerator)

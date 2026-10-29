@@ -1,5 +1,4 @@
 import logging
-import re
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -15,11 +14,12 @@ from fastapi import Depends
 from pydantic import BaseModel, ValidationError
 
 from app.chat import rules
-from app.core.config import AiMode, Settings, get_settings
+from app.core.backend import external_error
+from app.core.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
-MOCK_TITLE_LENGTH = 30
+HEAD_TITLE_LENGTH = 30
 # 이 길이 이하의 첫 메시지는 LLM 없이 그대로 제목으로 쓴다(짧은 입력에 뜻이 덧붙지 않게)
 SHORT_TITLE_LENGTH = 15
 # 분류·짧은 생성이라 낮은 effort. thinking 토큰도 max_tokens 안에서 쓴다
@@ -27,22 +27,14 @@ LLM_EFFORT = "low"
 LLM_MAX_TOKENS = 1024
 # 제목 앞뒤에서 지우는 따옴표·괄호
 TITLE_QUOTES = "\"'“”‘’「」『』"
-# mock 분류기가 질문으로 보는 표현
-MOCK_QUESTION = re.compile(r"[?？]|뭐|왜|어떻게|알려|어때|될까|되나|나요|까요")
 
 
 class TitleGenerator(Protocol):
     async def generate(self, first_message: str) -> str: ...
 
 
-class MockTitleGenerator:
-    # AI_MODE=mock 전용 : LLM 없이 첫 메시지 앞부분을 제목으로 쓴다
-    async def generate(self, first_message: str) -> str:
-        return first_message.strip()[:MOCK_TITLE_LENGTH]
-
-
 def _head(text: str) -> str:
-    return text.strip()[:MOCK_TITLE_LENGTH]
+    return text.strip()[:HEAD_TITLE_LENGTH]
 
 
 def _log_failure(task: str, started: float, reason: str) -> None:
@@ -67,7 +59,9 @@ def _anthropic_client(api_key: str, timeout_sec: float) -> AsyncAnthropic:
 def get_anthropic_client(settings: Settings) -> AsyncAnthropic:
     api_key = settings.llm_api_key.get_secret_value()
     if not api_key:
-        raise RuntimeError("AI_MODE=real에는 .env.local의 LLM_API_KEY가 필요합니다")
+        # 키 없는 PC·CI : 실제 API를 부르지 않고 502. 키 값은 남기지 않는다
+        logger.error("LLM 호출 불가: .env.local의 LLM_API_KEY가 비어 있습니다")
+        raise external_error()
     return _anthropic_client(api_key, settings.llm_timeout_sec)
 
 
@@ -120,8 +114,6 @@ def _clean_title(text: str) -> str:
 
 
 def get_title_generator(settings: Annotated[Settings, Depends(get_settings)]) -> TitleGenerator:
-    if settings.ai_mode is AiMode.MOCK:
-        return MockTitleGenerator()
     return AnthropicTitleGenerator(get_anthropic_client(settings), settings.llm_model)
 
 
@@ -153,14 +145,6 @@ class ClassifyError(Exception):
 class IntentClassifier(Protocol):
     # FN-AIM-004-02 : 룰 매칭에 실패한 입력에만 부르는 보조 분류. 장애면 ClassifyError
     async def classify(self, text: str) -> Classified: ...
-
-
-class MockIntentClassifier:
-    # AI_MODE=mock 전용 : 질문 표현이 있으면 검색, 아니면 판단 못 함
-    async def classify(self, text: str) -> Classified:
-        if MOCK_QUESTION.search(text):
-            return Classified(ClassifiedKind.SEARCH)
-        return Classified(ClassifiedKind.UNKNOWN)
 
 
 class ClassifyOutput(BaseModel):
@@ -258,8 +242,6 @@ class AnthropicIntentClassifier:
 def get_intent_classifier(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> IntentClassifier:
-    if settings.ai_mode is AiMode.MOCK:
-        return MockIntentClassifier()
     return AnthropicIntentClassifier(get_anthropic_client(settings), settings.llm_model)
 
 
@@ -274,17 +256,6 @@ class AnswerError(Exception):
 class AnswerGenerator(Protocol):
     # FN-AIM-002-02 : 답변을 생성되는 대로 조각으로 낸다. 실패하면 AnswerError
     def stream(self, messages: list[dict], max_tokens: int) -> AsyncIterator[str]: ...
-
-
-class MockAnswerGenerator:
-    # AI_MODE=mock 전용 : LLM 없이 받은 컨텍스트 크기를 알려 주는 고정 문장을 몇 조각으로 낸다
-    async def stream(self, messages: list[dict], max_tokens: int) -> AsyncIterator[str]:
-        for chunk in (
-            "(mock 답변) ",
-            f"대화 메시지 {len(messages)}개를 받았습니다. ",
-            "실제 답변은 AI_MODE=real에서 나옵니다.",
-        ):
-            yield chunk
 
 
 # FN-AIM-002-08·09 : 개인 데이터는 모른다고 보고 화면 안내, 진단 대신 수의사 상담 안내.
@@ -345,8 +316,6 @@ class AnthropicAnswerGenerator:
 def get_answer_generator(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> AnswerGenerator:
-    if settings.ai_mode is AiMode.MOCK:
-        return MockAnswerGenerator()
     return AnthropicAnswerGenerator(get_anthropic_client(settings), settings.llm_model)
 
 
@@ -354,12 +323,6 @@ class RegisterExtractor(Protocol):
     # FN-AIM-012-03 : 규칙으로 채우지 못한 칸의 보조 추출. 요청 문장과 오늘 날짜(KST)만 받는다.
     # 돌려준 값은 검증 전 원본(칸 이름 → 값)이고, 실패하면 빈 dict
     async def extract(self, text: str, today: date) -> dict: ...
-
-
-class MockRegisterExtractor:
-    # AI_MODE=mock 전용 : 아무 칸도 채우지 않는다(빈 칸은 되묻는다)
-    async def extract(self, text: str, today: date) -> dict:
-        return {}
 
 
 class ExtractOutput(BaseModel):
@@ -435,6 +398,4 @@ class AnthropicRegisterExtractor:
 def get_register_extractor(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> RegisterExtractor:
-    if settings.ai_mode is AiMode.MOCK:
-        return MockRegisterExtractor()
     return AnthropicRegisterExtractor(get_anthropic_client(settings), settings.llm_model)

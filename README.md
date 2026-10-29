@@ -20,7 +20,7 @@ bash setup.sh      # 맥
 setup.bat          # Windows (cmd·PowerShell·탐색기 더블클릭)
 ```
 
-`.env.local`이 없으면 `AI_MODE=mock`으로 만든다. 실제 값은 디스코드에서 받아 바꾼다.
+`.env.local`이 없으면 예시 파일을 복사해 만든다. 실제 값(`LLM_API_KEY` 등)은 디스코드에서 받아 바꾼다. 키가 없어도 서버는 뜨고 `/health`·`/ai/me`·대화 목록·조회는 되지만, LLM이 필요한 API는 502다. 테스트는 키 없이 돈다.
 
 ## 실행
 
@@ -40,7 +40,7 @@ sh scripts/check.sh      # ruff check, ruff format --check, pytest. CI와 하네
 
 - 검증 명령은 `sh scripts/check.sh`다.
 - 마일스톤은 Python 몫만 적는다(`docs/convention/milestone.md` "Python 몫"). 파일이 없으면 첫 `/start`가 만든다.
-- 외부 AI API가 정해지지 않았거나 키가 없으면 `AI_MODE=mock`으로 먼저 만든다.
+- mock 모드는 없다. 외부 AI API가 정해지지 않았거나 키가 없으면 실제 클라이언트 자리는 502로 두고, 테스트는 가짜 객체로 먼저 만든다.
 
 | 할 일 | 입력 |
 | --- | --- |
@@ -54,7 +54,7 @@ sh scripts/check.sh      # ruff check, ruff format --check, pytest. CI와 하네
 
 `/impl`이 끝에 주는 "`/end` 전에 확인할 것"(직접 `/verify`를 돌렸으면 그 보고)의 "사람 확인" 목록대로 Postman 데스크톱 앱으로 확인한다.
 
-1. 이 저장소에서 `uv run uvicorn app.main:app --reload` → `Application startup complete`가 나오면 준비 완료. 목록에 적힌 `AI_MODE`인지 `.env.local`을 확인한다.
+1. 이 저장소에서 `uv run uvicorn app.main:app --reload` → `Application startup complete`가 나오면 준비 완료. 목록에 적힌 키가 `.env.local`에 있는지 확인한다.
 2. 로그인이 필요한 `/ai/**` API면 백엔드 저장소에서 `./gradlew bootRun`을 띄우고 쿠키를 받는다.
    - `POST http://localhost:8080/api/auth/dev-tokens`, Headers `X-Requested-With: XMLHttpRequest`, Body → raw → JSON `{"mbrSn": <MBR에 있는 번호>}` → 200
    - 쿠키는 포트와 관계없이 `localhost`에 붙으므로 Postman이 `http://localhost:8000` 요청에도 실어 보낸다. 이 저장소 `.env.local`의 `BACKEND_BASE_URL`이 `http://localhost:8080`이어야 한다(Python이 쿠키를 Java에 넘겨 인증을 확인한다).

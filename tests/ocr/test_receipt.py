@@ -1,4 +1,5 @@
 import asyncio
+from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
@@ -6,19 +7,40 @@ from fastapi.testclient import TestClient
 from app.core.config import get_settings
 from app.main import create_app
 from app.ocr.clients import OcrApiError, get_ocr_client
-from app.ocr.schemas import ReceiptOcrResponse
+from app.ocr.schemas import Drug, Line, ReceiptOcrResponse, Section
 
 URL = "/internal/v1/ocr/receipt"
 PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 16
 
 
+class _Fixed:
+    """고정 응답을 돌려주는 가짜 OCR"""
+
+    async def recognize(self, image: bytes) -> ReceiptOcrResponse:
+        return ReceiptOcrResponse(
+            hsptl_nm="냥멍동물병원",
+            ckup_ymd=date(2026, 10, 20),
+            recpt_amt=45000,
+            sections=[
+                Section(
+                    section_nm="미르",
+                    sbttl_amt=45000,
+                    items=[Line(item_nm="진료비", item_amt=30000)],
+                    drugs=[
+                        Drug(mdcn_nm="소염제", mdcn_days=5, mdcn_usage="1일 2회", mdcn_amt=15000)
+                    ],
+                )
+            ],
+        )
+
+
 @pytest.fixture
 def app(monkeypatch: pytest.MonkeyPatch):
-    # 각자 PC의 .env.local 값과 무관하게 mock 모드로 기동
-    monkeypatch.setenv("AI_MODE", "mock")
     monkeypatch.setenv("OCR_TIMEOUT_SEC", "0.05")
     get_settings.cache_clear()
-    return create_app()
+    app = create_app()
+    app.dependency_overrides[get_ocr_client] = _Fixed
+    return app
 
 
 @pytest.fixture
@@ -30,7 +52,7 @@ def _post(client: TestClient, content: bytes = PNG):
     return client.post(URL, files={"file": ("r.png", content)})
 
 
-def test_mock_응답이_ReceiptOcrResponse_모양이다(client: TestClient) -> None:
+def test_응답이_ReceiptOcrResponse_모양이다(client: TestClient) -> None:
     response = _post(client)
 
     body = response.json()
@@ -107,3 +129,12 @@ def test_외부_API_오류는_502_OCR_API_ERROR(app, client: TestClient) -> None
 
     assert response.status_code == 502
     assert response.json()["code"] == "OCR_API_ERROR"
+
+
+def test_OCR_클라이언트가_연결되기_전에는_502_EXTERNAL_API_ERROR(app, client: TestClient) -> None:
+    del app.dependency_overrides[get_ocr_client]
+
+    response = _post(client)
+
+    assert response.status_code == 502
+    assert response.json()["code"] == "EXTERNAL_API_ERROR"
