@@ -14,6 +14,7 @@ from app.chat.clients import (
     AnthropicTitleGenerator,
     Classified,
     ClassifiedKind,
+    ClassifyError,
     MockAnswerGenerator,
     MockIntentClassifier,
     MockTitleGenerator,
@@ -126,6 +127,20 @@ def test_제목_응답이_비면_첫_메시지_앞_30자를_쓴다():
     assert generate(replying("  \n ")) == FIRST_MESSAGE[:30]
 
 
+@pytest.mark.parametrize("text", ["가계부", " ㅋㅋㅋㅋ ", "가" * 15])
+def test_짧은_첫_메시지는_LLM_없이_그대로_제목(text):
+    # '가계부' → '가계부 작성 방법'처럼 뜻이 덧붙지 않게(2026-10-29)
+    fake = replying("가계부 작성 방법")
+    assert generate(fake, text) == text.strip()
+    assert fake.requests == []
+
+
+def test_15자를_넘으면_LLM으로_제목을_만든다():
+    fake = replying("긴 제목")
+    assert generate(fake, "가" * 16) == "긴 제목"
+    assert len(fake.requests) == 1
+
+
 # FN-AIM-004-02 의도 분류
 
 
@@ -151,8 +166,10 @@ def test_라우팅_대상이_아닌_행이나_없는_번호면_판단_못_함():
 
 
 @pytest.mark.parametrize("respond", [server_error, timeout])
-def test_분류가_실패하면_판단_못_함(respond):
-    assert classify(FakeAnthropic(respond)).kind is ClassifiedKind.UNKNOWN
+def test_분류_API가_실패하면_ClassifyError(respond):
+    # 2026-10-29 결정 : 장애는 폴백(UNKNOWN)이 아니라 error 이벤트로 간다
+    with pytest.raises(ClassifyError):
+        classify(FakeAnthropic(respond))
 
 
 def test_분류가_거절되면_판단_못_함():

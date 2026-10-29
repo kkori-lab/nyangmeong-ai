@@ -15,6 +15,13 @@ SCR-AIM-002 대화창 · 검색 질문/응답 · 연결 끊김 문서 정정과 
 - 하네스(보고만, 이번에 고치지 않음): `scripts/milestone-status.sh`가 macOS BSD `sed -i`에서 실패해도 종료 코드 0이다(이번 세션 실측: "invalid command code m" 출력 뒤 exit 0). 이미 "다음에 할 것"의 하네스 수정 PR 후보에 BSD `sed` 항목이 있어 거기에 "실패해도 0" 을 덧붙인다.
 새 의존성: 없음
 
+### 추가 요청
+| 번호 | 바꿀 파일 | 완료 조건 | 요청 |
+| --- | --- | --- | --- |
+| 추가-1 | `app/chat/service.py`, `docs/api/chat.md`, `tests/chat/test_messages.py` | 명령: ROUTE 판정이면 이동 안내가 AI 메시지로 저장되고 `done.message`로 온다 | 요청 2026-10-29 10:42 "프론트 사람 확인 요청: ROUTE 이동 안내를 저장해 다시 열어도 답이 남게(저장한다)" |
+| 추가-2 | `app/chat/clients.py`, `app/chat/service.py`, `tests/chat/test_messages.py`, `tests/chat/test_llm_clients.py` | 명령: 룰에 안 걸린 문장에서 분류 LLM이 실패하면 `error` 이벤트, 폴백 저장 없음. 룰 라우팅은 LLM 오류여도 ROUTE | 요청 2026-10-29 10:42 "분류 단계 LLM 장애는 폴백이 아니라 error 이벤트로" |
+| 추가-3 | `app/chat/clients.py`, `tests/chat/test_llm_clients.py` | 명령: 15자 이하 첫 메시지는 LLM을 부르지 않고 그대로 제목이 된다 | 요청 2026-10-29 "'가계부' 한 단어가 '가계부 작성 방법' 제목이 됨. 짧은 입력은 그대로 제목으로(답변 요약 제목은 마일스톤으로)" |
+
 ## 다음에 할 것
 - 다음 `/start`는 대기 맨 위 SCR-AIM-012(등록 카드). 메시지 API의 REGISTER 판정 뒤 흐름을 잇는다
 - 백엔드에 요청(LJS 백엔드): AI 설정값 조회 내부 API(SYS_STNG_AI_TKN_UPLMT_CNT·SYS_STNG_AI_CNVRS_TURN_CNT, 연결되면 가짜 `get_ai_settings` 교체), AI 역할 메시지 `cnvrsCn` 1,000자 상한 확대(상한 없이 저장 요청 중, 넘으면 저장 실패). `docs/api/internal.md` "미정" 행은 "설정값 조회"만 남긴다(최근 6턴은 GET 대화, 미완료 완료 처리는 불필요)

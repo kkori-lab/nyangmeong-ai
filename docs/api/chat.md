@@ -17,7 +17,7 @@ React가 부르는 `/ai/**` API다. 공통 규칙은 `docs/api/README.md`에 있
 | GET | /ai/conversations | 내 대화 목록을 최신순으로 준다. 쿼리 `petSn`을 주면 그 태그의 대화만(태그가 null인 "전체" 대화는 나오지 않는다), 없으면 전부. 오늘·어제·지난 7일 그룹은 React가 `regDt`로 나눈다. 없으면 빈 배열 | AIM-011-08·09 | LJS | - | List<ConversationSummary> |
 | GET | /ai/conversations/{aiCnvrsRoomSn} | 대화 하나와 메시지를 순서대로 준다. 남의 대화·없는 번호 404 `NOT_FOUND` | AIM-011-10 | LJS | - | ConversationDetail |
 | DELETE | /ai/conversations/{aiCnvrsRoomSn} | 대화와 메시지를 물리 삭제한다(복구 불가). 남의 대화·없는 번호 404 `NOT_FOUND` | AIM-011-13 | LJS | - | - |
-| POST | /ai/conversations/{aiCnvrsRoomSn}/messages | 메시지를 보내고 판정·답변을 SSE(`text/event-stream`)로 받는다. `cnvrsCn`이 있으면 사용자 메시지로 저장하고 답한다. 없으면 저장 없이 방의 마지막 사용자 메시지에 답한다(첫 메시지 직후·[다시 시도]·[다시 생성]). 판정이 SEARCH면 LLM 답변을 흘리고 끝에 의료 고지를 붙여 저장, FALLBACK이면 안내 문구를 저장, ROUTE·REGISTER·RECEIPT는 판정만 준다. 컨텍스트는 현재 대화의 미완료를 뺀 최근 6턴. 첫 글자 10초 초과·오류는 `error` 이벤트(저장 없음), 첫 글자 뒤 60초 초과·오류는 부분 답변을 미완료(`cmptnYn=false`)로 저장. 연결이 끊겨도 생성·저장은 끝까지 한다(완료로 저장). 스트림 시작 전 오류는 JSON: 본문 공백만·1,000자 초과·답할 사용자 메시지 없음 400 `INVALID_REQUEST`, 남의 대화·없는 번호 404 `NOT_FOUND` | AIM-002-02·03·04·07·08·09·10·11, AIM-011-15·16 | LJS | MessageSendRequest | SSE 이벤트(아래 MessageEvent) |
+| POST | /ai/conversations/{aiCnvrsRoomSn}/messages | 메시지를 보내고 판정·답변을 SSE(`text/event-stream`)로 받는다. `cnvrsCn`이 있으면 사용자 메시지로 저장하고 답한다. 없으면 저장 없이 방의 마지막 사용자 메시지에 답한다(첫 메시지 직후·[다시 시도]·[다시 생성]). 판정이 SEARCH면 LLM 답변을 흘리고 끝에 의료 고지를 붙여 저장, FALLBACK이면 안내 문구를 저장, ROUTE면 이동 안내("<화면명>(으)로 이동할게요")를 저장, REGISTER·RECEIPT는 판정만 준다. 룰에 걸리지 않은 문장에서 분류 LLM이 실패(오류·시간 초과)하면 폴백이 아니라 `error` 이벤트(저장 없음). 컨텍스트는 현재 대화의 미완료를 뺀 최근 6턴. 첫 글자 10초 초과·오류는 `error` 이벤트(저장 없음), 첫 글자 뒤 60초 초과·오류는 부분 답변을 미완료(`cmptnYn=false`)로 저장. 연결이 끊겨도 생성·저장은 끝까지 한다(완료로 저장). 스트림 시작 전 오류는 JSON: 본문 공백만·1,000자 초과·답할 사용자 메시지 없음 400 `INVALID_REQUEST`, 남의 대화·없는 번호 404 `NOT_FOUND` | AIM-002-02·03·04·07·08·09·10·11, AIM-011-15·16 | LJS | MessageSendRequest | SSE 이벤트(아래 MessageEvent) |
 
 ## DTO
 
@@ -72,5 +72,5 @@ React가 부르는 `/ai/**` API다. 공통 규칙은 `docs/api/README.md`에 있
 | --- | --- | --- | --- |
 | intent | Intent `{kind, scrId, scrNm, param, moveType}` | 판정. `kind`: SEARCH·ROUTE·FALLBACK·REGISTER·RECEIPT. 화면 필드는 ROUTE일 때만 값이 있다(화면 ID → 프론트 경로 변환은 React) | AIM-001-05, AIM-004 |
 | delta | `{text: String}` | SEARCH 답변 조각. 이어 붙여 표시한다. 마지막 조각은 의료 고지(`\n\n※ 참고 정보이며 의료 진단이 아닙니다. …`), 미완료 답변에는 없다 | AIM-002-02·03 |
-| done | `{message: ConversationMessage?, shortcut: Intent?}` | 끝. `message`는 저장된 AI 메시지(SEARCH 답변·FALLBACK 안내). 저장하지 않았거나 저장에 실패하면 null. `message.cmptnYn=false`면 미완료(60초 초과·도중 오류): "답변이 완료되지 않았어요" + [다시 생성]. `shortcut`은 연관 바로가기(Intent ROUTE 모양, 저장 안 함), 없으면 null | AIM-002-04·07 |
-| error | `{code: "EXTERNAL_API_ERROR", message: "일시적으로 답변할 수 없어요"}` | 첫 글자 전 실패(10초 초과·오류). AI 메시지는 저장하지 않는다. [다시 시도]는 `cnvrsCn` 없이 다시 보낸다 | AIM-002-07 |
+| done | `{message: ConversationMessage?, shortcut: Intent?}` | 끝. `message`는 저장된 AI 메시지(SEARCH 답변·FALLBACK 안내·ROUTE 이동 안내). 저장하지 않았거나 저장에 실패하면 null. `message.cmptnYn=false`면 미완료(60초 초과·도중 오류): "답변이 완료되지 않았어요" + [다시 생성]. `shortcut`은 연관 바로가기(Intent ROUTE 모양, 저장 안 함), 없으면 null | AIM-002-04·07 |
+| error | `{code: "EXTERNAL_API_ERROR", message: "일시적으로 답변할 수 없어요"}` | 첫 글자 전 실패(10초 초과·오류)와 의도 분류 LLM 실패. AI 메시지는 저장하지 않는다. [다시 시도]는 `cnvrsCn` 없이 다시 보낸다 | AIM-002-07 |

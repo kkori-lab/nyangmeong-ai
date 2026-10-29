@@ -11,6 +11,7 @@ from app.chat.clients import (
     AnswerGenerator,
     Classified,
     ClassifiedKind,
+    ClassifyError,
     IntentClassifier,
     TitleGenerator,
 )
@@ -113,6 +114,14 @@ async def judge_intent(text: str, has_image: bool, classifier: IntentClassifier)
     return (await judge(text, has_image, classifier)).intent
 
 
+def route_message(scr_nm: str) -> str:
+    # 받침(ㄹ 제외)이 있으면 '으로', 없으면 '로'
+    last = scr_nm.rstrip()[-1:]
+    jong = (ord(last) - 0xAC00) % 28 if "가" <= last <= "힣" else 0
+    particle = "으로" if jong not in (0, 8) else "로"
+    return f"{scr_nm}{particle} 이동할게요"
+
+
 async def reply_fallback(repo: ConversationRepository, room_sn: int) -> ConversationMessage:
     # FN-AIM-005-02·07 : 실패 사유는 묻지 않고, 부적절 입력도 같은 문구. AI 역할 메시지로 저장
     return await repo.add_message(room_sn, ROLE_AI, FALLBACK_MESSAGE)
@@ -196,9 +205,16 @@ async def _run_turn(
             await _search_answer(turn, repo, answers, ai, limits, judged.shortcut, emit)
         elif kind is IntentKind.FALLBACK:
             emit(("done", AnswerDone(message=await reply_fallback(repo, turn.room_sn))))
+        elif kind is IntentKind.ROUTE:
+            # 이동은 React가 한다. 다시 열어도 답이 남게 이동 안내를 저장한다(2026-10-29 결정)
+            text = route_message(judged.intent.scr_nm or "")
+            emit(("done", AnswerDone(message=await _save(repo, turn.room_sn, text, True))))
         else:
-            # ROUTE는 React가 이동, REGISTER·RECEIPT는 SCR-AIM-012·013에서 잇는다
+            # REGISTER·RECEIPT는 SCR-AIM-012·013에서 잇는다
             emit(("done", AnswerDone()))
+    except ClassifyError:
+        # 분류 LLM 장애는 폴백이 아니라 일시 오류(2026-10-29 결정). 원인 로그는 분류기가 남긴다
+        emit(("error", StreamError(code="EXTERNAL_API_ERROR", message=ANSWER_ERROR_MESSAGE)))
     except Exception:
         logger.exception("대화 응답 처리 실패")
         emit(("error", StreamError(code="EXTERNAL_API_ERROR", message=ANSWER_ERROR_MESSAGE)))
