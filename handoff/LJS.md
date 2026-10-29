@@ -1,33 +1,34 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-008 영수증 촬영 · 업로드 (프론트 직접 호출 전환) — 끝 (검증 3회차 통과, 사람 확인 2026-10-29. `/ai/receipts`, Google Vision + LLM 정리, 가짜 Java 원본·상태 저장)
-기획 상태: 승인됨 (2026-10-29 14:38, Google Vision 실제 분석 포함)
-- 기획과 다른 점: OCR 키가 없으면 502 `EXTERNAL_API_ERROR`(기획 문구는 `OCR_API_ERROR`). 기존 `/internal/v1/ocr` 테스트와 `architecture.md` 키 없음 규칙에 맞췄다. 사람 확인 때 Vision 원문 순서가 섞여 금액이 틀려 `app/ocr/rules.py` `layout_text`(낱말 위치로 줄 다시 세우기, 글자 간격으로 수량·금액 나누기)를 넣고, LLM 정리는 분석 제한 15초·재시도 없음으로 바꿨다.
-- 고른 이유: "다음에 할 것" 맨 위(공용 하네스 PR)는 #15(15e1ad5)로 병합돼 지웠고, 그다음 항목은 남이 할 일·연결 대기라 "대기 맨 위"를 골랐다. 기준 DMS: AI매니저_기능명세서_v0.10_20261029, AI매니저_화면설계서_v0.11_20261026.
-- 흐름: React `POST /ai/receipts`(multipart) → Python 검증 → Java 원본 저장·영수증 생성(상태 분석중) → OCR(15초) → Java 결과·상태 보고 → React에 `recptSn` + `ReceiptOcrResponse`. Java 내부 API는 아직 없으므로 가짜 응답으로 먼저 만들고 나중에 연결한다. 가짜는 `app/ocr/repository.py` `FakeReceiptRepository`(대화 register-context 때와 같은 방식, 요청을 기록만 하고 `recptSn` 1부터 증가).
-- 계약 초안(구현 전에 먼저): `docs/api/ocr.md` 새로 만든다(React → `/ai/**`). `POST /ai/receipts` 요청 `ReceiptAnalyzeRequest`(`file` 필수, `petSn` Long 필수 FN-AIM-008-03, `ocrRqstSrcCd` String 필수 — 건강 일지 `AIMC0026`, AI 대화창 값은 AIMG07에 신설 대기라 SCR-AIM-013 때 추가) / 응답 `ReceiptAnalyzeResponse`(`recptSn` Long, `ocr` ReceiptOcrResponse — 기존 DTO를 그대로 감싸 백엔드와 맞춘 모양을 바꾸지 않는다). `docs/api/internal.md` "Python → Java"에 영수증 원본 저장·결과 보고 2행을 "미정(LJS 백엔드)"으로 추가.
-- FN-AIM-008-05 업로드 제약 검증(`app/ocr/service.py`·`router.py`): 확장자(jpg·jpeg·png·webp)와 실제 형식(`app/core/image.py` `detect_image_type`)이 모두 맞아야 하고, PDF 거부. 10MB 초과 400 `FILE_SIZE_EXCEEDED`, 형식 400 `FILE_TYPE_NOT_ALLOWED`(백엔드 `ErrorCode` 이름 확인 후 확정). 검증 실패면 Java·OCR 둘 다 부르지 않는다. 인증은 `require_requested_with` + `require_member`(쿠키 없음 401, Java 오류 그대로). 완료 조건 `명령:` txt를 png로 바꾼 파일·pdf·10MB+1바이트 → 400이고 가짜 Java·OCR 호출 0회, 쿠키 없음 → 401.
-- FN-AIM-008-06·013-04 OCR 호출·중복 차단(다시 하는 것): 같은 회원의 분석이 진행 중이면 409 `OCR_IN_PROGRESS`(프로세스 메모리의 회원 번호 집합. 워커 1개 전제, 여러 워커면 Java 영수증 상태로 옮길 것을 다음에 할 것에 남김). 끝나면(성공·실패·취소 모두) 풀린다. 완료 조건 `명령:` 느린 가짜 OCR로 동시 2요청 → 하나 200, 하나 409. 끝난 뒤 다시 요청 → 200.
-- FN-AIM-008-07·010-01 분석 대기(서버 부분): OCR만 15초 제한(`OCR_TIMEOUT_SEC` 12 → 15, 이제 Java 제한 아래 둘 필요 없음), 초과 504 `OCR_TIMEOUT`(상태 일시오류), 외부 API 오류 502 `OCR_API_ERROR`(일시오류), 추출 0건 200 빈 응답(상태 인식실패), 성공은 상태 인식완료. 취소는 React가 요청을 끊는 것으로 하고, Python은 연결 끊김을 감지하면 OCR을 멈추고 상태 취소로 보고한다(응답 없음). 상태 코드값(AIMG01)은 가짜 Java에 문자열 이름으로 넘기고 연결 때 코드로 맞춘다. 완료 조건 `명령:` 시간 초과·API 오류·0건·성공·끊김 각각 가짜 Java가 받은 상태가 일시오류(시간초과)·일시오류(API)·인식실패·인식완료·취소.
-- FN-AIM-008-09·010-06·013-08 원본 보관: OCR 전에 원본을 Java 저장 요청(실패해도 원본은 이미 저장돼 유지). Java 저장 실패면 OCR을 부르지 않고 기존 규칙(4xx 그대로, 연결 실패 502). 대화 이력에는 이미지를 넣지 않는다(013 마일스톤 몫). 완료 조건 `명령:` 모든 결과에서 가짜 Java가 원본 바이트·`petSn`·`ocrRqstSrcCd`를 받음, Java 저장 4xx면 OCR 호출 0회.
-- Google Vision 실제 분석(사람 요청으로 포함, 2026-10-29): `.env.local`의 Google 값은 서비스 계정 파일 경로가 아니라 API 키(`AIza…`)라 SDK 없이 Vision REST `images:annotate`(`DOCUMENT_TEXT_DETECTION`, `?key=`)를 기존 httpx2로 부른다. 키 변수 이름은 `GOOGLE_APPLICATION_CREDENTIALS`(구글 라이브러리가 파일 경로로 읽는 이름)에서 `GOOGLE_VISION_API_KEY`로 바꾼다(`app/core/config.py`·`.env.local.example`·`tests/conftest.py`·`scripts/doctor.py`·`docs/convention/config.md`). `app/ocr/clients.py` `GoogleVisionOcrClient`: Vision 원문 → 구조화는 Anthropic(`llm_model`)에 JSON 출력으로 맡겨 `ReceiptOcrResponse`로 검증한다(규칙 파싱은 병원마다 양식이 달라 샘플 3건으로는 못 맞춘다). 두 호출 합쳐 15초 제한. 원문 텍스트가 비면 LLM을 부르지 않고 0건. 키가 없거나 Vision·LLM 오류면 502 `OCR_API_ERROR`. `chat`의 `get_anthropic_client`는 `app/core/llm.py`로 옮겨 두 패키지가 같이 쓴다(기능 패키지끼리 import 금지). 완료 조건 `명령:` `MockTransport`로 Vision 요청 모양(키·base64 본문)·가짜 원문 → 가짜 LLM 응답이 `ReceiptOcrResponse`로 바뀜, Vision 4xx·5xx·LLM 잘못된 JSON → 502. `화면:` 키를 넣고 띄워 Postman으로 실제 영수증 사진(확보한 3건, git에 올리지 않음)을 보내 병원명·금액·구역(2마리 청구서는 2구역)·약품이 맞는지 사람이 본다.
-- 테스트(`tests/ocr/test_receipt_ai.py` 새로): 가짜 OCR·가짜 Java를 `dependency_overrides`로 끼우고 인증은 기존 대화 테스트의 가짜 Java 확인을 쓴다. 기존 `/internal/v1/ocr` 테스트는 그대로 둔다.
-- `화면:` `uv run python -m uvicorn app.main:app`으로 띄우고 Postman으로 `POST /ai/receipts`(쿠키·`X-Requested-With`, png) → 실제 분석 결과와 `recptSn`(가짜 Java), 서버 로그에 가짜 Java의 원본 저장·인식완료 보고. pdf → 400 `FILE_TYPE_NOT_ALLOWED`, 쿠키 없음 → 401.
-- 하지 않는 것: `/internal/v1/ocr` 삭제와 `internal.md` OCR 행 삭제(백엔드 PR과 함께 — 그때 따로), Java 내부 API 실제 연결, 실패 문구(프론트 몫), AI 대화창 출처 코드(SCR-AIM-013).
+SCR-AIM-013 대화창 · 영수증 분석 (대화 이력) — 끝 (검증 1회차 통과, 사람 확인 2026-10-29. `POST /ai/conversations/{aiCnvrsRoomSn}/receipt-result`로 함께 보낸 텍스트·결과 요약 한 줄 저장, `/ai/receipts` 출처에 AI 대화창 `AIMC0031`)
+기획 상태: 승인됨 (2026-10-29 15:46, 출처 코드 AIMC0031 포함)
+- 기획과 다른 점: 쿠키 없음 401을 저장 전에 주려고 `receipt-result`에 `require_member`를 붙였다(메시지 전송 API와 같음). 출처 번호는 기획 때 정한 "하나씩 미루기"(`AIMC0028`)에서 백엔드 결정으로 맨 뒤 새 번호 `AIMC0031`로 바꿨다.
+- 고른 이유: "다음에 할 것" 맨 위는 프론트 저장소 일(`receiptApi.js` 연결)이라 이 저장소에서 할 수 없어 "대기 맨 위"를 골랐다. 기준 DMS: AI매니저_기능명세서_v0.10_20261029, AI매니저_화면설계서_v0.11_20261026.
+- 흐름: 이미지가 붙은 전송이면 React가 `/messages`(의도 판정)를 부르지 않고 `POST /ai/receipts`(SCR-AIM-008에서 만듦)로 분석한다. 분석이 끝나면(인식·인식 실패·일시 오류·분석 취소) React가 새 API `POST /ai/conversations/{aiCnvrsRoomSn}/receipt-result`로 함께 보낸 텍스트와 결과를 보내고, Python이 사용자 메시지·요약 AI 메시지를 Java 대화 내부 API에 저장한다. 기능 패키지끼리 import하지 않으므로 `ocr`의 분석과 `chat`의 저장을 한 API로 합치지 않는다(SCR-AIM-012 `register-result`와 같은 방식).
+- 계약 초안(구현 전에 먼저): `docs/api/chat.md`에 행 추가. `POST /ai/conversations/{aiCnvrsRoomSn}/receipt-result` 요청 `ReceiptResultRequest`(`result` String 필수 `RECOGNIZED`·`FAILED`·`ERROR`·`CANCELED`, `cnvrsCn` String 선택 — 함께 보낸 텍스트, 메시지 전송과 같은 1~1,000자·공백만 불가, `hsptlNm` String·`ckupYmd` LocalDate·`recptAmt` Integer 선택 — `ReceiptOcrResponse`와 같은 이름, `RECOGNIZED`일 때만 쓰고 다른 결과면 무시) / 응답 201 `ConversationMessage[]`(저장한 순서: 사용자 메시지(있으면) → AI 요약). 오류: `result` 허용값 밖·`cnvrsCn` 길이 위반 400 `INVALID_REQUEST`, 남의 대화·없는 번호 404 `NOT_FOUND`(Java 오류 그대로). 문서 첫 줄의 "영수증(SCR-AIM-013) 이어 가기는 해당 마일스톤에서 추가" 문구를 고친다.
+- FN-AIM-013-02 영수증 분석 분기(`app/chat/schemas.py`·`service.py`·`router.py`): 의도 판정을 거치지 않는 것은 React가 `/messages`를 부르지 않는 것으로 된다(Python 쪽 분류기는 부르지 않음). 함께 보낸 텍스트는 `ROLE_USER`로 저장해 이후 대화의 AI 컨텍스트(최근 턴)에 들어가고, 분석에는 쓰지 않는다(`/ai/receipts`에 텍스트를 보내지 않음). 완료 조건 `명령:` `cnvrsCn`이 있으면 가짜 Java가 사용자 → AI 순서로 2건 받음, 없으면 AI 1건만, 분류기·LLM 가짜 호출 0회, 1,001자·공백만 → 400이고 저장 0건, 쿠키 없음 → 401.
+- FN-AIM-013-09 결과 이력 저장(`app/chat/service.py` `receipt_result_message`): 요약 한 줄 AI 메시지. `RECOGNIZED`: `영수증 분석 — 메이 동물병원, 10월 20일, 145,000원`(없는 값은 빼고 쉼표로 잇고, 셋 다 없으면 `영수증 분석 — 결과를 확인해 주세요`). `FAILED`: `영수증 분석 — 영수증을 읽지 못했어요`. `ERROR`: `영수증 분석 — 일시적인 오류로 분석하지 못했어요`. `CANCELED`: `영수증 분석 — 취소했어요`. 결과 카드의 [취소](저장 안 함)는 이미 요약이 저장된 뒤라 다시 부르지 않는다(카드 '취소됨'은 프론트 표시). 다시 열면 GET 대화가 요약만 돌려준다(버튼 없음, 기존 그대로). 완료 조건 `명령:` 네 결과·값 일부 없음·셋 다 없음 각각 가짜 Java가 받은 AI 메시지 문구가 위와 같음, 남의 대화(가짜 Java 404) → 404.
+- FN-AIM-013-04 요청 출처 'AI 대화창'(사람 요청으로 포함, 2026-10-29): AIMG07에 대화창 값이 없어 공통코드를 새로 받는다. 처음엔 번호를 하나씩 미루기로 했다가 백엔드 결정(사람 확인 2026-10-29)으로 맨 뒤 새 번호 `AIMC0031`(AIMG07, SORT_SEQ 3)로 바꿨다 — 미루면 이미 DB에 있는 0028·0030 행이 다른 뜻으로 오류 없이 읽힌다. 기존 0028·0029·0030은 그대로. 이 저장소는 `app/ocr/service.py` `SOURCE_CODES`에 `AIMC0031` 추가, `docs/api/ocr.md` `ocrRqstSrcCd` 설명(건강 일지 `AIMC0026`·AI 대화창 `AIMC0031`)과 주석을 고친다. 백엔드 공통코드 추가 PR과 같은 때 병합한다(AGENTS.md 4번). 완료 조건 `명령:` `ocrRqstSrcCd=AIMC0031`이면 200이고 가짜 Java가 `AIMC0031`을 받음, `AIMC0027`(가계부)·`AIMC0028`(다른 그룹) → 400 `INVALID_REQUEST`이고 Java·OCR 호출 0회.
+- 테스트: `tests/chat/test_receipt_result.py` 새로, 출처는 `tests/ocr/test_receipt_ai.py`에 추가. 기존 `tests/chat/fakes.py` 가짜 대화 저장소·인증을 쓴다.
+- `화면:` `uv run python -m uvicorn app.main:app`으로 띄우고 Postman으로 대화 생성 → `POST .../receipt-result`(쿠키·`X-Requested-With`, `RECOGNIZED`+텍스트) → 201에 2건, `GET /ai/conversations/{번호}`에 사용자 텍스트와 요약 한 줄이 이어서 보인다. `result: "X"` → 400.
+- 하지 않는 것: 백엔드·프론트·ERD의 공통코드 번호 변경(각 저장소 세션 몫, "다음에 할 것"에 남김), 다시 열었을 때 결과 카드 다시 불러오기(FN-AIM-013-09 미결, 스키마 변경 필요), 대상 반려동물 되물음·결과 카드·확인 모달·실패 버튼(FN-AIM-013-01·03·05~07, 프론트 몫).
 새 의존성: 없음
 
 ## 다음에 할 것
-- 프론트(LJS)에 요청함(2026-10-29): `receiptApi.js` 가짜 분석 결과를 `POST /ai/receipts`로 연결(필드 이름 변환, `code`별 안내, AbortController 취소, `recptSn` 보관). 저장 전 확인·저장은 Java API 전까지 가짜
+- 공통코드 `AIMC0031` AI 대화창(AIMG07, 2026-10-29 백엔드 결정, 맨 뒤 새 번호): 백엔드(LJS 백엔드)가 기준 SQL·`ReceiptSource.java`에 추가한다. 이 저장소 PR과 같은 때 병합. 프론트는 대화창 영수증 분석을 `ocrRqstSrcCd=AIMC0031`로 보낸다(알림 코드 변경 없음). 문서(LJS): ERD·공통코드 문서에 `AIMC0031` 추가
+- 프론트(LJS) 대기: 대화창 영수증 연결(SCR-AIM-013 — 이미지 첨부 시 `/messages` 대신 `POST /ai/receipts`(`ocrRqstSrcCd=AIMC0031`) → 끝나면 `receipt-result`). 프론트 핸드오프에 적혀 있고 프론트 `/start` 때 진행. 건강 일지 SCR-AIM-008 연결은 프론트 PR #112로 끝남
+- 병합 조건: 이 저장소의 `AIMC0031` 허용(`app/ocr/service.py` `SOURCE_CODES`)은 백엔드 공통코드 `AIMC0031` 추가 PR과 같은 때 병합한다
 - 연결 남음: FN-AIM-008-09·010-06·013-08, 008-07 상태 보고 — Java 영수증 원본 저장·결과·상태 보고 내부 API(LJS 백엔드). 연결되면 `app/ocr/repository.py` `FakeReceiptRepository` 교체, 상태 이름을 AIMG01 코드로
 - 백엔드에 요청(LJS 백엔드): Java `/api/receipts`(업로드)·`/{recptSn}/analyze`·`FakeOcrClient` 흐름 정리. 분석은 React → Python `/ai/receipts`라 Java 분석 경로는 `/internal/v1/ocr` 삭제와 함께 정리. Postman이 8080으로 가면 가짜 결과(초코·아포퀠)가 온다
 - 중복 분석 차단(`_in_progress`)은 프로세스 메모리라 워커 1개 전제. 여러 워커로 띄우면 Java 영수증 상태로 옮긴다
-- OCR 인식률: 실제 영수증 1건(메이동물메디컬센터, 1구역)으로 맞춤. 2마리 청구서·다른 병원 영수증으로 더 확인(샘플 10건 목표, 사진은 git 제외)
+- OCR 인식률: 실제 영수증 1건(메이동물메디컬센터, 1구역)으로 맞춤. 프론트 확인(2026-10-29)에서 아조딜은 `mdcnUsage`가 null이라 1일 횟수 칸이 빈다(회원 입력). 2마리 청구서·다른 병원 영수증으로 더 확인(샘플 10건 목표, 사진은 git 제외)
 - 각자 `.env.local`: `GOOGLE_APPLICATION_CREDENTIALS` → `GOOGLE_VISION_API_KEY`(API 키), `OCR_TIMEOUT_SEC` 15. 디스코드 `.env.local` 갱신
 - 연결 남음(JAJ): Java register-context의 `careArtclNms`가 빈 배열이라 같은 이름 케어 항목 안내(FN-AIM-012-08)가 실제로는 뜨지 않는다. JAJ 케어 항목 service가 생기면 Python은 고칠 것 없음
 - JAJ 대기: React→Java 일정·케어 항목 등록 API(출처 HLTC0067, SCR-HLT-003 토탈 케어리스트 대기). 카드 `cycleDays`는 `CARE_ARTCL.CYCLE_DRCT_INPT_DAY_CNT`에 대응(요청 필드 이름은 JAJ API가 정함)
 - DMS AI매니저 기능명세서 버전 11(v1.0 표기, 버전 12로 대체)은 MCP에 삭제 도구가 없어 남아 있을 수 있다. 남아 있으면 DMS 화면에서 지운다(LJS)
 - DMS 명세 갱신 모음(LJS): 하나씩 올리지 않고 모아서 한 번에 버전업한다. 코드에는 이미 반영돼 있다
+  - 기능명세서 FN-AIM-013-04 비고: "※ 확인 필요 — AIMG07 신설"을 `AIMC0031` AI 대화창 확정으로(2026-10-29)
   - 기능명세서 FN-AIM-011: 15자 이하 첫 메시지는 그대로 제목(PR #13 추가-3)
   - 기능명세서 부록 B: 등록 판정 사전에 요일만 쓴 표현(`[월화수목금토일]요일`) 추가. 화면설계서 SCR-AIM-012 ⑦ 예시("금요일에 병원 예약 잡아줘")가 근거, `data/register_dict.yaml`
   - 기능명세서 FN-AIM-012-02: 오전·오후가 없는 1~7시는 오후로 해석, "했어" 앞 날짜는 마지막으로 한 날

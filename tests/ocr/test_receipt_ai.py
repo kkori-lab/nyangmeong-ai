@@ -361,3 +361,27 @@ def test_연결이_끊기면_분석을_멈추고_취소를_보고한다(monkeypa
     assert repo.receipts[1].image == PNG
     # 취소 뒤에는 다시 요청할 수 있다
     assert asyncio.run(_analyze(FakeOcr(), repo)).recpt_sn == 2
+
+
+# FN-AIM-013-04 : 요청 출처 'AI 대화창'(AIMC0031, 2026-10-29 신설)
+
+
+def test_AI_대화창_출처로_분석하면_Java에_그_출처로_저장한다(
+    client: TestClient, repo: FakeReceiptRepository
+) -> None:
+    response = post(client, data={"petSn": "3", "ocrRqstSrcCd": "AIMC0031"})
+
+    assert response.status_code == 200
+    assert repo.receipts[1].src_cd == "AIMC0031"
+
+
+@pytest.mark.parametrize("src_cd", ["AIMC0027", "AIMC0028"])
+def test_가계부나_다른_그룹_코드는_400이고_Java_OCR을_부르지_않는다(
+    client: TestClient, repo: FakeReceiptRepository, ocr: FakeOcr, src_cd: str
+) -> None:
+    response = post(client, data={"petSn": "3", "ocrRqstSrcCd": src_cd})
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "INVALID_REQUEST"
+    assert repo.receipts == {}
+    assert ocr.calls == []

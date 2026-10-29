@@ -37,6 +37,8 @@ from app.chat.schemas import (
     Intent,
     IntentKind,
     PetChoice,
+    ReceiptResult,
+    ReceiptResultRequest,
     RegisterCard,
     RegisterDraft,
     RegisterResult,
@@ -532,3 +534,36 @@ async def save_register_result(
 ) -> ConversationMessage:
     # FN-AIM-012-11·16 : 등록(React → Java)과 취소의 결과를 AI 메시지로 저장한다
     return await repo.add_message(room_sn, ROLE_AI, result_message(request))
+
+
+RECEIPT_PREFIX = "영수증 분석 — "
+RECEIPT_MESSAGES = {
+    ReceiptResult.FAILED: "영수증을 읽지 못했어요",
+    ReceiptResult.ERROR: "일시적인 오류로 분석하지 못했어요",
+    ReceiptResult.CANCELED: "취소했어요",
+}
+
+
+def receipt_result_message(request: ReceiptResultRequest) -> str:
+    # FN-AIM-013-09 : 결과 요약 한 줄. 다시 열면 버튼 없이 이 글만 보인다
+    if request.result is not ReceiptResult.RECOGNIZED:
+        return RECEIPT_PREFIX + RECEIPT_MESSAGES[request.result]
+    parts = []
+    if request.hsptl_nm:
+        parts.append(request.hsptl_nm)
+    if request.ckup_ymd:
+        parts.append(f"{request.ckup_ymd.month}월 {request.ckup_ymd.day}일")
+    if request.recpt_amt is not None:
+        parts.append(f"{request.recpt_amt:,}원")
+    return RECEIPT_PREFIX + (", ".join(parts) or "결과를 확인해 주세요")
+
+
+async def save_receipt_result(
+    repo: ConversationRepository, room_sn: int, request: ReceiptResultRequest
+) -> list[ConversationMessage]:
+    # FN-AIM-013-02 : 함께 보낸 텍스트는 의도 판정 없이 사용자 메시지로 저장한다(분석에는 쓰지 않음)
+    saved = []
+    if request.cnvrs_cn is not None:
+        saved.append(await repo.add_message(room_sn, ROLE_USER, request.cnvrs_cn))
+    saved.append(await repo.add_message(room_sn, ROLE_AI, receipt_result_message(request)))
+    return saved

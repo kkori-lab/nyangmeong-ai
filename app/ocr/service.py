@@ -10,8 +10,8 @@ from app.ocr.schemas import ReceiptAnalyzeResponse, ReceiptOcrResponse
 # FN-AIM-008-05 : 업로드 제약(REQ-NFR-003)
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 EXTENSION_TYPES = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png", "webp": "webp"}
-# 요청 출처(AIMG07). AI 대화창 값은 공통코드 신설 뒤 SCR-AIM-013에서 추가
-SOURCE_CODES = frozenset({"AIMC0026"})
+# 요청 출처(AIMG07) : 건강 일지, AI 대화창(SCR-AIM-013). 가계부(AIMC0027)는 받지 않는다
+SOURCE_CODES = frozenset({"AIMC0026", "AIMC0031"})
 # 연결 끊김(취소) 확인 간격(초)
 DISCONNECT_POLL_SEC = 0.5
 
