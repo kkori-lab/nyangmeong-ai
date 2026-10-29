@@ -19,6 +19,8 @@ from app.core.config import AiMode, Settings, get_settings
 logger = logging.getLogger(__name__)
 
 MOCK_TITLE_LENGTH = 30
+# 이 길이 이하의 첫 메시지는 LLM 없이 그대로 제목으로 쓴다(짧은 입력에 뜻이 덧붙지 않게)
+SHORT_TITLE_LENGTH = 15
 # 분류·짧은 생성이라 낮은 effort. thinking 토큰도 max_tokens 안에서 쓴다
 LLM_EFFORT = "low"
 LLM_MAX_TOKENS = 1024
@@ -82,6 +84,8 @@ class AnthropicTitleGenerator:
         self.model = model
 
     async def generate(self, first_message: str) -> str:
+        if len(first_message.strip()) <= SHORT_TITLE_LENGTH:
+            return first_message.strip()
         started = time.monotonic()
         try:
             response = await self.client.messages.create(
@@ -137,8 +141,16 @@ class Classified:
     related_param: str | None = None
 
 
+class ClassifyError(Exception):
+    """분류 LLM 장애(API 오류·시간 초과). reason은 로그용 실패 종류(원문 없음)"""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
 class IntentClassifier(Protocol):
-    # FN-AIM-004-02 : 룰 매칭에 실패한 입력에만 부르는 보조 분류
+    # FN-AIM-004-02 : 룰 매칭에 실패한 입력에만 부르는 보조 분류. 장애면 ClassifyError
     async def classify(self, text: str) -> Classified: ...
 
 
@@ -200,7 +212,8 @@ def _search_of(related_num: int | None) -> Classified:
 
 
 class AnthropicIntentClassifier:
-    # FN-AIM-004-02 : 실패하면 UNKNOWN(→ FN-AIM-004-12 폴백)
+    # FN-AIM-004-02 : API 오류·시간 초과는 ClassifyError(→ error 이벤트, 2026-10-29 결정).
+    # 거절·깨진 출력은 입력 탓으로 보고 UNKNOWN(→ FN-AIM-004-12 폴백)
     def __init__(self, client: AsyncAnthropic, model: str):
         self.client = client
         self.model = model
@@ -217,8 +230,9 @@ class AnthropicIntentClassifier:
                 output_format=ClassifyOutput,
             )
         except anthropic.APIError as error:
-            _log_failure("의도 분류", started, _failure_reason(error))
-            return Classified(ClassifiedKind.UNKNOWN)
+            reason = _failure_reason(error)
+            _log_failure("의도 분류", started, reason)
+            raise ClassifyError(reason) from error
         except ValidationError:
             # 거절·max_tokens로 끊기면 JSON이 비거나 깨진다
             _log_failure("의도 분류", started, "invalid_output")

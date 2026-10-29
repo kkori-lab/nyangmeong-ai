@@ -5,13 +5,14 @@ import httpx2
 import pytest
 
 from app.chat import clients, repository
-from app.chat.clients import AnswerError, Classified, ClassifiedKind
+from app.chat.clients import AnswerError, Classified, ClassifiedKind, ClassifyError
 from app.chat.schemas import ROLE_AI, ConversationMessage
 from app.chat.service import (
     ANSWER_ERROR_MESSAGE,
     DISCLAIMER,
     FALLBACK_MESSAGE,
     build_context,
+    route_message,
 )
 from app.core.config import get_settings
 from tests.chat.conftest import AJAX, ROLE_USER, FakeJava, _ok, as_member, member_of
@@ -82,13 +83,13 @@ class FixedClassifier:
 
 
 class BrokenClassifier:
-    # LLM 장애 흉내 : AnthropicIntentClassifier는 실패하면 UNKNOWN을 준다
+    # LLM 장애 흉내 : AnthropicIntentClassifier는 API 오류·시간 초과면 ClassifyError
     def __init__(self) -> None:
         self.calls = 0
 
     async def classify(self, text: str) -> Classified:
         self.calls += 1
-        return Classified(ClassifiedKind.UNKNOWN)
+        raise ClassifyError("api_error")
 
 
 @pytest.fixture
@@ -239,18 +240,50 @@ def test_X_Requested_With_없으면_403이고_LLM을_부르지_않는다(client,
     assert len(java.rooms[room]["messages"]) == 1
 
 
-def test_라우팅_문장은_판정만_주고_LLM_답변을_부르지_않는다(client, java, answers):
-    # FN-AIM-004
+def test_라우팅_문장은_이동_안내를_저장하고_LLM_답변을_부르지_않는다(client, java, answers):
+    # FN-AIM-004 : 다시 열어도 답이 남게 이동 안내를 AI 메시지로 저장(2026-10-29 결정)
     as_member(client, 1)
     room = java.add_room(1, "제목")
     evs = events(send(client, room, "일정 등록할래"))
 
     assert names(evs) == ["intent", "done"]
-    assert evs[0][1]["kind"] == "ROUTE"
-    assert evs[0][1]["scrId"] == "SCR-HLT-003"
-    assert evs[1][1] == {"message": None, "shortcut": None}
+    intent = evs[0][1]
+    assert intent["kind"] == "ROUTE"
+    assert intent["scrId"] == "SCR-HLT-003"
+    expected = route_message(intent["scrNm"])
+    assert [m["cnvrsCn"] for m in java.ai_messages(room)] == [expected]
+    assert evs[1][1]["message"]["cnvrsCn"] == expected
+    assert evs[1][1]["shortcut"] is None
     assert answers.calls == []
+
+
+@pytest.mark.parametrize(
+    ("scr_nm", "expected"),
+    [
+        ("동물병원 찾기", "동물병원 찾기로 이동할게요"),
+        ("케어 캘린더", "케어 캘린더로 이동할게요"),
+        ("건강기록", "건강기록으로 이동할게요"),
+        ("일정 관리", "일정 관리로 이동할게요"),
+        ("FAQ", "FAQ로 이동할게요"),
+    ],
+)
+def test_이동_안내는_받침에_맞춰_조사를_붙인다(scr_nm, expected):
+    assert route_message(scr_nm) == expected
+
+
+def test_분류_LLM_장애면_폴백이_아니라_error_이벤트(client, java, answers):
+    # 2026-10-29 결정 : 장애를 사용자 입력 실패(폴백·연속 실패)로 세지 않는다
+    broken = BrokenClassifier()
+    client.app.dependency_overrides[clients.get_intent_classifier] = lambda: broken
+    as_member(client, 1)
+    room = java.add_room(1, "제목")
+    evs = events(send(client, room, SEARCH_TEXT))
+
+    assert names(evs) == ["error"]
+    assert evs[0][1] == {"code": "EXTERNAL_API_ERROR", "message": ANSWER_ERROR_MESSAGE}
+    assert broken.calls == 1
     assert java.ai_messages(room) == []
+    assert answers.calls == []
 
 
 def test_LLM_장애여도_룰_라우팅은_ROUTE(client, java, answers):

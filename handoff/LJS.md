@@ -26,6 +26,13 @@ SCR-AIM-002 대화창 · 검색 질문/응답 — 끝 (검증 통과 1회차, �
 - 다음에 할 것에 남길 것: Java AI 설정값 조회 API 요청·연결(가짜 `get_ai_settings` 교체), AI 메시지 길이 상한 변경 요청(실제 답변 길이 분포를 보고), internal.md "미정" 행을 "설정값 조회"만으로 줄임.
 새 의존성: 없음
 
+### 추가 요청
+| 번호 | 바꿀 파일 | 완료 조건 | 요청 |
+| --- | --- | --- | --- |
+| 추가-1 | `app/chat/service.py`, `docs/api/chat.md`, `tests/chat/test_messages.py` | 명령: ROUTE 판정이면 이동 안내가 AI 메시지로 저장되고 `done.message`로 온다 | 요청 2026-10-29 10:42 "프론트 사람 확인 요청: ROUTE 이동 안내를 저장해 다시 열어도 답이 남게(저장한다)" |
+| 추가-2 | `app/chat/clients.py`, `app/chat/service.py`, `tests/chat/test_messages.py`, `tests/chat/test_llm_clients.py` | 명령: 룰에 안 걸린 문장에서 분류 LLM이 실패하면 `error` 이벤트, 폴백 저장 없음. 룰 라우팅은 LLM 오류여도 ROUTE | 요청 2026-10-29 10:42 "분류 단계 LLM 장애는 폴백이 아니라 error 이벤트로" |
+| 추가-3 | `app/chat/clients.py`, `tests/chat/test_llm_clients.py` | 명령: 15자 이하 첫 메시지는 LLM을 부르지 않고 그대로 제목이 된다 | 요청 2026-10-29 "'가계부' 한 단어가 '가계부 작성 방법' 제목이 됨. 짧은 입력은 그대로 제목으로(답변 요약 제목은 마일스톤으로)" |
+
 ## 다음에 할 것
 - 문서 정정: 연결 끊김은 구현 중 조정대로 끝까지 생성·완료 저장한다(architecture.md). `docs/api/chat.md` 메시지 API 행과 `milestones/LJS.md` SCR-AIM-002 완료 조건에 남은 "연결 끊김 → 미완료 저장" 문구를 뺀다. 연결 끊김 테스트도 없음
 - 다음 `/start`는 대기 맨 위 SCR-AIM-012(등록 카드). 메시지 API의 REGISTER 판정 뒤 흐름을 잇는다
