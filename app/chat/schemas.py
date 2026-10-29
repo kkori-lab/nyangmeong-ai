@@ -155,3 +155,27 @@ class RegisterResultRequest(_Camel):
     # FN-AIM-012-11·16 : 카드 결과를 텍스트 요약으로 저장한다
     result: RegisterResult
     card: RegisterCard
+
+
+class ReceiptResult(StrEnum):
+    RECOGNIZED = "RECOGNIZED"  # 인식·부분 인식(결과 카드)
+    FAILED = "FAILED"  # 인식 실패(추출 0건)
+    ERROR = "ERROR"  # 일시 오류(API 오류·15초 초과)
+    CANCELED = "CANCELED"  # 분석 중 [취소]
+
+
+class ReceiptResultRequest(_Camel):
+    # FN-AIM-013-02·09 : 영수증 분석(/ai/receipts)이 끝난 뒤 함께 보낸 텍스트와 결과 요약을 저장한다
+    result: ReceiptResult
+    cnvrs_cn: str | None = Field(default=None, min_length=1, max_length=MAX_MESSAGE_LENGTH)
+    # ReceiptOcrResponse와 같은 이름. RECOGNIZED일 때만 쓴다
+    hsptl_nm: str | None = None
+    ckup_ymd: date | None = None
+    recpt_amt: int | None = None
+
+    @field_validator("cnvrs_cn")
+    @classmethod
+    def _not_blank(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("공백만 입력할 수 없습니다.")
+        return value

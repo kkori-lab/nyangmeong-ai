@@ -29,6 +29,7 @@ from app.chat.repository import (
 from app.chat.schemas import (
     ConversationCreateRequest,
     MessageSendRequest,
+    ReceiptResultRequest,
     RegisterResultRequest,
 )
 from app.core import response
@@ -117,6 +118,18 @@ async def save_register_result(
     # FN-AIM-012-11·16 : 등록 카드의 결과(등록됨·취소됨)를 텍스트 요약으로 저장한다
     result = await service.save_register_result(repo, room_sn, body)
     return response.success(result.model_dump(by_alias=True), http_code=201)
+
+
+# 저장 전에 인증 확인 : 로그인하지 않은 요청은 사용자 메시지부터 401
+@router.post("/{aiCnvrsRoomSn}/receipt-result", dependencies=[Depends(require_member)])
+async def save_receipt_result(
+    body: ReceiptResultRequest,
+    repo: Repo,
+    room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
+) -> JSONResponse:
+    # FN-AIM-013-02·09 : 영수증 분석이 끝난 뒤 함께 보낸 텍스트와 결과 요약을 저장한다
+    saved = await service.save_receipt_result(repo, room_sn, body)
+    return response.success([m.model_dump(by_alias=True) for m in saved], http_code=201)
 
 
 async def _sse(events: AsyncIterator[service.Event]) -> AsyncIterator[str]:
