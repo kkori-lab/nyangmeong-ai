@@ -3,7 +3,7 @@ import pytest
 from app.core.config import get_settings
 
 # 각자 PC의 .env.local에 있는 외부 AI 키
-AI_KEYS = ("LLM_API_KEY", "OPENAI_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS")
+AI_KEYS = ("LLM_API_KEY", "OPENAI_API_KEY", "GOOGLE_VISION_API_KEY")
 
 
 @pytest.fixture(autouse=True)

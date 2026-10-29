@@ -22,6 +22,8 @@ Java가 만드는 API다(백엔드 저장소 기준). 키 헤더는 없다. 인�
 | DELETE | /internal/ai/conversations/{aiCnvrsRoomSn} | 대화와 메시지 물리 삭제. 200. 남의 대화·없는 번호 404 `NOT_FOUND` | AIM-011-13 | 백엔드 | - | - |
 | POST | /internal/ai/conversations/{aiCnvrsRoomSn}/messages | 메시지 추가. 요청 `{roleCd(AIMG06: AIMC0024 사용자·AIMC0025 AI), cnvrsCn(1~1,000), cmptnYn: Boolean?(기본 true)}`, 201 ConversationMessageResponse. `msgSeq`는 Java가 매긴다. SCR-AIM-005 폴백 문구 저장에서 사용(SCR-AIM-002·012도 사용 예정) | AIM-002·012 | 백엔드 | `{roleCd, cnvrsCn, cmptnYn}` | ConversationMessageResponse |
 | GET | /internal/ai/register-context | **확정(백엔드 #54)** 쿠키 회원이 양육하는 반려동물과 각자의 케어 항목 이름. 응답 `data [{petSn: Long, petNm: String, careArtclNms: [String]}]`, `careArtclNms`는 케어 항목 API가 생길 때까지 빈 배열. SCR-AIM-012 반려동물 결정·같은 이름 케어 항목 안내에서 사용(`app/chat/repository.py` JavaRegisterContextRepository). `X-Requested-With`를 붙인다. 실패하면 메시지 스트림의 `error` `EXTERNAL_API_ERROR` | AIM-012-04·08 | 백엔드 | - | `[{petSn, petNm, careArtclNms}]` |
+| (미정) | 영수증 원본 저장 | 원본 이미지를 파일로 보관하고 RECPT를 만든다(상태 분석중). Python이 받는 값: 이미지 바이트·파일명·`petSn`·`ocrRqstSrcCd`, 돌려받는 값: `recptSn`. 회원은 쿠키로 판정. 그때까지 `app/ocr/repository.py` `FakeReceiptRepository` | AIM-008-09, AIM-010-06, AIM-013-08 | 백엔드 | 미정 | 미정 |
+| (미정) | 영수증 결과·상태 보고 | `recptSn`의 상태(AIMG01: 인식완료·인식실패·일시오류(시간 초과·API 오류 구분)·취소)와 인식 결과(ReceiptOcrResponse, 성공·0건일 때)를 저장한다. 지금은 상태를 `RECOGNIZED`·`UNRECOGNIZED`·`TIMEOUT`·`API_ERROR`·`CANCELED` 이름으로 넘기고 연결 때 공통코드로 맞춘다 | AIM-008-07, AIM-010-01, AIM-013-04 | 백엔드 | 미정 | 미정 |
 | (미정) | 미완료 메시지 완료 처리·최근 6턴·AI 설정값 조회 | 백엔드 `docs/api/ai.md`에 PATCH 설계만 있음. SCR-AIM-002에서 필요해지면 요청 | AIM-002 | 백엔드 | 미정 | 미정 |
 
 ## DTO

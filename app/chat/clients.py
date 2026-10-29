@@ -14,8 +14,8 @@ from fastapi import Depends
 from pydantic import BaseModel, ValidationError
 
 from app.chat import rules
-from app.core.backend import external_error
 from app.core.config import Settings, get_settings
+from app.core.llm import get_anthropic_client
 
 logger = logging.getLogger(__name__)
 
@@ -49,20 +49,6 @@ def _failure_reason(error: anthropic.APIError) -> str:
     if isinstance(error, anthropic.APIStatusError):
         return f"api_error {error.status_code}"
     return "api_error"
-
-
-@lru_cache
-def _anthropic_client(api_key: str, timeout_sec: float) -> AsyncAnthropic:
-    return AsyncAnthropic(api_key=api_key, timeout=timeout_sec, max_retries=1)
-
-
-def get_anthropic_client(settings: Settings) -> AsyncAnthropic:
-    api_key = settings.llm_api_key.get_secret_value()
-    if not api_key:
-        # 키 없는 PC·CI : 실제 API를 부르지 않고 502. 키 값은 남기지 않는다
-        logger.error("LLM 호출 불가: .env.local의 LLM_API_KEY가 비어 있습니다")
-        raise external_error()
-    return _anthropic_client(api_key, settings.llm_timeout_sec)
 
 
 TITLE_SYSTEM = (

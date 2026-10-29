@@ -13,8 +13,10 @@ class Settings(BaseSettings):
     # Python→Java 내부 API 주소(인증 확인·대화 저장). 빈 값이면 /ai/** 전부 502
     backend_base_url: str = ""
 
-    # OCR 분석 제한 시간(초). Java 제한 15초보다 짧게 둠 : Java가 먼저 끊는 일 방지
-    ocr_timeout_sec: float = 12.0
+    # FN-AIM-008-07 : OCR 분석 제한 시간(초). Vision·LLM 정리를 합친 시간
+    ocr_timeout_sec: float = 15.0
+    # Google Vision API 키. 비어 있으면 영수증 분석 API는 502
+    google_vision_api_key: SecretStr = SecretStr("")
 
     # LLM(Anthropic, 2026-10-28 결정). 비어 있으면 LLM이 필요한 API는 502
     llm_api_key: SecretStr = SecretStr("")
