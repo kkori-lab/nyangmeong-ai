@@ -3,6 +3,7 @@ import re
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from datetime import date
 from enum import StrEnum
 from functools import lru_cache
 from typing import Annotated, Protocol
@@ -347,3 +348,93 @@ def get_answer_generator(
     if settings.ai_mode is AiMode.MOCK:
         return MockAnswerGenerator()
     return AnthropicAnswerGenerator(get_anthropic_client(settings), settings.llm_model)
+
+
+class RegisterExtractor(Protocol):
+    # FN-AIM-012-03 : 규칙으로 채우지 못한 칸의 보조 추출. 요청 문장과 오늘 날짜(KST)만 받는다.
+    # 돌려준 값은 검증 전 원본(칸 이름 → 값)이고, 실패하면 빈 dict
+    async def extract(self, text: str, today: date) -> dict: ...
+
+
+class MockRegisterExtractor:
+    # AI_MODE=mock 전용 : 아무 칸도 채우지 않는다(빈 칸은 되묻는다)
+    async def extract(self, text: str, today: date) -> dict:
+        return {}
+
+
+class ExtractOutput(BaseModel):
+    # 구조화 출력 모양. 모르는 칸은 null
+    schdl_knd_cd: str | None = None
+    schdl_ymd: str | None = None
+    schdl_tm: str | None = None
+    ckup_type_cd: str | None = None
+    hsptl_nm: str | None = None
+    schdl_nm: str | None = None
+    care_artcl_nm: str | None = None
+    care_zone_cd: str | None = None
+    care_cycle_cd: str | None = None
+    cycle_days: int | None = None
+    last_cmptn_ymd: str | None = None
+
+
+EXTRACT_SYSTEM = (
+    "반려동물 케어 앱에서 보호자가 일정이나 반복 케어 항목을 등록해 달라고 한 문장에서 "
+    "칸을 뽑는다. "
+    "문장에 없는 칸은 추측하지 말고 null로 둔다. 날짜는 사용자 메시지의 오늘 날짜를 기준으로 "
+    "YYYY-MM-DD, 시간은 24시간 HH:MM으로 쓴다.\n"
+    "- schdl_knd_cd(일정 종류): HLTC0057 병원, HLTC0058 미용·목욕, HLTC0059 케어·투약, "
+    "HLTC0060 기타\n"
+    "- ckup_type_cd(병원일 때 검진유형): HLTC0001 정기검진, HLTC0002 예방접종, HLTC0003 질병진료, "
+    "HLTC0004 검사, HLTC0005 기타 진료\n"
+    "- hsptl_nm: 병원 이름. schdl_nm: 병원이 아닌 일정의 이름(40자 이내)\n"
+    "- 주기가 있는 요청이면 일정이 아니라 케어 항목이다. care_artcl_nm: 항목명(40자 이내), "
+    "care_zone_cd: HLTC0036 매일 / HLTC0037 주기, care_cycle_cd: HLTC0038 1주, HLTC0039 2주, "
+    "HLTC0040 한달, HLTC0041 1년, HLTC0042 직접입력(cycle_days에 n일), "
+    "last_cmptn_ymd: 마지막으로 한 날"
+)
+
+
+class AnthropicRegisterExtractor:
+    # FN-AIM-012-03 : 반려동물 목록·기록 데이터는 보내지 않는다(POL-006). 실패하면 빈 칸(되물음)
+    def __init__(self, client: AsyncAnthropic, model: str):
+        self.client = client
+        self.model = model
+
+    async def extract(self, text: str, today: date) -> dict:
+        started = time.monotonic()
+        content = f"오늘: {today.isoformat()} ({'월화수목금토일'[today.weekday()]})\n요청: {text}"
+        try:
+            response = await self.client.messages.parse(
+                model=self.model,
+                max_tokens=LLM_MAX_TOKENS,
+                system=EXTRACT_SYSTEM,
+                messages=[{"role": "user", "content": content}],
+                output_config={"effort": LLM_EFFORT},
+                output_format=ExtractOutput,
+            )
+        except anthropic.APIError as error:
+            _log_failure("등록 칸 추출", started, _failure_reason(error))
+            return {}
+        except ValidationError:
+            _log_failure("등록 칸 추출", started, "invalid_output")
+            return {}
+        output = response.parsed_output
+        if response.stop_reason == "refusal" or output is None:
+            _log_failure("등록 칸 추출", started, response.stop_reason or "no_output")
+            return {}
+        values = output.model_dump(exclude_none=True)
+        logger.info(
+            "LLM 등록 칸 추출: 입력 %d자 → %d칸 (%.0fms)",
+            len(text),
+            len(values),
+            (time.monotonic() - started) * 1000,
+        )
+        return values
+
+
+def get_register_extractor(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> RegisterExtractor:
+    if settings.ai_mode is AiMode.MOCK:
+        return MockRegisterExtractor()
+    return AnthropicRegisterExtractor(get_anthropic_client(settings), settings.llm_model)

@@ -106,3 +106,28 @@ class AiSettings:
 def get_ai_settings() -> AiSettings:
     # 가짜 : Java 설정값 조회 내부 API가 생기면 그 값으로 바꾼다. 지금은 명세 기본값
     return AiSettings()
+
+
+@dataclass(frozen=True)
+class PetInfo:
+    pet_sn: int
+    pet_nm: str
+    # FN-AIM-012-08 : 이 반려동물의 케어 항목 이름
+    care_artcl_nms: tuple[str, ...] = ()
+
+
+class RegisterContextRepository(Protocol):
+    # 쿠키 회원이 양육하는 반려동물(SCR-AIM-012 반려동물 결정·같은 이름 케어 항목 안내)
+    async def get_pets(self) -> list[PetInfo]: ...
+
+
+class FakeRegisterContextRepository:
+    # 가짜 : Java GET /internal/ai/register-context가 생기면 Java 호출로 바꾼다
+    PETS = (PetInfo(1, "초코"), PetInfo(2, "뭉치", ("발톱 깎기",)))
+
+    async def get_pets(self) -> list[PetInfo]:
+        return list(self.PETS)
+
+
+def get_register_context_repository() -> RegisterContextRepository:
+    return FakeRegisterContextRepository()
