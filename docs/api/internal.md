@@ -1,13 +1,12 @@
 # 내부 API·DTO (초안)
 
-Java ↔ Python 서버 간 API다. 공통 규칙은 `docs/api/README.md`에 있다. 2026-10-26 결정(DB는 Java만)으로 OCR·캐릭터 생성은 Java가 부르는 이 내부 API로 유지한다(10-25 A안의 `/ai/receipts` 이전은 폐기). Java 쪽 계약은 백엔드 `global/external`(`OcrClient`·`ReceiptOcrResponse`, `CharacterGenerator`·`CharacterGenerationRequest`·`CharacterSpec`)이고, 이 문서의 필드는 그 record와 같아야 한다. 한쪽을 바꾸면 다른 쪽도 같은 때 바꾼다.
+Java ↔ Python 서버 간 API다. 공통 규칙은 `docs/api/README.md`에 있다. 2026-10-26 결정(DB는 Java만)으로 OCR은 Java가 부르는 이 내부 API로 유지한다(10-25 A안의 `/ai/receipts` 이전은 폐기). 캐릭터 생성은 2026-10-27 결정으로 React가 `/ai/characters`(`character.md`)를 직접 부르고, 작업 생성·결과 보고는 아래 "Python → Java" 미정 행이다(이전 `/internal/v1/character/generate`는 삭제, 백엔드 `PythonCharacterGenerator` 삭제와 같은 때 병합). Java 쪽 계약은 백엔드 `global/external`(`OcrClient`·`ReceiptOcrResponse`, 캐릭터 규격 `CharacterSpec`)이고, 이 문서의 필드는 그 record와 같아야 한다. 한쪽을 바꾸면 다른 쪽도 같은 때 바꾼다.
 
 ## API 목록
 
 | 메서드 | 경로 | 설명 | 기능 ID | 담당 | 요청 DTO | 응답 DTO |
 | --- | --- | --- | --- | --- | --- | --- |
 | POST | /internal/v1/ocr/receipt | 영수증 이미지(multipart `file`)에서 항목을 뽑는다. 저장하지 않는다. 추출 0건도 200(값이 모두 null, `sections` 빈 배열). 오류: 이미지로 읽히지 않음 400 `FILE_TYPE_NOT_ALLOWED`(백엔드 `ErrorCode`와 같은 이름), 분석 시간 초과 504 `OCR_TIMEOUT`, 외부 API 오류 502 `OCR_API_ERROR`. 시간 제한은 Java 제한(15초)보다 짧게 둔다 | AIM-008-06, AIM-010-01 | LJS | ReceiptOcrRequest | ReceiptOcrResponse |
-| POST | /internal/v1/character/generate | 사진과 등록 정보로 픽셀 캐릭터 PNG를 만든다. 응답 본문이 `image/png`(512×512, `ApiResponse` 껍데기 없음). 저장하지 않는다. 오류(`ApiResponse`): 사진을 이미지로 읽을 수 없음 400 `FILE_TYPE_NOT_ALLOWED`, 필드 누락·`petSeCd` 허용값(`PETC0001`·`PETC0002`) 밖 400 `INVALID_REQUEST`, 외부 API 오류 502 `CHARACTER_API_ERROR`, 규격을 맞추지 못함 502 `CHARACTER_SPEC_MISMATCH` | MYP-010-08·17 | LJS | CharacterGenerationRequest | (PNG) |
 
 ## Python → Java
 
@@ -24,6 +23,8 @@ Java가 만드는 API다(백엔드 저장소 기준). 키 헤더는 없다. 인�
 | GET | /internal/ai/register-context | **확정(백엔드 #54)** 쿠키 회원이 양육하는 반려동물과 각자의 케어 항목 이름. 응답 `data [{petSn: Long, petNm: String, careArtclNms: [String]}]`, `careArtclNms`는 케어 항목 API가 생길 때까지 빈 배열. SCR-AIM-012 반려동물 결정·같은 이름 케어 항목 안내에서 사용(`app/chat/repository.py` JavaRegisterContextRepository). `X-Requested-With`를 붙인다. 실패하면 메시지 스트림의 `error` `EXTERNAL_API_ERROR` | AIM-012-04·08 | 백엔드 | - | `[{petSn, petNm, careArtclNms}]` |
 | (미정) | 영수증 원본 저장 | 원본 이미지를 파일로 보관하고 RECPT를 만든다(상태 분석중). Python이 받는 값: 이미지 바이트·파일명·`petSn`·`ocrRqstSrcCd`, 돌려받는 값: `recptSn`. 회원은 쿠키로 판정. 그때까지 `app/ocr/repository.py` `FakeReceiptRepository` | AIM-008-09, AIM-010-06, AIM-013-08 | 백엔드 | 미정 | 미정 |
 | (미정) | 영수증 결과·상태 보고 | `recptSn`의 상태(AIMG01: 인식완료·인식실패·일시오류(시간 초과·API 오류 구분)·취소)와 인식 결과(ReceiptOcrResponse, 성공·0건일 때)를 저장한다. 지금은 상태를 `RECOGNIZED`·`UNRECOGNIZED`·`TIMEOUT`·`API_ERROR`·`CANCELED` 이름으로 넘기고 연결 때 공통코드로 맞춘다 | AIM-008-07, AIM-010-01, AIM-013-04 | 백엔드 | 미정 | 미정 |
+| (미정) | 캐릭터 작업 생성 | 생성 작업을 만들고 반려동물 등록 정보를 돌려준다. 주양육자 여부·이미 캐릭터 있음·생성 중 판정은 Java(4xx는 Python이 React에 그대로 전달). Python이 보내는 값: `petSn`, 돌려받는 값: 작업 번호(`chrcJobSn`, 이름은 Java 작업 테이블에 맞춤)·`petSeCd`·`vrtyNm`·`colrNm`·`chrcCn`. 회원은 쿠키로 판정. 그때까지 `app/character/repository.py` `FakeCharacterJobRepository` | MYP-010-08·09 | 백엔드 | 미정 | 미정 |
+| (미정) | 캐릭터 결과·상태 보고 | 작업 번호의 결과를 보고한다. 성공이면 512×512 PNG, 실패면 사유 `CHARACTER_API_ERROR`(생성기 오류)·`CHARACTER_SPEC_MISMATCH`(규격 밖). 보고가 실패해 멈춘 작업은 Java가 타임아웃으로 정리한다. 자동 저장·알림·실패 시 기본 캐릭터 표시는 Java | MYP-010-09·17·18 | 백엔드 | 미정 | 미정 |
 | (미정) | 미완료 메시지 완료 처리·최근 6턴·AI 설정값 조회 | 백엔드 `docs/api/ai.md`에 PATCH 설계만 있음. SCR-AIM-002에서 필요해지면 요청 | AIM-002 | 백엔드 | 미정 | 미정 |
 
 ## DTO
@@ -66,16 +67,6 @@ Java가 만드는 API다(백엔드 저장소 기준). 키 헤더는 없다. 인�
 | mdcnDays | Integer | N | 일수 | AIM-009-04 |
 | mdcnUsage | String | N | 용법 원문(예: 1일 2회) | AIM-009-04 |
 | mdcnAmt | Long | N | 약품 금액(대조용) | AIM-009-13 |
-
-### CharacterGenerationRequest
-쓰는 API: POST /internal/v1/character/generate (multipart/form-data)
-| 필드 | 타입 | 필수 | 검증·설명 | 근거 |
-| --- | --- | --- | --- | --- |
-| photo | 파일 | Y | 첨부 사진 | MYP-010-08 |
-| petSeCd | String | Y | 반려동물 구분 공통코드(강아지·고양이) | PET.PET_SE_CD |
-| vrtyNm | String | N | 품종 | MYP-010-08 |
-| colrNm | String | N | 털색 | MYP-010-08 |
-| chrcCn | String | N | 특징 | MYP-010-08 |
 
 ## 외부 AI 키가 없을 때
 

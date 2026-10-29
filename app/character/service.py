@@ -1,18 +1,55 @@
+import logging
+
 from app.character.clients import CharacterApiError, CharacterClient, CharacterRequest
+from app.character.repository import CharacterFailure, CharacterJob, CharacterJobRepository
 from app.character.rules import matches_spec
-from app.core.image import detect_image_type
-from app.core.response import AppError
+from app.core.backend import external_error
+from app.core.image import validate_upload
+
+logger = logging.getLogger(__name__)
 
 
-async def generate_character(client: CharacterClient, request: CharacterRequest) -> bytes:
-    # FN-MYP-010-08 : 형식·용량 검증은 Java 담당, 여기서는 이미지 판독 여부만 확인
-    if detect_image_type(request.photo) is None:
-        raise AppError("FILE_TYPE_NOT_ALLOWED", 400, "이미지 파일로 읽을 수 없습니다.")
+async def create_job(
+    client: CharacterClient | None,
+    repo: CharacterJobRepository,
+    photo: bytes,
+    file_name: str,
+    pet_sn: int,
+) -> CharacterJob:
+    """FN-MYP-010-08 : 검증에 실패하거나 생성기가 없으면 Java 작업을 만들지 않는다"""
+    validate_upload(photo, file_name)
+    if client is None:
+        logger.error("캐릭터 생성 불가: 생성기가 아직 연결되지 않았습니다")
+        raise external_error()
+    # 주양육자 여부·이미 캐릭터 있음·생성 중 판정은 Java (4xx 그대로 전달)
+    return await repo.create_job(pet_sn)
+
+
+async def generate_and_report(
+    client: CharacterClient, repo: CharacterJobRepository, job: CharacterJob, photo: bytes
+) -> None:
+    """FN-MYP-010-09 : 응답 뒤 백그라운드에서 생성하고 결과·상태를 Java에 보고한다"""
+    request = CharacterRequest(photo, job.pet_se_cd, job.vrty_nm, job.colr_nm, job.chrc_cn)
     try:
         image = await client.generate(request)
     except CharacterApiError:
-        raise AppError("CHARACTER_API_ERROR", 502, "캐릭터 생성 중 오류가 발생했습니다.") from None
-    # FN-MYP-010-17·18 : 규격 밖 결과는 내보내지 않는다
+        await _report_failure(repo, job, CharacterFailure.API_ERROR)
+        return
+    # FN-MYP-010-17·18 : 규격 밖 결과는 저장하지 않는다
     if not matches_spec(image):
-        raise AppError("CHARACTER_SPEC_MISMATCH", 502, "캐릭터 규격을 맞추지 못했습니다.")
-    return image
+        await _report_failure(repo, job, CharacterFailure.SPEC_MISMATCH)
+        return
+    try:
+        await repo.report_success(job.chrc_job_sn, image)
+    except Exception:
+        # 보고 실패로 멈춘 작업은 Java가 타임아웃으로 정리한다
+        logger.exception("캐릭터 성공 보고 실패: chrcJobSn=%d", job.chrc_job_sn)
+
+
+async def _report_failure(
+    repo: CharacterJobRepository, job: CharacterJob, reason: CharacterFailure
+) -> None:
+    try:
+        await repo.report_failure(job.chrc_job_sn, reason)
+    except Exception:
+        logger.exception("캐릭터 실패 보고 실패: chrcJobSn=%d, %s", job.chrc_job_sn, reason)
