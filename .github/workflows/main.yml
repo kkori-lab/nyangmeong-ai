@@ -1,0 +1,79 @@
+name: Deploy FastAPI
+
+on:
+  pull_request:
+    branches: [ "main" ]
+    types: [closed]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    # merge된 PR만 실행 (push는 항상 실행)
+    if: github.event.pull_request.merged == true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Deploy to CentOS Server
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.OCI_HOST }}
+          username: ${{ secrets.OCI_USER }}
+          key: ${{ secrets.KSMARTDEV }}
+          port: ${{ secrets.OCI_PORT }}
+          script: |
+            # 1. 서비스 중단
+            sudo systemctl stop ai-backend
+            
+            # 2. git repo가 없으면 clone, 있으면 pull
+            if [ ! -d "${{ secrets.OCI_DEPLOY_PATH }}/.git" ]; then
+              # 디렉토리가 있으면 삭제 후 clone
+              find ${{ secrets.OCI_DEPLOY_PATH }} -maxdepth 0 -type d -exec sudo rm -rf {} +
+              echo "기존 디렉토리 삭제 완료"
+              git clone https://${{ secrets.GIT_TOKEN }}@github.com/kkori-lab/nyangmeong-ai.git ${{ secrets.OCI_DEPLOY_PATH }}
+              echo "clone 완료"
+            fi
+            
+            # 3. 최신 코드 pull
+            cd ${{ secrets.OCI_DEPLOY_PATH }}
+            git pull origin main
+            
+            # 4. .env 파일 생성
+            if [ ! -f ${{ secrets.OCI_DEPLOY_PATH }}/.env ]; then
+              cat > ${{ secrets.OCI_DEPLOY_PATH }}/.env << 'EOF'
+            ${{ secrets.ENV_FILE }}
+            EOF
+              echo ".env 파일 생성 완료"
+            else
+              echo ".env 파일 이미 존재, 스킵"
+            fi
+            
+            # 5. venv 없으면 생성
+            if [ ! -f "venv/bin/activate" ]; then
+              python3.12 -m venv venv
+              echo "venv 생성 완료"
+            fi
+            
+            # 6. 패키지 설치
+            source venv/bin/activate
+            pip install --upgrade pip
+            pip install uvicorn
+            pip install -r requirements.txt --upgrade
+            
+            # 7. SELinux 컨텍스트 복구
+            sudo restorecon -Rv ${{ secrets.OCI_DEPLOY_PATH }}
+            
+            # 8. 서비스 시작
+            sudo systemctl start ai-backend
+            sudo systemctl status ai-backend
