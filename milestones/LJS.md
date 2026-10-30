@@ -113,7 +113,9 @@
 - 할 것: SEARCH 첫 답변이 끝나면 답변을 요약해(Haiku 한 번) 제목을 바꾼다. 방 생성 때 제목은 지금 규칙 그대로(임시). ROUTE·폴백·등록은 바꾸지 않는다
 - 기다리는 것: Java 대화 제목 수정 내부 API (예: `PATCH /internal/ai/conversations/{sn}`, LJS 백엔드. 계약은 백엔드 PR과 함께)
 - 완료 조건: mock 모드에서 첫 SEARCH 답변 뒤 요약 제목이 가짜 Java 제목 수정 API로 한 번만 전달되고, 두 번째 답변부터는 부르지 않는다.
-- 연결: 2026-10-30 Java `PATCH /internal/ai/conversations/{aiCnvrsRoomSn}`로 실제 확인(백엔드 PR #75, 병합 전)
+- 연결: 2026-10-30 Java `PATCH /internal/ai/conversations/{aiCnvrsRoomSn}`로 실제 확인(백엔드 PR #75, 2026-10-30 병합)
+- 제목 상한 30자(2026-10-30 LJS 결정): 생성·요약 제목 모두 30자에서 자른다(Java 저장 상한 200은 그대로). 검증 통과 1회차
+- 연결 남음: 없음
 
 ## 제외
 - FN-AIM-001-01~04,06, FN-AIM-002-01,05~06, FN-AIM-004-03~07, FN-AIM-005-03~06, FN-AIM-011-01~02,04~06,17~18,20, FN-AIM-012-09,15 (27건): 프론트 몫 (LJS 프론트: 대화창 화면)
