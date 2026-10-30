@@ -731,14 +731,14 @@ def test_제목_수정이_실패해도_답변과_done은_그대로(client, java,
     assert java.rooms[room]["cnvrsTtl"] == "제목"
 
 
-def test_요약_제목은_200자로_자른다(client, java, answers):
+def test_요약_제목은_30자로_자른다(client, java, answers):
     long = FailingSummary("가" * 250)
     client.app.dependency_overrides[clients.get_title_generator] = lambda: long
     as_member(client, 1)
     room = java.add_room(1, "제목", cn=SEARCH_TEXT)
     events(send(client, room))
 
-    assert title_patches(java) == [{"cnvrsTtl": "가" * 200}]
+    assert title_patches(java) == [{"cnvrsTtl": "가" * 30}]
 
 
 # 키 없는 PC·CI : 가짜를 끼우지 않으면 실제 API 대신 502

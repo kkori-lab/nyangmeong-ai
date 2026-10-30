@@ -50,7 +50,8 @@ from app.core.response import AppError
 
 logger = logging.getLogger(__name__)
 
-MAX_TITLE_LENGTH = 200
+# FN-AIM-011-11 : 생성 제목 30자 이내 (Java 저장 상한 200보다 짧게, 2026-10-30 LJS 결정)
+MAX_TITLE_LENGTH = 30
 DEFAULT_TITLE = "새 대화"
 # FN-AIM-005-02 : 화면설계서 SCR-AIM-005 ② 문구
 FALLBACK_MESSAGE = "질문을 이해하지 못했어요. 다시 입력하거나 아래에서 선택해 주세요."
@@ -71,10 +72,15 @@ Event = tuple[str, BaseModel | dict]
 async def create_conversation(
     repo: ConversationRepository, titles: TitleGenerator, request: ConversationCreateRequest
 ) -> ConversationSummary:
-    # FN-AIM-011-11 : 제목은 첫 메시지로 1회 생성, 200자 제한은 서버에서 적용
-    title = (await titles.generate(request.cnvrs_cn)).strip()[:MAX_TITLE_LENGTH] or DEFAULT_TITLE
+    # FN-AIM-011-11 : 제목은 첫 메시지로 1회 생성, 30자 제한은 서버에서 적용
+    title = _cut_title(await titles.generate(request.cnvrs_cn)) or DEFAULT_TITLE
     # FN-AIM-011-07·14 : 방과 첫 메시지 함께 저장 (Java 단일 트랜잭션)
     return await repo.create_room(request.pet_sn, title, request.cnvrs_cn)
+
+
+def _cut_title(text: str) -> str:
+    # 30자에서 자른 뒤 끝 공백 제거
+    return text.strip()[:MAX_TITLE_LENGTH].rstrip()
 
 
 async def list_conversations(
@@ -351,7 +357,7 @@ async def _retitle(
     # done 뒤 실행 : 실패해도 이미 보낸 답변 유지, 제목은 그대로 (error 이벤트 없음)
     try:
         summary = await titles.summarize(turn.question.cnvrs_cn, answer)
-        title = summary.strip()[:MAX_TITLE_LENGTH]
+        title = _cut_title(summary)
         if title:
             await repo.update_title(turn.room_sn, title)
     except Exception as error:
