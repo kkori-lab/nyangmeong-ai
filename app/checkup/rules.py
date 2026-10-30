@@ -20,7 +20,7 @@ MAX_UNIT_NM = 20
 
 
 def validate_pdf(data: bytes, file_name: str | None) -> None:
-    """FN-HLT-005-04 : 확장자 .pdf와 실제 형식(%PDF-)을 함께 검증, 10MB 이하 (REQ-NFR-003)"""
+    """FN-HLT-005-04 : 확장자 .pdf + 실제 형식(%PDF-) 검증, 10MB 이하 (REQ-NFR-003)"""
     if len(data) > MAX_PDF_BYTES:
         raise AppError("FILE_SIZE_EXCEEDED", 400, "파일 용량은 10MB 이하여야 합니다.")
     _, dot, extension = (file_name or "").rpartition(".")
@@ -34,7 +34,7 @@ def _key(name: str) -> str:
 
 @lru_cache
 def _items() -> list[dict]:
-    # FN-HLT-007-02 : 드롭다운 12종과 공통코드(HLTG12)는 data/lab_items.yaml이 기준
+    # FN-HLT-007-02 : 드롭다운 12종·공통코드(HLTG12) 기준은 data/lab_items.yaml
     with (DATA_DIR / "lab_items.yaml").open(encoding="utf-8") as f:
         return yaml.safe_load(f)["items"]
 
@@ -50,12 +50,12 @@ def _aliases() -> dict[str, str]:
 
 @lru_cache
 def _codes() -> dict[str, str]:
-    """표준 약어 → HLTG12 공통코드. 코드가 없는 항목(SDMA)은 빠진다"""
+    """표준 약어 → HLTG12 공통코드, 코드 없는 항목(SDMA) 제외"""
     return {item["code"]: item["cd"] for item in _items() if item.get("cd")}
 
 
 def normalize_name(name: str) -> str:
-    """12종이면 표준 약어, 아니면 결과지 표기 그대로. '크레아티닌(CREA)'처럼 괄호 안팎도 본다"""
+    """12종은 표준 약어, 그 외는 결과지 표기 그대로 (괄호 안팎 모두 대조)"""
     name = name.strip()
     candidates = [name]
     match = re.fullmatch(r"(.*?)\s*\((.*)\)\s*", name)
@@ -73,7 +73,7 @@ def is_standard(code: str) -> bool:
 
 
 def normalize_number(value: str | None) -> float | None:
-    """숫자만 남긴다(쉼표·공백 제거). '<0.5'·'음성'이나 decimal(15,4)에 안 들어가면 null"""
+    """숫자만 추출 (쉼표·공백 제거), '<0.5'·'음성'·decimal(15,4) 초과는 null"""
     if value is None:
         return None
     text = re.sub(r"[\s,]", "", value)
@@ -90,7 +90,7 @@ def normalize_number(value: str | None) -> float | None:
 
 
 def is_blood(name: str, blood: bool) -> bool:
-    """FN-HLT-007-05 : 12종은 혈액검사. 그 밖은 모델 판정"""
+    """FN-HLT-007-05 : 12종은 혈액검사, 그 밖은 모델 판정"""
     return blood or is_standard(normalize_name(name))
 
 
@@ -101,7 +101,7 @@ def to_item(
     ref_min: str | None,
     ref_max: str | None,
 ) -> LabResultItem | None:
-    """FN-HLT-007-04 : 못 읽은 값은 null. 이름이 없으면 행을 만들지 않는다"""
+    """FN-HLT-007-04 : 못 읽은 값은 null, 이름 없는 행 제외"""
     if not name or not name.strip():
         return None
     code = normalize_name(name)
@@ -109,7 +109,7 @@ def to_item(
     artcl_cd = _codes().get(code)
     drct_inpt_nm = None if artcl_cd else code[:MAX_DRCT_INPT_NM]
     low, high = normalize_number(ref_min), normalize_number(ref_max)
-    # FN-HLT-007-02 : 참고범위는 하한·상한을 함께, 한쪽만 읽히면 둘 다 비운다
+    # FN-HLT-007-02 : 참고범위는 하한·상한 쌍으로, 한쪽만 읽히면 둘 다 null
     if low is None or high is None:
         low = high = None
     unit_nm = unit.strip() if unit and unit.strip() else None

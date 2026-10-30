@@ -1,9 +1,8 @@
-# 글자 사이가 글자 폭의 이 배수보다 벌어지면 다른 낱말로 자른다
-# (수량 "1"과 금액이 한 낱말로 붙는 경우)
+# 낱말 분리 기준 : 글자 간격이 글자 폭의 이 배수 초과 (수량 "1"과 금액이 붙는 경우)
 SYMBOL_GAP_RATIO = 0.8
-# 낱말 높이 중심이 높이의 이 배수 안이면 같은 줄
+# 같은 줄 기준 : 낱말 높이 중심 차이가 높이의 이 배수 이내
 ROW_RATIO = 0.5
-# 같은 줄 낱말 사이가 높이의 이 배수보다 벌어지면 띄어 쓴다
+# 띄어쓰기 기준 : 같은 줄 낱말 간격이 높이의 이 배수 초과
 SPACE_RATIO = 0.3
 
 
@@ -14,7 +13,7 @@ def _box(bounding_box: dict) -> tuple[int, int, int, int]:
 
 
 def _tokens(page: dict) -> list[tuple[float, int, int, int, str]]:
-    """(중심 y, 왼쪽 x, 오른쪽 x, 높이, 글자). 글자 간격이 크면 낱말을 나눈다"""
+    """(중심 y, 왼쪽 x, 오른쪽 x, 높이, 글자), 글자 간격이 크면 낱말 분리"""
     tokens = []
     for block in page.get("blocks", []):
         for paragraph in block.get("paragraphs", []):
@@ -39,10 +38,9 @@ def _tokens(page: dict) -> list[tuple[float, int, int, int, str]]:
 
 
 def layout_text(annotation: dict) -> str:
-    """Vision fullTextAnnotation을 영수증 줄 모양의 글자로 바꾼다
-
-    Vision의 text는 표의 칸을 따로 읽어 품목과 금액의 순서가 섞이므로, 낱말 위치로 줄을 다시 세운다.
-    낱말 위치가 없으면 Vision text를 그대로 쓴다
+    """[Vision fullTextAnnotation -> 영수증 줄 모양 글자]
+    - Vision text는 표의 칸을 따로 읽어 품목·금액 순서가 섞임 -> 낱말 위치로 줄 재구성
+    - 낱말 위치 없으면 Vision text 그대로
     """
     tokens = [t for page in annotation.get("pages", []) for t in _tokens(page)]
     if not tokens:

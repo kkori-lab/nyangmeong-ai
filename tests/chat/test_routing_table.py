@@ -37,7 +37,7 @@ def test_매핑표_대표_칩_7종이_모두_라우팅_대상이다():
     ["SCR-HLT-000", "SCR-HLT-001", "SCR-HLT-005", "SCR-HLT-007", "SCR-AIM-008", "SCR-COM-007"],
 )
 def test_매핑표_결번_종속_화면_대화창은_라우팅_대상이_아니다(scr_id):
-    # FN-AIM-004-08 : 제외·결번 행은 매핑하지 않는다
+    # FN-AIM-004-08 : 제외·결번 행은 매핑 제외
     assert all(not row.scr_id.startswith(scr_id) for row in ROUTABLE)
     assert all(not row.scr_id.startswith("SCR-AIM") for row in ROUTABLE)
 

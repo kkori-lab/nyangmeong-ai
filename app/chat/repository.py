@@ -34,12 +34,11 @@ class ConversationRepository(Protocol):
 
 
 class JavaConversationRepository:
-    # 회원은 Java가 브라우저 Cookie로 직접 판정한다. 인증 오류(401·403)와 남의 대화·없는 번호(404)는
-    # Java가 답한 그대로 전달된다
+    # 회원 판정은 Java(브라우저 Cookie). 인증 오류·404는 Java 응답 그대로 전달
     def __init__(self, client: httpx2.AsyncClient, settings: Settings, cookie: str | None) -> None:
         self._client = client
         self._settings = settings
-        # Java RequestedWithFilter는 /internal/**의 POST·DELETE에도 걸린다
+        # Java RequestedWithFilter가 /internal/**의 POST·DELETE에도 적용
         self._headers = {REQUESTED_WITH_HEADER: REQUESTED_WITH}
         if cookie:
             self._headers["Cookie"] = cookie
@@ -68,7 +67,7 @@ class JavaConversationRepository:
     async def add_message(
         self, room_sn: int, role_cd: str, cn: str, cmptn_yn: bool = True
     ) -> ConversationMessage:
-        # msgSeq는 Java가 매긴다. cmptnYn은 Java 기본값이 true라 미완료 답변(FN-AIM-002-07)만 보낸다
+        # msgSeq는 Java 채번. cmptnYn은 Java 기본값이 true라 미완료 답변(FN-AIM-002-07)만 전송
         body = {"roleCd": role_cd, "cnvrsCn": cn}
         if not cmptn_yn:
             body["cmptnYn"] = False
@@ -82,7 +81,7 @@ class JavaConversationRepository:
 
 
 def _parse[T: BaseModel](model: type[T], data) -> T:
-    # Java 응답 모양이 다르면 502 : 받은 값을 그대로 React에 넘기지 않는다
+    # Java 응답 모양 불일치 시 502 : 받은 값을 React에 그대로 넘기지 않음
     try:
         return model.model_validate(data)
     except ValidationError:
@@ -106,7 +105,7 @@ class AiSettings:
 
 
 def get_ai_settings() -> AiSettings:
-    # 가짜 : Java 설정값 조회 내부 API가 생기면 그 값으로 바꾼다. 지금은 명세 기본값
+    # 가짜 : 명세 기본값, Java 설정값 조회 내부 API가 생기면 교체
     return AiSettings()
 
 
@@ -131,7 +130,7 @@ class RegisterContextItem(BaseModel):
 
 
 class JavaRegisterContextRepository:
-    # 회원은 Java가 브라우저 Cookie로 판정한다. careArtclNms는 케어 항목 API가 생길 때까지 빈 배열
+    # 회원 판정은 Java(브라우저 Cookie). careArtclNms는 케어 항목 API가 생길 때까지 빈 배열
     def __init__(self, client: httpx2.AsyncClient, settings: Settings, cookie: str | None) -> None:
         self._client = client
         self._settings = settings

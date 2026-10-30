@@ -10,7 +10,7 @@ React가 부르는 `/ai/**` API다. 공통 규칙은 `docs/api/README.md`에 있
 
 | 메서드 | 경로 | 설명 | 기능 ID | 담당 | 요청 DTO | 응답 DTO |
 | --- | --- | --- | --- | --- | --- | --- |
-| POST | /ai/receipts | 영수증 이미지(multipart)를 분석한다. 원본은 분석 전에 Java에 저장한다(실패해도 유지). 추출 0건도 200(`ocr` 값이 모두 null, `sections` 빈 배열, 상태 인식실패). 같은 회원의 분석이 진행 중이면 409 `OCR_IN_PROGRESS`. 분석 제한 15초(Vision·LLM 합계). [취소]는 React가 요청을 끊는 것이다(Python이 끊김을 감지해 분석을 멈추고 상태 취소를 보고, 응답 없음). 오류: 형식(확장자·실제 형식 불일치, PDF 포함) 400 `FILE_TYPE_NOT_ALLOWED`, 10MB 초과 400 `FILE_SIZE_EXCEEDED`, 폼 값 없음·`ocrRqstSrcCd` 허용값 밖 400 `INVALID_REQUEST`(검증 실패는 Java·OCR을 부르지 않는다), 분석 시간 초과 504 `OCR_TIMEOUT`, 외부 API 오류 502 `OCR_API_ERROR`, OCR 키가 없음 502 `EXTERNAL_API_ERROR`, Java 원본 저장 실패는 Java 4xx 그대로·연결 실패 502 `EXTERNAL_API_ERROR` | AIM-008-05·06·07·09, AIM-010-01·06, AIM-013-04 | LJS | ReceiptAnalyzeRequest | ReceiptAnalyzeResponse |
+| POST | /ai/receipts | 영수증 이미지(multipart)를 분석한다. 원본은 분석 전에 Java에 저장한다(실패해도 유지). 추출 0건도 200(`ocr` 값이 모두 null, `sections` 빈 배열, 상태 인식실패). 같은 회원의 분석이 진행 중이면 409 `OCR_IN_PROGRESS`. 분석 제한 15초(Vision·LLM 합계). [취소]는 React가 요청을 끊는 것이다(Python이 끊김을 감지해 분석을 멈추고 상태 취소를 보고, 응답 없음). 오류: 형식(확장자·실제 형식 불일치, PDF 포함) 400 `FILE_TYPE_NOT_ALLOWED`, 10MB 초과 400 `FILE_SIZE_EXCEEDED`, 폼 값 없음·`ocrRqstSrcCd` 허용값 밖 400 `INVALID_REQUEST`(검증 실패는 Java·OCR을 부르지 않는다), 분석 시간 초과 504 `OCR_TIMEOUT`, 외부 API 오류 502 `OCR_API_ERROR`, OCR 키가 없음 502 `EXTERNAL_API_ERROR`, Java 원본 저장 실패는 Java 4xx 그대로·연결 실패 502 `EXTERNAL_API_ERROR`. 결과·상태 보고(`internal.md`)가 실패하면: 인식·추출 0건은 결과를 주지 않고 Java 4xx 그대로·연결 실패 502 `EXTERNAL_API_ERROR`(RECPT가 분석중으로 남으므로), 시간 초과·API 오류·취소는 로그만 남기고 원래 오류 | AIM-008-05·06·07·09, AIM-010-01·06, AIM-013-04 | LJS | ReceiptAnalyzeRequest | ReceiptAnalyzeResponse |
 
 ## DTO
 

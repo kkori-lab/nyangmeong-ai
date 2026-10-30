@@ -44,7 +44,7 @@ def vision_ok(text: str):
 
 
 class FakeVision:
-    """MockTransport로 Vision API를 흉내 낸다. 받은 요청을 requests에 남긴다"""
+    """MockTransport로 Vision API를 흉내. 받은 요청은 requests에 기록"""
 
     def __init__(self, respond) -> None:
         self.respond = respond
@@ -59,7 +59,7 @@ class FakeVision:
 
 
 class FakeAnthropic:
-    """MockTransport로 Anthropic API를 흉내 낸다. 받은 요청 본문을 requests에 남긴다"""
+    """MockTransport로 Anthropic API를 흉내. 받은 요청 본문은 requests에 기록"""
 
     def __init__(self, respond) -> None:
         self.respond = respond
@@ -117,7 +117,7 @@ def test_Vision_글자를_LLM이_ReceiptOcrResponse로_정리한다() -> None:
     assert result.recpt_amt == 45000
     assert result.sections[0].section_nm == "미르"
     assert result.sections[0].drugs[0].mdcn_days == 5
-    # LLM에는 Vision 글자만 보낸다
+    # LLM에는 Vision 글자만 전송
     assert llm.requests[0]["messages"][0]["content"] == RECEIPT_TEXT
 
 

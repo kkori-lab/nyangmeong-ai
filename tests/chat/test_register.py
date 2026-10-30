@@ -17,7 +17,7 @@ CHOCO, MUNG = 1, 2
 
 
 class Extractor:
-    """가짜 AI 보조 추출기. 받은 인자를 남기고 result를 돌려준다(fail이면 예외)"""
+    """가짜 AI 보조 추출기. 받은 인자는 기록, result 반환(fail이면 예외)"""
 
     def __init__(self, result: dict | None = None, fail: bool = False) -> None:
         self.result = result or {}
@@ -109,9 +109,9 @@ def test_필수_칸이_찬_요청은_AI_없이_일정_카드를_주고_저장하
     assert card["hsptlNm"] == "메이 동물병원"
     assert (card["schdlYmd"], card["schdlTm"]) == ("2026-10-06", "15:00")
     assert card["missing"] == []
-    # FN-AIM-012-02 : 규칙으로 다 찼으면 AI를 부르지 않는다
+    # FN-AIM-012-02 : 규칙으로 다 찼으면 AI 미호출
     assert extractor.calls == []
-    # FN-AIM-012-11 : 카드는 저장하지 않는다(무응답이면 아무것도 남지 않음)
+    # FN-AIM-012-11 : 카드 미저장(무응답이면 아무것도 남지 않음)
     assert done(evs)["message"] is None
     assert java.ai_messages(room) == []
 
@@ -130,12 +130,12 @@ def test_주기_요청은_케어_항목_카드와_다음_예정일(client, java,
     assert card["lastCmptnYmd"] is None
     assert card["nxtmPrnmntYmd"] == "2026-10-06"
     assert card["duplicateName"] is False
-    # 일정 칸은 싣지 않는다
+    # 일정 칸 제외
     assert card["schdlKndCd"] is None
 
 
 def test_같은_이름_케어_항목이_있으면_안내한다(client, java, extractor):
-    # FN-AIM-012-08 : 가짜 register-context에서 뭉치는 '발톱 깎기'를 가지고 있다
+    # FN-AIM-012-08 : 가짜 register-context에서 뭉치는 '발톱 깎기' 보유
     as_member(client, 1)
     room = java.add_room(1, "제목")
     card = done(send(client, room, CARE_TEXT))["card"]
@@ -173,7 +173,7 @@ def test_내일_3시_병원_일정은_병원명과_검진유형을_되묻고_저
     expected = "어느 병원인가요? 검진 종류도 알려 주세요. (예: 정기검진, 예방접종)"
     assert body["message"]["cnvrsCn"] == expected
     assert [m["cnvrsCn"] for m in java.ai_messages(room)] == [expected]
-    # 빈 칸이 있어 AI 보조 해석을 1번 부른다
+    # 빈 칸이 있어 AI 보조 해석 1회 호출
     assert len(extractor.calls) == 1
 
 
@@ -359,7 +359,7 @@ def test_등록됨은_일정_요약을_AI_메시지로_저장(client, java, extr
     assert res.status_code == 201
     assert res.json()["data"]["cnvrsCn"] == "✔ 등록됨 — 초코 예방접종 · 10-06(화) 15:00"
     assert res.json()["data"]["roleCd"] == ROLE_AI
-    # 다시 열면 버튼 없이 결과 글만 남는다
+    # 다시 열면 버튼 없이 결과 글만 유지
     detail = client.get(f"/ai/conversations/{room}", headers=AJAX).json()["data"]
     assert detail["messages"][-1]["cnvrsCn"] == "✔ 등록됨 — 초코 예방접종 · 10-06(화) 15:00"
 
@@ -409,7 +409,7 @@ def test_취소됨은_취소_문구를_저장(client, java, extractor):
             "schdlYmd": "2026-10-06",
             "ckupTypeCd": "HLTC0002",
         },
-        # 되물음 카드는 결과가 없다
+        # 되물음 카드는 결과 없음
         {"cardType": "ASK", "petSn": 1, "petNm": "초코"},
         # 반려동물 없음
         {"cardType": "CARE_ITEM", "careArtclNm": "산책", "careZoneCd": "HLTC0036"},
@@ -475,7 +475,7 @@ def test_Java가_준_반려동물로_카드의_반려동물을_정한다(client,
 
 @pytest.mark.parametrize("status", [401, 500, 0])
 def test_Java_등록_맥락이_실패하면_SSE_error(client, java, extractor, status):
-    # 스트림 시작 뒤라 Java 본문을 그대로 전달하지 못한다(0은 연결 실패)
+    # 스트림 시작 뒤라 Java 본문 전달 불가(0은 연결 실패)
     java.context_status = status
     as_member(client, 1)
     room = java.add_room(1, "제목")

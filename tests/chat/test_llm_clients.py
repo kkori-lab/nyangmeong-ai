@@ -45,7 +45,7 @@ def message(text: str, stop_reason: str = "end_turn") -> dict:
 
 
 class FakeAnthropic:
-    """MockTransport로 Anthropic API를 흉내 낸다. 받은 요청 본문을 requests에 남긴다"""
+    """MockTransport로 Anthropic API를 흉내. 받은 요청 본문은 requests에 기록"""
 
     def __init__(self, respond):
         self.respond = respond
@@ -167,7 +167,7 @@ def test_라우팅_대상이_아닌_행이나_없는_번호면_판단_못_함():
 
 @pytest.mark.parametrize("respond", [server_error, timeout])
 def test_분류_API가_실패하면_ClassifyError(respond):
-    # 2026-10-29 결정 : 장애는 폴백(UNKNOWN)이 아니라 error 이벤트로 간다
+    # 2026-10-29 결정 : 장애는 폴백(UNKNOWN)이 아니라 error 이벤트로 전달
     with pytest.raises(ClassifyError):
         classify(FakeAnthropic(respond))
 
@@ -192,7 +192,7 @@ def test_분류_프롬프트에는_라우팅_대상_행만_들어간다():
         assert (line in system) is row.routable
 
 
-# 키에 따른 선택 : 앱에는 실제 구현만 있다
+# 키에 따른 선택 : 앱에는 실제 구현만 존재
 
 
 def settings(key: str = "test-key") -> Settings:

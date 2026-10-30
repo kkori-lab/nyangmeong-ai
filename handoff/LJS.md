@@ -1,17 +1,18 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-HLT-005 검진상세 · 검사결과지 PDF 분석 — 끝 (검증 1회차 통과, 사람 확인 2026-10-30. React가 `POST /ai/checkups/lab-results`로 검사결과지 PDF를 다시 올리면 형식·크기 검증 → LLM(`LLM_MODEL`)에 PDF document 블록으로 보내 구조화 출력 → 12종 약어 정규화(`data/lab_items.yaml`)·숫자·참고범위 정리 → SCR-HLT-007 입력값 모양 `items` 반환. 저장하지 않는다. 새 패키지 `app/checkup/`, API 초안 `docs/api/checkup.md`)
-- 기획과 다른 점: 못 읽은 값은 필드를 빼지 않고 null로 준다(영수증과 같음). 구조화 출력은 tool use가 아니라 `messages.parse`(영수증과 같음). 기획의 `.env.example`은 실제 파일 `.env.local.example`.
-- 추가-1 끝(검증 통과, 사람 확인 2026-10-30): 응답을 백엔드 InspectionAnalysisItem(INSP_NVL, DDL v0.10) 이름으로 맞춤 — `inspArtclCd`(HLTG12)·`inspArtclDrctInptNm`·`rsltNvl`·`unitNm`·`refLlmtNvl`·`refUplmtNvl`, 혈액검사가 아닌 항목은 `excludedArtclNms`. 진입 경로는 React → Python 고정(2026-10-30 LJS 결정)
+SCR-AIM-013 대화창 · 영수증 원본·상태 Java 연결 (SCR-AIM-008·010 공통) — 끝 (검증 통과, 사람 확인 2026-10-30. `app/ocr/repository.py` `FakeReceiptRepository` → `JavaReceiptRepository`: 원본 `POST /internal/ai/receipts`(multipart `file`·`petSn`·`ocrDmndSrcCd`) → `recptSn`, 결과 `POST /internal/ai/receipts/{recptSn}/result` `{ocrRslt, ocr}`. 실제 Java로 인식·0건·취소·남의 반려동물 확인. 가짜 저장소는 `tests/ocr/fakes.py`)
+- 새로 정한 것: 인식·0건 보고가 실패하면 결과 없이 Java 4xx 그대로·502, 시간 초과·API 오류·취소 보고 실패는 로그만 남기고 원래 오류(`docs/api/ocr.md`)
+- 추가-1 끝(검증 통과): 주석 컨벤션 `docs/convention/architecture.md` "## 주석"(백엔드·프론트와 같은 명사형 규칙), `app/`·`tests/`·`scripts/` 주석·docstring 정리(코드 변경 없음)
 
 ### 추가 요청
 | 번호 | 바꿀 파일 | 완료 조건 | 요청 |
 | --- | --- | --- | --- |
-| 추가-1 | `app/checkup/{schemas,rules,service}.py`, `data/lab_items.yaml`, `docs/api/checkup.md`, `tests/checkup/` | 명령: `sh scripts/check.sh` 통과, 응답 항목이 백엔드 `docs/api/health.md` InspectionAnalysisItem 이름(`inspArtclCd`(HLTG12)·`inspArtclDrctInptNm`·`rsltNvl`·`unitNm`·`refLlmtNvl`·`refUplmtNvl`, 숫자는 JSON 숫자)과 같고 혈액검사가 아닌 항목은 `excludedArtclNms`로 뺀다. 화면: 합성 결과지 PDF로 `POST /ai/checkups/lab-results` → CREA는 `inspArtclCd` HLTC0030, SDMA·Total Protein은 `inspArtclDrctInptNm`, 소변 항목은 `excludedArtclNms` | 요청 2026-10-30 09:40 "응답 필드는 백엔드 db/ DDL 보고 실제로 연결" |
+| 추가-1 | `docs/convention/architecture.md`(주석 절), `app/`·`tests/`·`scripts/`의 `.py` 주석·docstring | 명령: `sh scripts/check.sh` 통과, `grep -rnE '#.*(한다|이다|있다|된다|않는다)\s*$' app tests scripts --include=*.py` 출력 없음. 화면: 없음(동작 변화 없음, 주석만) | 요청 2026-10-30 "주석은 백엔드랑 프론트엔드 컨벤션 참고해서 수정하고 주석 컨벤션도 만들어둬" |
 
 ## 다음에 할 것
-- 바로 다음(2026-10-30 frontend-83 요청, `/start AIM-013`): FN-AIM-008-09·010-06·013-08, 008-07 — `app/ocr/repository.py` `FakeReceiptRepository`를 Java 영수증 내부 API(백엔드 PR #64, develop 병합)로 교체. `POST /internal/ai/receipts`(multipart `file`·`petSn`·`ocrDmndSrcCd`) → 201 `recptSn`, `POST /internal/ai/receipts/{recptSn}/result`(`ocrRslt` RECOGNIZED·UNRECOGNIZED·TIMEOUT·API_ERROR·CANCELED, RECOGNIZED면 `ocr`). 실패·취소도 꼭 보고(안 하면 RECPT가 분석중으로 남고 Java 정리 배치 없음), React 응답 전에 보고를 await하는 순서 유지, `docs/api/internal.md` 미정 2행 확정. 계약은 메시지가 아니라 백엔드 `docs/api/receipt.md`·코드와 대조(필드 이름·오류 코드 `FILE_TOO_LARGE` 등). 끝나면 frontend-83 세션에 알린다
+- frontend-83 세션에 알리기: 영수증 원본·상태가 실제 Java 영수증 내부 API로 저장된다(SCR-AIM-008·013, 대화창은 `ocrRqstSrcCd=AIMC0031`)
+- 로컬 Java DB 정리(선택): 검증으로 생긴 RECPT 515~527과 원본 파일
 - JAJ에 요청(2026-10-30 LJS 결정): 검사결과지 PDF 분석은 React → Python `POST /ai/checkups/lab-results`로 고정한다. 백엔드 `docs/api/health.md`의 Java `POST /pets/{petSn}/checkup-attachments/{ckupRcdAtchSn}/analyses`와 InspectionAnalysisResponse(`anlysRslt`)는 지운다. 항목 이름은 Python이 InspectionAnalysisItem(INSP_NVL)에 맞췄다(`registered`는 React가 검진상세 목록으로 판정). HLTG12에 SDMA 코드가 없어 지금은 직접입력명 `SDMA`로 보낸다. 명세대로 드롭다운에 넣으려면 JAJ가 SDMA 코드를 추가하고 `data/lab_items.yaml`에 `cd`를 넣는다
 - 프론트(LJS) 대기: 검진상세 첨부 자료 [PDF 분석] → `POST /ai/checkups/lab-results`(파일 다시 올림) → 성공 시 SCR-HLT-007에 채움, `excludedArtclNms`는 저장 대상 밖으로 안내, `registered`(이미 등록됨)는 검진상세 혈액검사 목록으로 판정, 실패·422·504는 SCR-HLT-005에서 사유 안내, 다시 분석 중복 요청은 버튼 잠금
 - 검사결과지 인식률: 합성 결과지 1건으로만 확인(2026-10-30). 실제 병원 결과지·스캔본으로 더 확인(원본은 git 제외)

@@ -10,7 +10,7 @@ QUESTION = re.compile(r"[?？]|뭐|왜|어떻게|알려|어때|될까|되나|나
 
 
 class FakeTitleGenerator:
-    """LLM 없이 첫 메시지 앞부분을 제목으로 쓴다"""
+    """LLM 없이 첫 메시지 앞부분을 제목으로 사용"""
 
     async def generate(self, first_message: str) -> str:
         return first_message.strip()[:TITLE_LENGTH]
@@ -26,7 +26,7 @@ class FakeIntentClassifier:
 
 
 class FakeAnswerGenerator:
-    """받은 컨텍스트 크기를 알려 주는 고정 문장을 몇 조각으로 낸다"""
+    """받은 컨텍스트 크기를 알리는 고정 문장을 몇 조각으로 분할"""
 
     async def stream(self, messages: list[dict], max_tokens: int) -> AsyncIterator[str]:
         for chunk in ("(가짜 답변) ", f"대화 메시지 {len(messages)}개를 받았습니다."):
@@ -34,7 +34,7 @@ class FakeAnswerGenerator:
 
 
 class FakeRegisterExtractor:
-    """아무 칸도 채우지 않는다(빈 칸은 되묻는다)"""
+    """아무 칸도 채우지 않음(빈 칸은 되물음)"""
 
     async def extract(self, text: str, today: date) -> dict:
         return {}

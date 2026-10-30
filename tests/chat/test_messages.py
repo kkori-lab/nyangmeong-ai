@@ -22,7 +22,7 @@ SEARCH_TEXT = "강아지 포도 먹어도 돼?"
 
 
 class MessageJava(FakeJava):
-    """FakeJava에 메시지 추가(POST .../messages)를 더한다. 메시지에 cmptnYn을 남긴다"""
+    """FakeJava에 메시지 추가(POST .../messages) 확장. 메시지에 cmptnYn 기록"""
 
     def __init__(self) -> None:
         super().__init__()
@@ -57,7 +57,7 @@ class MessageJava(FakeJava):
 
 
 class Answers:
-    """가짜 답변 생성기. chunks를 내고, fail이면 그 자리에서 AnswerError, hang이면 멈춘다"""
+    """가짜 답변 생성기. chunks 출력, fail이면 그 자리에서 AnswerError, hang이면 정지"""
 
     def __init__(self, chunks=("포도는 ", "강아지에게 위험해요."), fail=None, hang=None):
         self.chunks = chunks
@@ -273,7 +273,7 @@ def test_이동_안내는_받침에_맞춰_조사를_붙인다(scr_nm, expected)
 
 
 def test_분류_LLM_장애면_폴백이_아니라_error_이벤트(client, java, answers):
-    # 2026-10-29 결정 : 장애를 사용자 입력 실패(폴백·연속 실패)로 세지 않는다
+    # 2026-10-29 결정 : 장애는 사용자 입력 실패(폴백·연속 실패)로 미집계
     broken = BrokenClassifier()
     client.app.dependency_overrides[clients.get_intent_classifier] = lambda: broken
     as_member(client, 1)
@@ -288,7 +288,7 @@ def test_분류_LLM_장애면_폴백이_아니라_error_이벤트(client, java, 
 
 
 def test_LLM_장애여도_룰_라우팅은_ROUTE(client, java, answers):
-    # FN-AIM-002-10 : 분류 LLM이 실패 상태여도 룰 매칭은 LLM 앞에서 끝난다
+    # FN-AIM-002-10 : 분류 LLM이 실패 상태여도 룰 매칭은 LLM 앞에서 종료
     broken = BrokenClassifier()
     client.app.dependency_overrides[clients.get_intent_classifier] = lambda: broken
     as_member(client, 1)
@@ -300,7 +300,7 @@ def test_LLM_장애여도_룰_라우팅은_ROUTE(client, java, answers):
 
 
 def test_등록_요청은_판정만_준다(client, java, answers):
-    # 등록 흐름은 SCR-AIM-012에서 잇는다
+    # 등록 흐름은 SCR-AIM-012에서 이어짐
     as_member(client, 1)
     room = java.add_room(1, "제목")
     evs = events(send(client, room, "매일 산책 추가해 주세요"))
@@ -363,7 +363,7 @@ def test_첫_글자_전_오류는_error_이벤트이고_저장하지_않는다(c
     assert names(evs) == ["intent", "error"]
     assert evs[1][1] == {"code": "EXTERNAL_API_ERROR", "message": ANSWER_ERROR_MESSAGE}
     assert java.ai_messages(room) == []
-    # 사용자 메시지는 남아 [다시 시도]가 본문 없이 다시 부를 수 있다
+    # 사용자 메시지 유지 : [다시 시도]가 본문 없이 재호출 가능
     assert java.rooms[room]["messages"][-1]["cnvrsCn"] == SEARCH_TEXT
 
 
@@ -403,12 +403,12 @@ def test_전체_시간_초과는_부분_답변을_미완료로_저장(client, ja
     saved = java.ai_messages(room)
     assert saved[0]["cnvrsCn"] == "부분 "
     assert saved[0]["cmptnYn"] is False
-    # 미완료 답변에는 고지를 붙이지 않는다
+    # 미완료 답변은 고지 제외
     assert DISCLAIMER not in saved[0]["cnvrsCn"]
 
 
 class SlowAnswers(Answers):
-    """조각 사이에 잠깐 쉰다. 연결이 끊긴 뒤에도 생성이 남아 있게 한다"""
+    """조각 사이에 잠깐 휴지. 연결이 끊긴 뒤에도 생성 유지"""
 
     async def stream(self, messages, max_tokens):
         async for chunk in super().stream(messages, max_tokens):
@@ -417,8 +417,8 @@ class SlowAnswers(Answers):
 
 
 def test_연결이_끊겨도_답변을_끝까지_만들어_완료로_저장(client, java):
-    # architecture.md "질문 한 번의 순서" : 브라우저 연결이 끊겨도 생성·저장은 끝까지 한다.
-    # TestClient로는 스트림 중간에 끊을 수 없어 서비스를 직접 부른다(client는 설정값용)
+    # architecture.md "질문 한 번의 순서" : 연결이 끊겨도 생성·저장은 끝까지 진행
+    # TestClient로는 스트림 중간 끊김 재현 불가 : 서비스를 직접 호출(client는 설정값용)
     room = java.add_room(1, "제목", cn=SEARCH_TEXT)
     settings = get_settings()
     limits = service.AnswerLimits(settings.answer_first_token_sec, settings.answer_total_sec)
@@ -432,7 +432,7 @@ def test_연결이_끊겨도_답변을_끝까지_만들어_완료로_저장(clie
             turn, repo, FakeIntentClassifier(), answers, repository.AiSettings(), limits
         )
         first = await anext(events)
-        # StreamingResponse는 연결이 끊기면 이벤트 제너레이터를 닫는다
+        # 연결이 끊기면 StreamingResponse가 이벤트 제너레이터 종료
         await events.aclose()
         await asyncio.gather(*service._running)
         return first
@@ -446,7 +446,7 @@ def test_연결이_끊겨도_답변을_끝까지_만들어_완료로_저장(clie
 
 
 def test_답변_저장이_실패해도_스트림은_끝나고_message는_null(client, java, answers):
-    # 1,000자 상한을 두지 않기로 함(2026-10-28) : Java가 거절하면 저장만 빠진다
+    # 1,000자 상한 없음(2026-10-28) : Java가 거절하면 저장만 누락
     java.fail_ai_save = True
     as_member(client, 1)
     room = java.add_room(1, "제목")
@@ -515,7 +515,7 @@ def test_컨텍스트는_사용자_메시지로_시작하고_역할을_바꿔_�
     messages = conversation(6) + [message(13, ROLE_USER, "새 질문")]
     context = build_context(messages, 13, 6)
 
-    # 마지막 12개는 답변0부터라 맨 앞 AI 메시지를 버린다
+    # 마지막 12개는 답변0부터라 맨 앞 AI 메시지 제외
     assert context[0] == {"role": "user", "content": "질문1"}
     assert len(context) == 11
     assert context[1] == {"role": "assistant", "content": "답변1"}
@@ -556,7 +556,7 @@ def test_대화_상세에_미완료_여부가_나온다(client, java):
 
 
 def test_mock_모드는_LLM_없이_조각을_흘린다(client, java):
-    # 기본 mock 답변 생성기 : 받은 컨텍스트 크기를 알려 준다
+    # 기본 mock 답변 생성기 : 받은 컨텍스트 크기를 알림
     as_member(client, 1)
     room = java.add_room(1, "제목", cn="첫 질문")
     evs = events(send(client, room, SEARCH_TEXT))

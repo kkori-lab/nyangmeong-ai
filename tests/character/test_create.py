@@ -54,7 +54,7 @@ def fake_auth_check(request: httpx2.Request) -> httpx2.Response:
 
 
 class FakeGenerator:
-    """받은 요청을 calls에 남기고 result(PNG 또는 예외)를 돌려준다"""
+    """받은 요청은 calls에 기록, result(PNG 또는 예외) 반환"""
 
     def __init__(self, result: bytes | Exception) -> None:
         self.result = result
@@ -216,7 +216,7 @@ def test_규격_검증은_캔버스_크기가_512x512인_PNG만_통과시킨다(
     assert not matches_spec(b"\x89PNG\r\n\x1a\n")
 
 
-# FN-MYP-010-08 : 업로드 검증은 Java·생성기를 부르지 않는다
+# FN-MYP-010-08 : 업로드 검증은 Java·생성기 미호출
 
 
 @pytest.mark.parametrize(

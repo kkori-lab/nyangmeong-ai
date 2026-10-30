@@ -12,7 +12,7 @@ TIMEOUT_SEC = 3.0
 
 
 class BackendError(Exception):
-    """Java 4xx 오류. 본문·Set-Cookie를 다시 만들지 않고 그대로 전달한다"""
+    """Java 4xx 오류 : 본문·Set-Cookie 그대로 전달"""
 
     def __init__(
         self, status_code: int, body: bytes, content_type: str | None, set_cookies: list[str]
@@ -46,7 +46,7 @@ def get_backend_client(request: Request) -> httpx2.AsyncClient:
 async def call_backend(
     client: httpx2.AsyncClient, settings: Settings, method: str, path: str, **kwargs: Any
 ) -> Any:
-    """Java 내부 API를 불러 ApiResponse의 data를 돌려준다. 4xx는 그대로 전달, 그 밖의 실패는 502"""
+    """Java 내부 API 호출 -> ApiResponse의 data (4xx 그대로 전달, 그 외 실패 502)"""
     base_url = settings.backend_base_url.rstrip("/")
     if not base_url:
         raise external_error()

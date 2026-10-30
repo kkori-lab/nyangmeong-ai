@@ -23,7 +23,7 @@ def repo() -> FakeCharacterJobRepository:
 
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch, repo: FakeCharacterJobRepository) -> TestClient:
-    # 생성기를 끼우지 않는다 : 실제 앱처럼 생성기가 아직 없는 상태
+    # 생성기 미주입 : 실제 앱처럼 생성기가 아직 없는 상태
     monkeypatch.setenv("BACKEND_BASE_URL", "http://backend.test")
     get_settings.cache_clear()
     app = create_app()
@@ -33,7 +33,7 @@ def client(monkeypatch: pytest.MonkeyPatch, repo: FakeCharacterJobRepository) ->
     return TestClient(app)
 
 
-# FN-MYP-010-08 : 생성기가 없어도 업로드 검증이 먼저다
+# FN-MYP-010-08 : 생성기가 없어도 업로드 검증 우선
 
 
 def test_생성기가_없어도_PDF는_400_FILE_TYPE_NOT_ALLOWED(

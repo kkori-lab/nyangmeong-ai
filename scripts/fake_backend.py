@@ -3,14 +3,13 @@
 띄우기: uv run uvicorn scripts.fake_backend:app --port 8081
 .env.local: BACKEND_BASE_URL=http://localhost:8081
 
-쿠키 access_token 값으로 결과를 고른다
+쿠키 access_token 값별 결과
 - member-<번호>: 200, 그 회원 번호
 - expired: 401 TOKEN_EXPIRED
 - inactive: 403 MEMBER_INACTIVE + 쿠키 삭제 Set-Cookie
 - 그 밖·없음: 401 UNAUTHORIZED
 
-대화 내부 API(/internal/ai/conversations)도 같은 쿠키로 회원을 정한다.
-메모리에 저장하므로 끄면 사라진다
+대화 내부 API(/internal/ai/conversations)도 같은 쿠키로 회원 결정, 메모리 저장이라 끄면 소멸
 """
 
 from datetime import datetime
@@ -51,7 +50,7 @@ Token = Annotated[str | None, Cookie(alias="access_token")]
 
 
 def _member(token: str | None) -> int | JSONResponse:
-    """쿠키로 회원 번호를 정한다. 통과하지 못하면 Java 인증 오류 응답"""
+    """쿠키로 회원 번호 결정, 통과하지 못하면 Java 인증 오류 응답"""
     token = token or ""
     if token.startswith("member-") and token[7:].isdigit():
         return int(token[7:])

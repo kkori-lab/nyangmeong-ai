@@ -14,5 +14,5 @@ FACE_X, FACE_Y, FACE_W, FACE_H = 128, 64, 256, 256
 class CharacterCreateResponse(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    # 이름은 Java 작업 테이블이 정해지면 맞춘다
+    # 이름 : Java 작업 테이블 확정 시 맞춤
     chrc_job_sn: int

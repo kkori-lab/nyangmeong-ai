@@ -20,9 +20,9 @@ from app.core.llm import get_anthropic_client
 logger = logging.getLogger(__name__)
 
 HEAD_TITLE_LENGTH = 30
-# 이 길이 이하의 첫 메시지는 LLM 없이 그대로 제목으로 쓴다(짧은 입력에 뜻이 덧붙지 않게)
+# 이 길이 이하의 첫 메시지는 LLM 없이 제목으로 사용 : 짧은 입력에 뜻이 덧붙는 것 방지
 SHORT_TITLE_LENGTH = 15
-# 분류·짧은 생성이라 낮은 effort. thinking 토큰도 max_tokens 안에서 쓴다
+# 분류·짧은 생성용 낮은 effort : thinking 토큰도 max_tokens에 포함
 LLM_EFFORT = "low"
 LLM_MAX_TOKENS = 1024
 # 제목 앞뒤에서 지우는 따옴표·괄호
@@ -38,12 +38,12 @@ def _head(text: str) -> str:
 
 
 def _log_failure(task: str, started: float, reason: str) -> None:
-    # 원문은 남기지 않는다 : 실패 종류와 소요 시간만
+    # 원문 제외 : 실패 종류와 소요 시간만 기록
     logger.warning("LLM %s 실패: %s (%.0fms)", task, reason, (time.monotonic() - started) * 1000)
 
 
 def _failure_reason(error: anthropic.APIError) -> str:
-    # 시간 초과와 API 오류를 나눠 남긴다
+    # 시간 초과·API 오류 구분 기록
     if isinstance(error, anthropic.APITimeoutError):
         return "timeout"
     if isinstance(error, anthropic.APIStatusError):
@@ -58,8 +58,8 @@ TITLE_SYSTEM = (
 
 
 class AnthropicTitleGenerator:
-    # FN-AIM-011-11 : 첫 메시지만 보낸다(FN-AIM-011-16 반려동물 기록은 보내지 않음).
-    # 실패해도 대화 생성을 막지 않고 mock과 같은 앞 30자를 쓴다
+    # FN-AIM-011-11 : 첫 메시지만 전송 (FN-AIM-011-16 반려동물 기록 제외)
+    # 실패해도 대화 생성 유지 : mock과 같은 앞 30자 사용
     def __init__(self, client: AsyncAnthropic, model: str):
         self.client = client
         self.model = model
@@ -94,7 +94,7 @@ class AnthropicTitleGenerator:
 
 
 def _clean_title(text: str) -> str:
-    # 첫 줄만, 앞뒤 따옴표·끝 마침표를 지운다
+    # 첫 줄만, 앞뒤 따옴표·끝 마침표 제거
     line = next((line.strip() for line in text.splitlines() if line.strip()), "")
     return line.strip(TITLE_QUOTES).strip().rstrip(".").strip()
 
@@ -112,7 +112,7 @@ class ClassifiedKind(StrEnum):
 @dataclass(frozen=True)
 class Classified:
     kind: ClassifiedKind
-    # ROUTE일 때 매핑표의 화면 ID·파라미터. 매핑표에 없으면 서비스가 버린다
+    # ROUTE일 때 매핑표의 화면 ID·파라미터 : 매핑표에 없으면 서비스가 폐기
     scr_id: str | None = None
     param: str | None = None
     # SEARCH일 때 답과 관련된 화면(FN-AIM-002-04 연관 바로가기). 매핑표에 있는 행만
@@ -143,7 +143,7 @@ class ClassifyOutput(BaseModel):
 
 @lru_cache
 def classify_system() -> str:
-    # 매핑표에서 라우팅 대상 행만 넣는다. 고정 내용이라 매 요청 같다
+    # 매핑표의 라우팅 대상 행만 : 고정 내용이라 매 요청 동일
     screens = "\n".join(
         f"{row.no}. {row.name}: {', '.join(row.keywords)}"
         for row in rules.routing_table()
@@ -167,7 +167,7 @@ def _routable_row(num: int | None) -> rules.RouteRow | None:
 
 
 def _route_of(num: int | None) -> Classified:
-    # 매핑표에 없는 번호나 라우팅 대상이 아닌 행은 판단 못 함으로 본다
+    # 매핑표에 없는 번호·라우팅 대상 아닌 행 : 판단 못 함 처리
     row = _routable_row(num)
     if row is None:
         return Classified(ClassifiedKind.UNKNOWN)
@@ -183,8 +183,8 @@ def _search_of(related_num: int | None) -> Classified:
 
 
 class AnthropicIntentClassifier:
-    # FN-AIM-004-02 : API 오류·시간 초과는 ClassifyError(→ error 이벤트, 2026-10-29 결정).
-    # 거절·깨진 출력은 입력 탓으로 보고 UNKNOWN(→ FN-AIM-004-12 폴백)
+    # FN-AIM-004-02 : API 오류·시간 초과 -> ClassifyError (error 이벤트, 2026-10-29 결정)
+    # 거절·깨진 출력은 입력 탓으로 보고 UNKNOWN (FN-AIM-004-12 폴백)
     def __init__(self, client: AsyncAnthropic, model: str):
         self.client = client
         self.model = model
@@ -205,7 +205,7 @@ class AnthropicIntentClassifier:
             _log_failure("의도 분류", started, reason)
             raise ClassifyError(reason) from error
         except ValidationError:
-            # 거절·max_tokens로 끊기면 JSON이 비거나 깨진다
+            # 거절·max_tokens 중단 시 JSON 비거나 깨짐
             _log_failure("의도 분류", started, "invalid_output")
             return Classified(ClassifiedKind.UNKNOWN)
         output = response.parsed_output
@@ -240,12 +240,12 @@ class AnswerError(Exception):
 
 
 class AnswerGenerator(Protocol):
-    # FN-AIM-002-02 : 답변을 생성되는 대로 조각으로 낸다. 실패하면 AnswerError
+    # FN-AIM-002-02 : 답변 조각 스트리밍, 실패 시 AnswerError
     def stream(self, messages: list[dict], max_tokens: int) -> AsyncIterator[str]: ...
 
 
-# FN-AIM-002-08·09 : 개인 데이터는 모른다고 보고 화면 안내, 진단 대신 수의사 상담 안내.
-# 의료 고지 문구는 서비스가 붙이므로 여기서 쓰게 하지 않는다
+# FN-AIM-002-08·09 : 개인 데이터는 모른다고 보고 화면 안내, 진단 대신 수의사 상담 안내
+# 의료 고지 문구는 서비스가 붙이므로 프롬프트에서 제외
 ANSWER_SYSTEM = (
     "너는 반려동물 케어 앱의 AI 매니저다. 반려동물 보호자의 질문에 한국어로 답한다.\n"
     "- 너는 사용자의 반려동물 기록, 일정, 다녀온 병원 같은 앱 안의 개인 데이터를 볼 수 없다. "
@@ -258,7 +258,7 @@ ANSWER_SYSTEM = (
 
 
 class AnthropicAnswerGenerator:
-    # FN-AIM-002-02 : 대화 메시지 텍스트만 보낸다(FN-AIM-011-16 반려동물 기록은 보내지 않음)
+    # FN-AIM-002-02 : 대화 메시지 텍스트만 전송 (FN-AIM-011-16 반려동물 기록 제외)
     def __init__(self, client: AsyncAnthropic, model: str):
         self.client = client
         self.model = model
@@ -283,7 +283,7 @@ class AnthropicAnswerGenerator:
             _log_failure("답변", started, reason)
             raise AnswerError(reason) from None
         except httpx2.HTTPError as error:
-            # 스트림 도중 끊김은 SDK 오류로 감싸이지 않고 올라올 수 있다
+            # 스트림 도중 끊김 : SDK 오류로 감싸이지 않고 전파될 수 있음
             reason = "timeout" if isinstance(error, httpx2.TimeoutException) else "network"
             _log_failure("답변", started, reason)
             raise AnswerError(reason) from None
@@ -306,8 +306,8 @@ def get_answer_generator(
 
 
 class RegisterExtractor(Protocol):
-    # FN-AIM-012-03 : 규칙으로 채우지 못한 칸의 보조 추출. 요청 문장과 오늘 날짜(KST)만 받는다.
-    # 돌려준 값은 검증 전 원본(칸 이름 → 값)이고, 실패하면 빈 dict
+    # FN-AIM-012-03 : 규칙으로 채우지 못한 칸의 보조 추출 (입력은 요청 문장과 오늘 날짜(KST)만)
+    # 반환값은 검증 전 원본 (칸 이름 -> 값), 실패 시 빈 dict
     async def extract(self, text: str, today: date) -> dict: ...
 
 
@@ -344,7 +344,7 @@ EXTRACT_SYSTEM = (
 
 
 class AnthropicRegisterExtractor:
-    # FN-AIM-012-03 : 반려동물 목록·기록 데이터는 보내지 않는다(POL-006). 실패하면 빈 칸(되물음)
+    # FN-AIM-012-03 : 반려동물 목록·기록 데이터 제외 (POL-006), 실패 시 빈 칸 (되물음)
     def __init__(self, client: AsyncAnthropic, model: str):
         self.client = client
         self.model = model

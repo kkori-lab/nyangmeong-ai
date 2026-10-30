@@ -35,8 +35,8 @@ class CardType(StrEnum):
 
 
 class RegisterDraft(_Camel):
-    # 등록 카드의 칸. 이름은 SCHDL·CARE_ARTCL 컬럼, 코드는 공통코드 그대로.
-    # Python은 초안을 저장하지 않는다 : React가 가장 최근 카드를 다음 메시지에 돌려보낸다
+    # 등록 카드의 칸. 이름은 SCHDL·CARE_ARTCL 컬럼, 코드는 공통코드 그대로
+    # Python은 초안 미저장 : React가 가장 최근 카드를 다음 메시지에 반환
     pet_sn: int | None = Field(default=None, ge=1)
     schdl_knd_cd: str | None = Field(default=None, max_length=8)  # HLTG19
     schdl_ymd: date | None = None
@@ -74,9 +74,9 @@ class RegisterCard(RegisterDraft):
 
 
 class MessageSendRequest(_Camel):
-    # 없으면 저장 없이 방의 마지막 사용자 메시지에 답한다(첫 메시지 직후·다시 시도·다시 생성)
+    # 없으면 저장 없이 방의 마지막 사용자 메시지에 답변 (첫 메시지 직후·다시 시도·다시 생성)
     cnvrs_cn: str | None = Field(default=None, min_length=1, max_length=MAX_MESSAGE_LENGTH)
-    # FN-AIM-012-05·10 : 가장 최근 카드(되물음 포함). 있으면 이 메시지로 칸을 채우거나 고친다
+    # FN-AIM-012-05·10 : 가장 최근 카드(되물음 포함). 있으면 이 메시지로 칸 채움·수정
     draft: RegisterDraft | None = None
 
     @field_validator("cnvrs_cn")
@@ -100,7 +100,7 @@ class ConversationMessage(_Camel):
     cnvrs_cn: str
     msg_seq: int
     reg_dt: datetime
-    # FN-AIM-002-07 : false면 미완료 답변(AI 컨텍스트에서 뺀다)
+    # FN-AIM-002-07 : false면 미완료 답변 (AI 컨텍스트에서 제외)
     cmptn_yn: bool = True
 
 
@@ -124,7 +124,7 @@ class MoveType(StrEnum):
 
 class Intent(_Camel):
     kind: IntentKind
-    # ROUTE일 때만. 화면 ID → 프론트 경로 변환은 프론트가 한다
+    # ROUTE일 때만. 화면 ID → 프론트 경로 변환은 프론트 담당
     scr_id: str | None = None
     scr_nm: str | None = None
     param: str | None = None
@@ -134,9 +134,9 @@ class Intent(_Camel):
 class AnswerDone(_Camel):
     # SSE done 이벤트. message는 저장된 AI 메시지(없거나 저장 실패면 null)
     message: ConversationMessage | None = None
-    # FN-AIM-002-04 : 연관 바로가기(ROUTE 모양). 저장하지 않는다
+    # FN-AIM-002-04 : 연관 바로가기(ROUTE 모양), 미저장
     shortcut: Intent | None = None
-    # REGISTER : 미리보기 카드나 되물음(FN-AIM-012-05~08). 카드는 저장하지 않는다
+    # REGISTER : 미리보기 카드나 되물음(FN-AIM-012-05~08), 카드 미저장
     card: RegisterCard | None = None
 
 
@@ -152,7 +152,7 @@ class RegisterResult(StrEnum):
 
 
 class RegisterResultRequest(_Camel):
-    # FN-AIM-012-11·16 : 카드 결과를 텍스트 요약으로 저장한다
+    # FN-AIM-012-11·16 : 카드 결과 텍스트 요약 저장
     result: RegisterResult
     card: RegisterCard
 
@@ -165,7 +165,7 @@ class ReceiptResult(StrEnum):
 
 
 class ReceiptResultRequest(_Camel):
-    # FN-AIM-013-02·09 : 영수증 분석(/ai/receipts)이 끝난 뒤 함께 보낸 텍스트와 결과 요약을 저장한다
+    # FN-AIM-013-02·09 : 영수증 분석(/ai/receipts) 후 함께 보낸 텍스트·결과 요약 저장
     result: ReceiptResult
     cnvrs_cn: str | None = Field(default=None, min_length=1, max_length=MAX_MESSAGE_LENGTH)
     # ReceiptOcrResponse와 같은 이름. RECOGNIZED일 때만 쓴다

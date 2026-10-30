@@ -40,7 +40,7 @@ def fake_auth_check(request: httpx2.Request) -> httpx2.Response:
 
 
 class FakeLabClient:
-    """behavior: ok·empty·not_lab·error·slow. 받은 PDF를 calls에 남긴다"""
+    """behavior: ok·empty·not_lab·error·slow. 받은 PDF는 calls에 기록"""
 
     def __init__(self, behavior: str = "ok") -> None:
         self.behavior = behavior
@@ -92,7 +92,7 @@ def test_PDF를_읽어_SCR_HLT_007_입력값_모양으로_돌려준다(client, l
     assert res.status_code == 200
     assert lab.calls == [PDF]
     data = res.json()["data"]
-    # 이름은 백엔드 InspectionAnalysisItem(INSP_NVL)과 같다. 숫자는 JSON 숫자
+    # 이름은 백엔드 InspectionAnalysisItem(INSP_NVL)과 동일, 숫자는 JSON 숫자
     assert data["items"] == [
         {
             "inspArtclCd": "HLTC0030",
@@ -102,7 +102,7 @@ def test_PDF를_읽어_SCR_HLT_007_입력값_모양으로_돌려준다(client, l
             "refLlmtNvl": 0.5,
             "refUplmtNvl": 1.8,
         },
-        # 참고범위가 한쪽만 읽히면 둘 다 비운다
+        # 참고범위가 한쪽만 읽히면 둘 다 빈 값
         {
             "inspArtclCd": "HLTC0031",
             "inspArtclDrctInptNm": None,

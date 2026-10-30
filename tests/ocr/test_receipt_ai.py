@@ -10,8 +10,9 @@ from app.core.response import AppError
 from app.main import create_app
 from app.ocr import service
 from app.ocr.clients import OcrApiError, get_ocr_client
-from app.ocr.repository import FakeReceiptRepository, ReceiptStatus, get_receipt_repository
+from app.ocr.repository import ReceiptStatus, get_receipt_repository
 from app.ocr.schemas import Line, ReceiptOcrResponse, Section
+from tests.ocr.fakes import FakeReceiptRepository
 
 URL = "/ai/receipts"
 AJAX = {"X-Requested-With": "XMLHttpRequest"}
@@ -37,7 +38,7 @@ def fake_auth_check(request: httpx2.Request) -> httpx2.Response:
 
 
 class FakeOcr:
-    """behavior: ok·empty·error·slow. 받은 이미지를 calls에 남긴다"""
+    """behavior: ok·empty·error·slow. 받은 이미지는 calls에 기록"""
 
     def __init__(self, behavior: str = "ok", delay: float = 0.0) -> None:
         self.behavior = behavior
@@ -143,7 +144,7 @@ def test_결과별_응답과_Java에_보고한_상태(
 
     assert response.status_code == http_code
     assert response.json().get("code") == code
-    # FN-AIM-010-06 : 실패해도 원본은 저장돼 있다
+    # FN-AIM-010-06 : 실패에도 원본 저장 유지
     assert repo.receipts[1].image == PNG
     assert repo.receipts[1].status is status
 
@@ -175,7 +176,7 @@ def test_jpg_jpeg_png_webp는_통과한다(client: TestClient, content: bytes, n
         (b"hello", "r.png"),  # 확장자만 png
         (PNG, "r.txt"),  # 실제는 png, 확장자가 밖
         (JPG, "r.png"),  # 확장자와 실제 형식이 다름
-        (b"%PDF-1.4", "r.pdf"),  # PDF는 받지 않는다
+        (b"%PDF-1.4", "r.pdf"),  # PDF 불허
         (PNG, "noext"),
     ],
 )
@@ -359,7 +360,7 @@ def test_연결이_끊기면_분석을_멈추고_취소를_보고한다(monkeypa
     assert error.code == "OCR_CANCELED"
     assert repo.receipts[1].status is ReceiptStatus.CANCELED
     assert repo.receipts[1].image == PNG
-    # 취소 뒤에는 다시 요청할 수 있다
+    # 취소 뒤 재요청 가능
     assert asyncio.run(_analyze(FakeOcr(), repo)).recpt_sn == 2
 
 
