@@ -30,45 +30,65 @@ def test_목록_밖_항목은_결과지_표기_그대로() -> None:
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
-        ("1.2", "1.2"),
-        ("1,234", "1234"),
-        (" 45 ", "45"),
+        ("1.2", 1.2),
+        ("1,234", 1234.0),
+        (" 45 ", 45.0),
         ("<0.5", None),
         ("음성", None),
         (None, None),
+        ("1.23456", None),
+        ("123456789012", None),
     ],
 )
-def test_숫자_문자열만_남긴다(value: str | None, expected: str | None) -> None:
+def test_숫자만_남기고_decimal_15_4에_안_들어가면_null(
+    value: str | None, expected: float | None
+) -> None:
     assert rules.normalize_number(value) == expected
 
 
+def test_드롭다운_항목은_HLTG12_공통코드() -> None:
+    item = rules.to_item("Creatinine", "1.2", "mg/dL", "0.5", "1.8")
+    assert item is not None
+    assert (item.insp_artcl_cd, item.insp_artcl_drct_inpt_nm) == ("HLTC0030", None)
+    assert (item.rslt_nvl, item.ref_llmt_nvl, item.ref_uplmt_nvl) == (1.2, 0.5, 1.8)
+
+
+def test_HLTG12에_코드가_없는_SDMA는_직접입력명() -> None:
+    item = rules.to_item("Symmetric Dimethylarginine", "16", "ug/dL", None, None)
+    assert item is not None
+    assert (item.insp_artcl_cd, item.insp_artcl_drct_inpt_nm) == (None, "SDMA")
+
+
+def test_목록_밖_항목은_직접입력명_40자() -> None:
+    item = rules.to_item("가" * 50, "1", None, None, None)
+    assert item is not None
+    assert item.insp_artcl_cd is None
+    assert item.insp_artcl_drct_inpt_nm == "가" * 40
+
+
 def test_참고범위가_한쪽만_있으면_둘_다_null() -> None:
-    item = rules.to_item("CREA", "1.2", "mg/dL", "0.5", None, True)
+    item = rules.to_item("CREA", "1.2", "mg/dL", "0.5", None)
     assert item is not None
-    assert (item.ref_min_vl, item.ref_max_vl) == (None, None)
+    assert (item.ref_llmt_nvl, item.ref_uplmt_nvl) == (None, None)
 
 
-def test_참고범위가_양쪽이면_그대로() -> None:
-    item = rules.to_item("CREA", "1.2", "mg/dL", "0.5", "1.8", True)
+def test_단위가_20자를_넘으면_null() -> None:
+    item = rules.to_item("CREA", "1.2", "x" * 21, None, None)
     assert item is not None
-    assert (item.ref_min_vl, item.ref_max_vl) == ("0.5", "1.8")
+    assert item.unit_nm is None
 
 
 def test_12종은_모델이_혈액검사가_아니라고_해도_혈액검사() -> None:
-    item = rules.to_item("Glucose", "100", "mg/dL", None, None, False)
-    assert item is not None
-    assert item.blood_yn == "Y"
+    assert rules.is_blood("Glucose", False) is True
 
 
-def test_목록_밖_비혈액_항목은_N() -> None:
-    item = rules.to_item("요비중", "1.030", None, None, None, False)
-    assert item is not None
-    assert item.blood_yn == "N"
+def test_목록_밖_비혈액_항목은_혈액검사_아님() -> None:
+    assert rules.is_blood("요비중", False) is False
 
 
 def test_이름이_없으면_행을_만들지_않는다() -> None:
-    assert rules.to_item(None, "1", None, None, None, True) is None
-    assert rules.to_item("  ", "1", None, None, None, True) is None
+    assert rules.to_item(None, "1", None, None, None) is None
+    assert rules.to_item("  ", "1", None, None, None) is None
 
 
 def test_PDF는_통과() -> None:

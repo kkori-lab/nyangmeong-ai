@@ -1,4 +1,5 @@
 import re
+from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from pathlib import Path
 
@@ -11,6 +12,11 @@ DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 MAX_PDF_BYTES = 10 * 1024 * 1024
 PDF_SIGNATURE = b"%PDF-"
 _NUMBER = re.compile(r"-?\d+(\.\d+)?")
+# INSP_NVL 컬럼 크기 : 수치 decimal(15,4), 직접입력명 40자, 단위 20자
+MAX_INT_DIGITS = 11
+MAX_FRACTION_DIGITS = 4
+MAX_DRCT_INPT_NM = 40
+MAX_UNIT_NM = 20
 
 
 def validate_pdf(data: bytes, file_name: str | None) -> None:
@@ -27,15 +33,25 @@ def _key(name: str) -> str:
 
 
 @lru_cache
-def _aliases() -> dict[str, str]:
-    # FN-HLT-007-02 : 드롭다운 12종은 data/lab_items.yaml이 기준
+def _items() -> list[dict]:
+    # FN-HLT-007-02 : 드롭다운 12종과 공통코드(HLTG12)는 data/lab_items.yaml이 기준
     with (DATA_DIR / "lab_items.yaml").open(encoding="utf-8") as f:
-        items = yaml.safe_load(f)["items"]
+        return yaml.safe_load(f)["items"]
+
+
+@lru_cache
+def _aliases() -> dict[str, str]:
     table: dict[str, str] = {}
-    for item in items:
+    for item in _items():
         for name in [item["code"], *item["aliases"]]:
             table[_key(name)] = item["code"]
     return table
+
+
+@lru_cache
+def _codes() -> dict[str, str]:
+    """표준 약어 → HLTG12 공통코드. 코드가 없는 항목(SDMA)은 빠진다"""
+    return {item["code"]: item["cd"] for item in _items() if item.get("cd")}
 
 
 def normalize_name(name: str) -> str:
@@ -56,12 +72,26 @@ def is_standard(code: str) -> bool:
     return code in _aliases().values()
 
 
-def normalize_number(value: str | None) -> str | None:
-    """숫자 문자열만 남긴다(쉼표·공백 제거). '<0.5'·'음성'처럼 숫자가 아니면 null"""
+def normalize_number(value: str | None) -> float | None:
+    """숫자만 남긴다(쉼표·공백 제거). '<0.5'·'음성'이나 decimal(15,4)에 안 들어가면 null"""
     if value is None:
         return None
     text = re.sub(r"[\s,]", "", value)
-    return text if _NUMBER.fullmatch(text) else None
+    if not _NUMBER.fullmatch(text):
+        return None
+    try:
+        number = Decimal(text)
+    except InvalidOperation:
+        return None
+    integer, _, fraction = text.lstrip("-").partition(".")
+    if len(integer.lstrip("0")) > MAX_INT_DIGITS or len(fraction) > MAX_FRACTION_DIGITS:
+        return None
+    return float(number)
+
+
+def is_blood(name: str, blood: bool) -> bool:
+    """FN-HLT-007-05 : 12종은 혈액검사. 그 밖은 모델 판정"""
+    return blood or is_standard(normalize_name(name))
 
 
 def to_item(
@@ -70,24 +100,26 @@ def to_item(
     unit: str | None,
     ref_min: str | None,
     ref_max: str | None,
-    blood: bool,
 ) -> LabResultItem | None:
     """FN-HLT-007-04 : 못 읽은 값은 null. 이름이 없으면 행을 만들지 않는다"""
     if not name or not name.strip():
         return None
     code = normalize_name(name)
+    # INSP_NVL : 공통코드가 있으면 코드, 없으면 직접입력명(40자)
+    artcl_cd = _codes().get(code)
+    drct_inpt_nm = None if artcl_cd else code[:MAX_DRCT_INPT_NM]
     low, high = normalize_number(ref_min), normalize_number(ref_max)
-    # FN-HLT-007-02 : 참고범위는 최소·최대를 함께, 한쪽만 읽히면 둘 다 비운다
+    # FN-HLT-007-02 : 참고범위는 하한·상한을 함께, 한쪽만 읽히면 둘 다 비운다
     if low is None or high is None:
         low = high = None
-    # FN-HLT-007-05 : 12종은 혈액검사. 그 밖은 모델 판정
-    blood_yn = "Y" if blood or is_standard(code) else "N"
     unit_nm = unit.strip() if unit and unit.strip() else None
+    if unit_nm and len(unit_nm) > MAX_UNIT_NM:
+        unit_nm = None
     return LabResultItem(
-        insp_artcl_nm=code,
-        rslt_vl=normalize_number(value),
+        insp_artcl_cd=artcl_cd,
+        insp_artcl_drct_inpt_nm=drct_inpt_nm,
+        rslt_nvl=normalize_number(value),
         unit_nm=unit_nm,
-        ref_min_vl=low,
-        ref_max_vl=high,
-        blood_yn=blood_yn,
+        ref_llmt_nvl=low,
+        ref_uplmt_nvl=high,
     )

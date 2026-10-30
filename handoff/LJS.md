@@ -3,12 +3,17 @@
 ## 지금 하는 것
 SCR-HLT-005 검진상세 · 검사결과지 PDF 분석 — 끝 (검증 1회차 통과, 사람 확인 2026-10-30. React가 `POST /ai/checkups/lab-results`로 검사결과지 PDF를 다시 올리면 형식·크기 검증 → LLM(`LLM_MODEL`)에 PDF document 블록으로 보내 구조화 출력 → 12종 약어 정규화(`data/lab_items.yaml`)·숫자·참고범위 정리 → SCR-HLT-007 입력값 모양 `items` 반환. 저장하지 않는다. 새 패키지 `app/checkup/`, API 초안 `docs/api/checkup.md`)
 - 기획과 다른 점: 못 읽은 값은 필드를 빼지 않고 null로 준다(영수증과 같음). 구조화 출력은 tool use가 아니라 `messages.parse`(영수증과 같음). 기획의 `.env.example`은 실제 파일 `.env.local.example`.
-- 병합 조건: 응답 필드 이름(`inspArtclNm` 등)은 초안. 건강기록 백엔드의 검사 수치 저장 DTO와 맞춘 뒤 백엔드 PR과 함께 병합한다(AGENTS.md 4번).
+- 추가-1 끝(검증 통과, 사람 확인 2026-10-30): 응답을 백엔드 InspectionAnalysisItem(INSP_NVL, DDL v0.10) 이름으로 맞춤 — `inspArtclCd`(HLTG12)·`inspArtclDrctInptNm`·`rsltNvl`·`unitNm`·`refLlmtNvl`·`refUplmtNvl`, 혈액검사가 아닌 항목은 `excludedArtclNms`. 진입 경로는 React → Python 고정(2026-10-30 LJS 결정)
+
+### 추가 요청
+| 번호 | 바꿀 파일 | 완료 조건 | 요청 |
+| --- | --- | --- | --- |
+| 추가-1 | `app/checkup/{schemas,rules,service}.py`, `data/lab_items.yaml`, `docs/api/checkup.md`, `tests/checkup/` | 명령: `sh scripts/check.sh` 통과, 응답 항목이 백엔드 `docs/api/health.md` InspectionAnalysisItem 이름(`inspArtclCd`(HLTG12)·`inspArtclDrctInptNm`·`rsltNvl`·`unitNm`·`refLlmtNvl`·`refUplmtNvl`, 숫자는 JSON 숫자)과 같고 혈액검사가 아닌 항목은 `excludedArtclNms`로 뺀다. 화면: 합성 결과지 PDF로 `POST /ai/checkups/lab-results` → CREA는 `inspArtclCd` HLTC0030, SDMA·Total Protein은 `inspArtclDrctInptNm`, 소변 항목은 `excludedArtclNms` | 요청 2026-10-30 09:40 "응답 필드는 백엔드 db/ DDL 보고 실제로 연결" |
 
 ## 다음에 할 것
 - 바로 다음(2026-10-30 frontend-83 요청, `/start AIM-013`): FN-AIM-008-09·010-06·013-08, 008-07 — `app/ocr/repository.py` `FakeReceiptRepository`를 Java 영수증 내부 API(백엔드 PR #64, develop 병합)로 교체. `POST /internal/ai/receipts`(multipart `file`·`petSn`·`ocrDmndSrcCd`) → 201 `recptSn`, `POST /internal/ai/receipts/{recptSn}/result`(`ocrRslt` RECOGNIZED·UNRECOGNIZED·TIMEOUT·API_ERROR·CANCELED, RECOGNIZED면 `ocr`). 실패·취소도 꼭 보고(안 하면 RECPT가 분석중으로 남고 Java 정리 배치 없음), React 응답 전에 보고를 await하는 순서 유지, `docs/api/internal.md` 미정 2행 확정. 계약은 메시지가 아니라 백엔드 `docs/api/receipt.md`·코드와 대조(필드 이름·오류 코드 `FILE_TOO_LARGE` 등). 끝나면 frontend-83 세션에 알린다
-- 연결 남음: FN-HLT-005-04 응답 필드 이름(`inspArtclNm`·`rsltVl`·`unitNm`·`refMinVl`·`refMaxVl`·`bloodYn`)을 건강기록 백엔드의 검사 수치 저장 DTO와 맞춘다(건강기록 백엔드 담당). 맞추기 전에는 이 PR을 병합하지 않는다
-- 프론트(LJS) 대기: 검진상세 첨부 자료 [PDF 분석] → `POST /ai/checkups/lab-results`(파일 다시 올림) → 성공 시 SCR-HLT-007에 채움, `bloodYn` N 행은 저장 대상에서 빼고 안내, 실패·422·504는 SCR-HLT-005에서 사유 안내, 다시 분석 중복 요청은 버튼 잠금
+- JAJ에 요청(2026-10-30 LJS 결정): 검사결과지 PDF 분석은 React → Python `POST /ai/checkups/lab-results`로 고정한다. 백엔드 `docs/api/health.md`의 Java `POST /pets/{petSn}/checkup-attachments/{ckupRcdAtchSn}/analyses`와 InspectionAnalysisResponse(`anlysRslt`)는 지운다. 항목 이름은 Python이 InspectionAnalysisItem(INSP_NVL)에 맞췄다(`registered`는 React가 검진상세 목록으로 판정). HLTG12에 SDMA 코드가 없어 지금은 직접입력명 `SDMA`로 보낸다. 명세대로 드롭다운에 넣으려면 JAJ가 SDMA 코드를 추가하고 `data/lab_items.yaml`에 `cd`를 넣는다
+- 프론트(LJS) 대기: 검진상세 첨부 자료 [PDF 분석] → `POST /ai/checkups/lab-results`(파일 다시 올림) → 성공 시 SCR-HLT-007에 채움, `excludedArtclNms`는 저장 대상 밖으로 안내, `registered`(이미 등록됨)는 검진상세 혈액검사 목록으로 판정, 실패·422·504는 SCR-HLT-005에서 사유 안내, 다시 분석 중복 요청은 버튼 잠금
 - 검사결과지 인식률: 합성 결과지 1건으로만 확인(2026-10-30). 실제 병원 결과지·스캔본으로 더 확인(원본은 git 제외)
 - 연결 남음: FN-MYP-010-08·17·18 생성기 붙이기 — 다른 곳에서 만드는 생성기(사진 분석 포함)를 `app/character/clients.py` `get_character_client`에 붙인다. 입출력이 다르면 그 파일에 맞춤 코드만. 분석 방식(한 번에 / 분석 뒤 생성)·반려동물 사진 판정은 그때 정한다. 붙인 뒤 얼굴 영역 위치·샘플 10건 이상 검증(FN-MYP-010-18), 규격 미확보 시 대체(FN-MYP-010-19) 판단 (LJS)
 - 연결 남음: FN-MYP-010-09 Java 캐릭터 작업 생성·결과 보고 내부 API(LJS 백엔드, 캐릭터 흐름 재설계). 연결되면 `app/character/repository.py` `FakeCharacterJobRepository` 교체, 작업 번호 이름(`chrcJobSn`)·실패 사유를 Java에 맞춘다. 초안은 `docs/api/internal.md` "Python → Java" 미정 행

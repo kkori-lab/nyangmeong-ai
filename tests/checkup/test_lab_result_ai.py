@@ -91,34 +91,29 @@ def test_PDF를_읽어_SCR_HLT_007_입력값_모양으로_돌려준다(client, l
 
     assert res.status_code == 200
     assert lab.calls == [PDF]
-    items = res.json()["data"]["items"]
-    assert items == [
+    data = res.json()["data"]
+    # 이름은 백엔드 InspectionAnalysisItem(INSP_NVL)과 같다. 숫자는 JSON 숫자
+    assert data["items"] == [
         {
-            "inspArtclNm": "CREA",
-            "rsltVl": "1.2",
+            "inspArtclCd": "HLTC0030",
+            "inspArtclDrctInptNm": None,
+            "rsltNvl": 1.2,
             "unitNm": "mg/dL",
-            "refMinVl": "0.5",
-            "refMaxVl": "1.8",
-            "bloodYn": "Y",
+            "refLlmtNvl": 0.5,
+            "refUplmtNvl": 1.8,
         },
         # 참고범위가 한쪽만 읽히면 둘 다 비운다
         {
-            "inspArtclNm": "ALT",
-            "rsltVl": "45",
+            "inspArtclCd": "HLTC0031",
+            "inspArtclDrctInptNm": None,
+            "rsltNvl": 45,
             "unitNm": "U/L",
-            "refMinVl": None,
-            "refMaxVl": None,
-            "bloodYn": "Y",
-        },
-        {
-            "inspArtclNm": "요비중",
-            "rsltVl": "1.030",
-            "unitNm": None,
-            "refMinVl": None,
-            "refMaxVl": None,
-            "bloodYn": "N",
+            "refLlmtNvl": None,
+            "refUplmtNvl": None,
         },
     ]
+    # 혈액검사가 아닌 항목은 이름만 안내용으로
+    assert data["excludedArtclNms"] == ["요비중"]
 
 
 def test_인식_항목_0건은_200_빈_배열(client, lab) -> None:
@@ -126,7 +121,7 @@ def test_인식_항목_0건은_200_빈_배열(client, lab) -> None:
     res = post(client)
 
     assert res.status_code == 200
-    assert res.json()["data"]["items"] == []
+    assert res.json()["data"] == {"items": [], "excludedArtclNms": []}
 
 
 def test_검사결과지가_아니면_422_NOT_LAB_RESULT(client, lab) -> None:

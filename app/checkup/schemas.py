@@ -8,14 +8,15 @@ class _Camel(BaseModel):
 
 
 class LabResultItem(_Camel):
-    # 필드 이름은 초안 : 건강기록 백엔드의 검사 수치 저장 DTO와 맞춘다
-    insp_artcl_nm: str
-    rslt_vl: str | None = None
+    # 백엔드 InspectionAnalysisItem(INSP_NVL 컬럼)과 같은 이름. `registered`는 Java·React가 정한다
+    insp_artcl_cd: str | None = None
+    insp_artcl_drct_inpt_nm: str | None = None
+    rslt_nvl: float | None = None
     unit_nm: str | None = None
-    ref_min_vl: str | None = None
-    ref_max_vl: str | None = None
-    blood_yn: str = "Y"
+    ref_llmt_nvl: float | None = None
+    ref_uplmt_nvl: float | None = None
 
 
 class LabResultAnalyzeResponse(_Camel):
     items: list[LabResultItem] = []
+    excluded_artcl_nms: list[str] = []
