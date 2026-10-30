@@ -1,16 +1,16 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-011 대화창 · 첫 답변 요약 제목 (추가 요청) · Java PATCH 연결 — 끝 (검증 통과, 사람 확인 2026-10-30. internal.md PATCH 행 확정, Python 코드 변경 없음)
-- 상황: LJS 백엔드 작업 트리에 `PATCH /internal/ai/conversations/{aiCnvrsRoomSn}`(`ConversationTitleUpdateRequest {cnvrsTtl: @NotBlank @Size(max=200)}`, 본인 대화 아니면 404 `NOT_FOUND`, 200 ConversationSummary, 암호화 저장)와 백엔드 `docs/api/ai.md` 행이 있다(아직 커밋·PR 전). Python 초안과 경로·본문·응답이 같다. Python 코드(`JavaConversationRepository.update_title`)는 이미 이 계약으로 부른다
-- 결정: Python 코드는 바꾸지 않는다. Python은 200자(코드 포인트)로 자르고 Java `@Size`는 UTF-16 길이라 이모지가 많으면 400이 날 수 있다. 실패해도 로그만 남고 답변은 그대로라 이번에는 두고 남는 위험으로 적는다
-- (명세 밖, 관련 FN-AIM-011-11) → `docs/api/internal.md` PATCH 행의 "초안(백엔드 PR 전, LJS)"를 "확정(10-30, 정본은 백엔드 `docs/api/ai.md`)"으로 바꾸고 "그때까지 `tests/chat/conftest.py` `FakeJava`" 문구를 지운다. 부를 API: Java `PATCH /internal/ai/conversations/{aiCnvrsRoomSn}` `{cnvrsTtl}` → 200 ConversationSummary(LJS 백엔드, 작업 트리에 있음·PR 전). 완료 조건 — 명령: `sh scripts/check.sh` 통과(코드 변경 없음, 기존 테스트 ①~⑥ 그대로). 화면: 로컬 Java(백엔드 LJS 작업 트리)와 Python을 띄워 Postman으로 새 대화(`POST /ai/conversations`) → 메시지 전송(SEARCH 질문, SSE `done`까지) → `GET /ai/conversations`에서 그 방 제목이 요약 제목으로 바뀐 것, 같은 방에 SEARCH를 한 번 더 보내도 제목이 다시 바뀌지 않는 것 확인
-- 결정: 추천안대로. 질문 아님(완료 조건의 "SEARCH 질문"이 걸림), 기획대로 진행. 백엔드 PATCH는 구현 완료(2026-10-30 LJS)
+SCR-AIM-002 대화창 · 검색 질문/응답 · 의료 고지 중복 수정 — 끝 (검증 통과 1회차, 사람 확인 2026-10-30. `build_context`가 저장된 답변 끝의 고지를 떼고 넘긴다)
+- 결정: 추천안대로. 질문 아님(제목의 "질문/응답"이 걸림)
+- 문제(10-30 검증 중 발견): 같은 방 두 번째 SEARCH 답변 끝에 "※ 참고 정보이며…"가 두 번 붙는다. 원인: 저장된 AI 답변은 고지를 포함해 저장되고(FN-AIM-002-03), `build_context`가 그 본문을 그대로 assistant 메시지로 넘겨 모델이 프롬프트("고지 문구를 따로 쓰지 않는다")를 어기고 따라 쓴다. 서비스가 다시 붙여 두 번이 된다
+- FN-AIM-002-03·002-11 → `app/chat/service.py` `build_context`에서 AI 메시지 본문 끝의 `DISCLAIMER`를 떼고 넘긴다(`removesuffix`). 저장 형식·`delta`·`done` 계약은 그대로. 부를 API: 없음(Java 내부 API 그대로). 완료 조건 — 명령: `sh scripts/check.sh` 통과, `tests/chat/test_messages.py`에 테스트 추가: ① 고지가 붙은 AI 메시지는 컨텍스트에서 고지 없이 넘어간다 ② 고지가 없는 AI 메시지·사용자 메시지는 그대로. 화면: 로컬 Java와 Python을 띄워 Postman으로 같은 방에 SEARCH 질문 두 번 → 두 번째 SSE `delta` 이어 붙인 본문과 `done.message.cnvrsCn` 끝에 고지가 한 번만 있다
+- 결정: 추천안대로. 질문 아님(완료 조건의 "SEARCH 질문"이 걸림), 기획대로 진행
+- 하지 않는 것: 모델이 고지를 스스로 쓴 경우 답변 본문에서 지우기(문구가 조금만 달라도 못 잡고, 원인을 막으면 드물다). 남으면 다음에 할 것으로
 - 새 의존성: 없음
 
 ## 다음에 할 것
 - 백엔드 PR #75(대화 제목 수정 내부 API) 병합 확인. 배포 전에 병합돼야 제목 교체가 동작한다(병합 전엔 PATCH 실패 → 로그만)
-- 버그 의심(10-30 검증 중 발견): 같은 방 두 번째 SEARCH 답변 끝에 의료 고지 문구 "※ 참고 정보이며…"가 두 번 붙었다
 - 남는 위험: 제목 200자를 Python은 코드 포인트, Java `@Size`는 UTF-16으로 센다. 이모지가 많은 요약 제목은 Java 400(로그만)
 - 프론트(LJS) 알리기: SCR-AIM-011 첫 SEARCH 답변은 `done` 뒤 제목 요약(Haiku 한 번)이 끝나야 SSE 스트림이 닫힌다. 입력창 다시 열기는 스트림 종료가 아닌 `done` 기준으로. 바뀐 제목은 대화 목록을 다시 읽어 반영
 - DMS 반영(모아서): AI매니저 기능명세서 FN-AIM-011-11에 "첫 AI 답변이 SEARCH로 완료되면 질문·답변 요약으로 제목을 한 번 바꾼다(서버, 사용자 변경 없음)" 추가

@@ -548,6 +548,32 @@ def test_컨텍스트는_미완료와_답할_메시지_뒤를_뺀다():
     assert build_context(messages, 1, 6) == [{"role": "user", "content": "질문"}]
 
 
+def test_컨텍스트는_답변_끝의_의료_고지를_뗀다():
+    messages = [
+        message(1, ROLE_USER, "질문"),
+        message(2, ROLE_AI, "답변" + DISCLAIMER),
+        message(3, ROLE_USER, "새 질문"),
+    ]
+    context = build_context(messages, 3, 6)
+
+    assert context[1] == {"role": "assistant", "content": "답변"}
+
+
+def test_컨텍스트는_고지_없는_답변과_사용자_메시지를_그대로_넘긴다():
+    messages = [
+        message(1, ROLE_USER, "질문" + DISCLAIMER),
+        message(2, ROLE_AI, "답변"),
+        message(3, ROLE_USER, "새 질문"),
+    ]
+    context = build_context(messages, 3, 6)
+
+    assert context == [
+        {"role": "user", "content": "질문" + DISCLAIMER},
+        {"role": "assistant", "content": "답변"},
+        {"role": "user", "content": "새 질문"},
+    ]
+
+
 def test_턴_수는_설정값을_따른다():
     messages = conversation(3) + [message(7, ROLE_USER, "새 질문")]
     assert len(build_context(messages, 7, 1)) == 1
