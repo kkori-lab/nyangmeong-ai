@@ -1,0 +1,387 @@
+import logging
+import time
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from datetime import date
+from enum import StrEnum
+from functools import lru_cache
+from typing import Annotated, Protocol
+
+import anthropic
+import httpx2
+from anthropic import AsyncAnthropic
+from fastapi import Depends
+from pydantic import BaseModel, ValidationError
+
+from app.chat import rules
+from app.core.config import Settings, get_settings
+from app.core.llm import get_anthropic_client
+
+logger = logging.getLogger(__name__)
+
+HEAD_TITLE_LENGTH = 30
+# 이 길이 이하의 첫 메시지는 LLM 없이 제목으로 사용 : 짧은 입력에 뜻이 덧붙는 것 방지
+SHORT_TITLE_LENGTH = 15
+# 분류·짧은 생성용 낮은 effort : thinking 토큰도 max_tokens에 포함
+LLM_EFFORT = "low"
+LLM_MAX_TOKENS = 1024
+# 제목 앞뒤에서 지우는 따옴표·괄호
+TITLE_QUOTES = "\"'“”‘’「」『』"
+
+
+class TitleGenerator(Protocol):
+    async def generate(self, first_message: str) -> str: ...
+
+
+def _head(text: str) -> str:
+    return text.strip()[:HEAD_TITLE_LENGTH]
+
+
+def _log_failure(task: str, started: float, reason: str) -> None:
+    # 원문 제외 : 실패 종류와 소요 시간만 기록
+    logger.warning("LLM %s 실패: %s (%.0fms)", task, reason, (time.monotonic() - started) * 1000)
+
+
+def _failure_reason(error: anthropic.APIError) -> str:
+    # 시간 초과·API 오류 구분 기록
+    if isinstance(error, anthropic.APITimeoutError):
+        return "timeout"
+    if isinstance(error, anthropic.APIStatusError):
+        return f"api_error {error.status_code}"
+    return "api_error"
+
+
+TITLE_SYSTEM = (
+    "사용자가 반려동물 케어 앱의 AI 대화창에 처음 보낸 메시지를 보고 대화 제목을 만든다. "
+    "한국어 한 줄, 30자 안팎으로 쓴다. 따옴표·마침표·설명 없이 제목만 쓴다."
+)
+
+
+class AnthropicTitleGenerator:
+    # FN-AIM-011-11 : 첫 메시지만 전송 (FN-AIM-011-16 반려동물 기록 제외)
+    # 실패해도 대화 생성 유지 : mock과 같은 앞 30자 사용
+    def __init__(self, client: AsyncAnthropic, model: str):
+        self.client = client
+        self.model = model
+
+    async def generate(self, first_message: str) -> str:
+        if len(first_message.strip()) <= SHORT_TITLE_LENGTH:
+            return first_message.strip()
+        started = time.monotonic()
+        try:
+            response = await self.client.messages.create(
+                model=self.model,
+                max_tokens=LLM_MAX_TOKENS,
+                system=TITLE_SYSTEM,
+                messages=[{"role": "user", "content": first_message}],
+                output_config={"effort": LLM_EFFORT},
+            )
+        except anthropic.APIError as error:
+            _log_failure("제목 생성", started, _failure_reason(error))
+            return _head(first_message)
+        if response.stop_reason == "refusal":
+            _log_failure("제목 생성", started, "refusal")
+            return _head(first_message)
+        text = next((block.text for block in response.content if block.type == "text"), "")
+        title = _clean_title(text)
+        logger.info(
+            "LLM 제목 생성: 입력 %d자 → %d자 (%.0fms)",
+            len(first_message),
+            len(title),
+            (time.monotonic() - started) * 1000,
+        )
+        return title or _head(first_message)
+
+
+def _clean_title(text: str) -> str:
+    # 첫 줄만, 앞뒤 따옴표·끝 마침표 제거
+    line = next((line.strip() for line in text.splitlines() if line.strip()), "")
+    return line.strip(TITLE_QUOTES).strip().rstrip(".").strip()
+
+
+def get_title_generator(settings: Annotated[Settings, Depends(get_settings)]) -> TitleGenerator:
+    return AnthropicTitleGenerator(get_anthropic_client(settings), settings.llm_model)
+
+
+class ClassifiedKind(StrEnum):
+    ROUTE = "ROUTE"
+    SEARCH = "SEARCH"
+    UNKNOWN = "UNKNOWN"
+
+
+@dataclass(frozen=True)
+class Classified:
+    kind: ClassifiedKind
+    # ROUTE일 때 매핑표의 화면 ID·파라미터 : 매핑표에 없으면 서비스가 폐기
+    scr_id: str | None = None
+    param: str | None = None
+    # SEARCH일 때 답과 관련된 화면(FN-AIM-002-04 연관 바로가기). 매핑표에 있는 행만
+    related_scr_id: str | None = None
+    related_param: str | None = None
+
+
+class ClassifyError(Exception):
+    """분류 LLM 장애(API 오류·시간 초과). reason은 로그용 실패 종류(원문 없음)"""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+class IntentClassifier(Protocol):
+    # FN-AIM-004-02 : 룰 매칭에 실패한 입력에만 부르는 보조 분류. 장애면 ClassifyError
+    async def classify(self, text: str) -> Classified: ...
+
+
+class ClassifyOutput(BaseModel):
+    # 구조화 출력 모양. route_num은 매핑표(data/routing.yaml)의 num
+    kind: ClassifiedKind
+    route_num: int | None = None
+    # SEARCH일 때 답과 관련된 화면 번호(FN-AIM-002-04)
+    related_num: int | None = None
+
+
+@lru_cache
+def classify_system() -> str:
+    # 매핑표의 라우팅 대상 행만 : 고정 내용이라 매 요청 동일
+    screens = "\n".join(
+        f"{row.no}. {row.name}: {', '.join(row.keywords)}"
+        for row in rules.routing_table()
+        if row.routable
+    )
+    return (
+        "반려동물 케어 앱 AI 대화창의 사용자 입력을 하나로 분류한다.\n"
+        "- ROUTE: 아래 화면 중 하나로 가려는 요청. route_num에 그 화면 번호를 쓴다.\n"
+        "- SEARCH: 반려동물이나 앱에 관해 답을 찾아 줘야 하는 질문.\n"
+        "- UNKNOWN: 그 밖의 입력(뜻 없는 글자, 욕설, 판단하기 어려운 것). "
+        "확실하지 않으면 UNKNOWN.\n"
+        "ROUTE가 아니면 route_num은 null.\n"
+        "SEARCH이고 답과 관련된 화면이 아래에 있으면 related_num에 그 번호를, "
+        "없으면 null을 쓴다.\n\n"
+        f"화면 목록(번호. 화면명: 키워드)\n{screens}"
+    )
+
+
+def _routable_row(num: int | None) -> rules.RouteRow | None:
+    return next((row for row in rules.routing_table() if row.no == num and row.routable), None)
+
+
+def _route_of(num: int | None) -> Classified:
+    # 매핑표에 없는 번호·라우팅 대상 아닌 행 : 판단 못 함 처리
+    row = _routable_row(num)
+    if row is None:
+        return Classified(ClassifiedKind.UNKNOWN)
+    return Classified(ClassifiedKind.ROUTE, scr_id=row.scr_id, param=row.param)
+
+
+def _search_of(related_num: int | None) -> Classified:
+    # 연관 화면 번호가 매핑표에 없으면 바로가기 없이 검색
+    row = _routable_row(related_num)
+    if row is None:
+        return Classified(ClassifiedKind.SEARCH)
+    return Classified(ClassifiedKind.SEARCH, related_scr_id=row.scr_id, related_param=row.param)
+
+
+class AnthropicIntentClassifier:
+    # FN-AIM-004-02 : API 오류·시간 초과 -> ClassifyError (error 이벤트, 2026-10-29 결정)
+    # 거절·깨진 출력은 입력 탓으로 보고 UNKNOWN (FN-AIM-004-12 폴백)
+    def __init__(self, client: AsyncAnthropic, model: str):
+        self.client = client
+        self.model = model
+
+    async def classify(self, text: str) -> Classified:
+        started = time.monotonic()
+        try:
+            response = await self.client.messages.parse(
+                model=self.model,
+                max_tokens=LLM_MAX_TOKENS,
+                system=classify_system(),
+                messages=[{"role": "user", "content": text}],
+                output_config={"effort": LLM_EFFORT},
+                output_format=ClassifyOutput,
+            )
+        except anthropic.APIError as error:
+            reason = _failure_reason(error)
+            _log_failure("의도 분류", started, reason)
+            raise ClassifyError(reason) from error
+        except ValidationError:
+            # 거절·max_tokens 중단 시 JSON 비거나 깨짐
+            _log_failure("의도 분류", started, "invalid_output")
+            return Classified(ClassifiedKind.UNKNOWN)
+        output = response.parsed_output
+        if response.stop_reason == "refusal" or output is None:
+            _log_failure("의도 분류", started, response.stop_reason or "no_output")
+            return Classified(ClassifiedKind.UNKNOWN)
+        logger.info(
+            "LLM 의도 분류: 입력 %d자 → %s (%.0fms)",
+            len(text),
+            output.kind,
+            (time.monotonic() - started) * 1000,
+        )
+        if output.kind is ClassifiedKind.ROUTE:
+            return _route_of(output.route_num)
+        if output.kind is ClassifiedKind.SEARCH:
+            return _search_of(output.related_num)
+        return Classified(output.kind)
+
+
+def get_intent_classifier(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> IntentClassifier:
+    return AnthropicIntentClassifier(get_anthropic_client(settings), settings.llm_model)
+
+
+class AnswerError(Exception):
+    """답변 생성 실패. reason은 로그용 실패 종류(원문 없음)"""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+class AnswerGenerator(Protocol):
+    # FN-AIM-002-02 : 답변 조각 스트리밍, 실패 시 AnswerError
+    def stream(self, messages: list[dict], max_tokens: int) -> AsyncIterator[str]: ...
+
+
+# FN-AIM-002-08·09 : 개인 데이터는 모른다고 보고 화면 안내, 진단 대신 수의사 상담 안내
+# 의료 고지 문구는 서비스가 붙이므로 프롬프트에서 제외
+ANSWER_SYSTEM = (
+    "너는 반려동물 케어 앱의 AI 매니저다. 반려동물 보호자의 질문에 한국어로 답한다.\n"
+    "- 너는 사용자의 반려동물 기록, 일정, 다녀온 병원 같은 앱 안의 개인 데이터를 볼 수 없다. "
+    "그런 내용을 물으면 추측하지 말고 앱의 해당 화면(케어 캘린더, 건강 기록 등)에서 "
+    "확인하라고 안내한다.\n"
+    "- 진단이나 처방을 하지 않는다. 증상을 물으면 일반적인 정보를 주고 "
+    "수의사 상담을 권한다. 응급으로 보이면 바로 동물병원에 가라고 먼저 말한다.\n"
+    "- 답 끝에 의료 고지 문구를 따로 쓰지 않는다."
+)
+
+
+class AnthropicAnswerGenerator:
+    # FN-AIM-002-02 : 대화 메시지 텍스트만 전송 (FN-AIM-011-16 반려동물 기록 제외)
+    def __init__(self, client: AsyncAnthropic, model: str):
+        self.client = client
+        self.model = model
+
+    async def stream(self, messages: list[dict], max_tokens: int) -> AsyncIterator[str]:
+        started = time.monotonic()
+        length = 0
+        try:
+            async with self.client.messages.stream(
+                model=self.model,
+                max_tokens=max_tokens,
+                system=ANSWER_SYSTEM,
+                messages=messages,
+                output_config={"effort": LLM_EFFORT},
+            ) as stream:
+                async for text in stream.text_stream:
+                    length += len(text)
+                    yield text
+                final = await stream.get_final_message()
+        except anthropic.APIError as error:
+            reason = _failure_reason(error)
+            _log_failure("답변", started, reason)
+            raise AnswerError(reason) from None
+        except httpx2.HTTPError as error:
+            # 스트림 도중 끊김 : SDK 오류로 감싸이지 않고 전파될 수 있음
+            reason = "timeout" if isinstance(error, httpx2.TimeoutException) else "network"
+            _log_failure("답변", started, reason)
+            raise AnswerError(reason) from None
+        if final.stop_reason == "refusal":
+            _log_failure("답변", started, "refusal")
+            raise AnswerError("refusal")
+        logger.info(
+            "LLM 답변: 메시지 %d개 → %d자 %s (%.0fms)",
+            len(messages),
+            length,
+            final.stop_reason,
+            (time.monotonic() - started) * 1000,
+        )
+
+
+def get_answer_generator(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> AnswerGenerator:
+    return AnthropicAnswerGenerator(get_anthropic_client(settings), settings.llm_model)
+
+
+class RegisterExtractor(Protocol):
+    # FN-AIM-012-03 : 규칙으로 채우지 못한 칸의 보조 추출 (입력은 요청 문장과 오늘 날짜(KST)만)
+    # 반환값은 검증 전 원본 (칸 이름 -> 값), 실패 시 빈 dict
+    async def extract(self, text: str, today: date) -> dict: ...
+
+
+class ExtractOutput(BaseModel):
+    # 구조화 출력 모양. 모르는 칸은 null
+    schdl_knd_cd: str | None = None
+    schdl_ymd: str | None = None
+    schdl_tm: str | None = None
+    ckup_type_cd: str | None = None
+    hsptl_nm: str | None = None
+    schdl_nm: str | None = None
+    care_artcl_nm: str | None = None
+    care_zone_cd: str | None = None
+    care_cycle_cd: str | None = None
+    cycle_days: int | None = None
+    last_cmptn_ymd: str | None = None
+
+
+EXTRACT_SYSTEM = (
+    "반려동물 케어 앱에서 보호자가 일정이나 반복 케어 항목을 등록해 달라고 한 문장에서 "
+    "칸을 뽑는다. "
+    "문장에 없는 칸은 추측하지 말고 null로 둔다. 날짜는 사용자 메시지의 오늘 날짜를 기준으로 "
+    "YYYY-MM-DD, 시간은 24시간 HH:MM으로 쓴다.\n"
+    "- schdl_knd_cd(일정 종류): HLTC0057 병원, HLTC0058 미용·목욕, HLTC0059 케어·투약, "
+    "HLTC0060 기타\n"
+    "- ckup_type_cd(병원일 때 검진유형): HLTC0001 정기검진, HLTC0002 예방접종, HLTC0003 질병진료, "
+    "HLTC0004 검사, HLTC0005 기타 진료\n"
+    "- hsptl_nm: 병원 이름. schdl_nm: 병원이 아닌 일정의 이름(40자 이내)\n"
+    "- 주기가 있는 요청이면 일정이 아니라 케어 항목이다. care_artcl_nm: 항목명(40자 이내), "
+    "care_zone_cd: HLTC0036 매일 / HLTC0037 주기, care_cycle_cd: HLTC0038 1주, HLTC0039 2주, "
+    "HLTC0040 한달, HLTC0041 1년, HLTC0042 직접입력(cycle_days에 n일), "
+    "last_cmptn_ymd: 마지막으로 한 날"
+)
+
+
+class AnthropicRegisterExtractor:
+    # FN-AIM-012-03 : 반려동물 목록·기록 데이터 제외 (POL-006), 실패 시 빈 칸 (되물음)
+    def __init__(self, client: AsyncAnthropic, model: str):
+        self.client = client
+        self.model = model
+
+    async def extract(self, text: str, today: date) -> dict:
+        started = time.monotonic()
+        content = f"오늘: {today.isoformat()} ({'월화수목금토일'[today.weekday()]})\n요청: {text}"
+        try:
+            response = await self.client.messages.parse(
+                model=self.model,
+                max_tokens=LLM_MAX_TOKENS,
+                system=EXTRACT_SYSTEM,
+                messages=[{"role": "user", "content": content}],
+                output_config={"effort": LLM_EFFORT},
+                output_format=ExtractOutput,
+            )
+        except anthropic.APIError as error:
+            _log_failure("등록 칸 추출", started, _failure_reason(error))
+            return {}
+        except ValidationError:
+            _log_failure("등록 칸 추출", started, "invalid_output")
+            return {}
+        output = response.parsed_output
+        if response.stop_reason == "refusal" or output is None:
+            _log_failure("등록 칸 추출", started, response.stop_reason or "no_output")
+            return {}
+        values = output.model_dump(exclude_none=True)
+        logger.info(
+            "LLM 등록 칸 추출: 입력 %d자 → %d칸 (%.0fms)",
+            len(text),
+            len(values),
+            (time.monotonic() - started) * 1000,
+        )
+        return values
+
+
+def get_register_extractor(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> RegisterExtractor:
+    return AnthropicRegisterExtractor(get_anthropic_client(settings), settings.llm_model)

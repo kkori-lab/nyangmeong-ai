@@ -1,0 +1,7 @@
+#!/bin/sh
+# 커밋 메시지에서 AI 도구가 붙인 공동 작성자 줄과 생성 문구를 지운다.
+# setup이 이 폴더를 core.hooksPath로 등록한다. 백엔드·프론트 저장소에 같은 파일이 있다. 고칠 때 모두 고친다
+msg=$1
+grep -v -i -e '^co-authored-by:' -e 'generated with \[claude code\]' "$msg" |
+  awk '{ line[NR] = $0 } END { n = NR; while (n > 0 && line[n] ~ /^[[:space:]]*$/) n--; for (i = 1; i <= n; i++) print line[i] }' > "$msg.tmp"
+mv "$msg.tmp" "$msg"

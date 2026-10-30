@@ -1,0 +1,239 @@
+# 부록 A. 라우팅 지시어 매핑표 (AI매니저 기능명세서 v0.9, FN-AIM-004-09)
+# 명세가 바뀌면 이 파일만 고친다. 키워드는 공백을 빼고 대조한다(최장 일치, 같은 길이면 위쪽 행).
+# num: 부록 A의 No(YAML에서 `no`는 false로 읽혀 이름을 바꿈). routable: false 는 라우팅 대상이 아닌 행(종속 화면·제외·보류). 키워드를 두지 않는다.
+# move_type: PAGE = 본창 이동, MODAL = 본창에서 모달 열기(SCR-COM-009)
+version: v0.9
+rows:
+  - num: 1
+    group: 대표 칩
+    name: 종합 건강기록
+    scr_id: SCR-HLT-011
+    keywords: [건강기록, 종합 건강기록, 건강 종합, 건강 이력, 우리 애 상태]
+  - num: 2
+    group: 대표 칩
+    name: 플레이스 병원 화면
+    scr_id: SCR-HOS-001
+    param: "?cat=hospital"
+    keywords: [병원, 동물병원, 진료, 아파, 병원 찾아줘]
+  # 명세의 미용·용품·호텔·동반 키워드는 No.17~20 탭 행으로 보낸다.
+  # 같은 길이면 위쪽 행 우선이라 여기 두면 파라미터 없는 이 행이 이긴다.
+  - num: 3
+    group: 대표 칩
+    name: 플레이스
+    scr_id: SCR-HOS-001
+    keywords: [플레이스]
+  - num: 4
+    group: 대표 칩
+    name: 펫이야기 목록
+    scr_id: SCR-CMU-001-01
+    keywords: [커뮤니티, 게시판, 펫이야기, 글 보고 싶어]
+  - num: 5
+    group: 대표 칩
+    name: 마이페이지 홈
+    scr_id: SCR-MYP-001
+    keywords: [마이페이지, 내 정보, 내 페이지]
+  - num: 6
+    group: 대표 칩
+    name: 픽셀 캐릭터 관리
+    scr_id: SCR-MYP-010
+    keywords: [캐릭터, 픽셀, 꾸미기, 아이템]
+  - num: 7
+    group: 대표 칩
+    name: 공지사항 목록
+    scr_id: SCR-CSC-001
+    keywords: [고객센터, 문의, 공지, 공지사항]
+  - num: 8
+    group: 일반
+    name: 메인
+    scr_id: SCR-MAN-001
+    keywords: [메인, 홈, 처음으로, 대시보드, 통합대시보드, 건강 대시보드]
+  - num: 9
+    group: 일반
+    name: 설정
+    scr_id: SCR-COM-008
+    keywords: [설정, 알림 설정, 알림 꺼줘, 알림 켜줘, 수신 해제]
+  - num: 10
+    group: 일반
+    name: 채팅
+    scr_id: SCR-COM-009
+    move_type: MODAL
+    keywords: [채팅, 메시지, 쪽지, 대화 확인]
+  - num: 11
+    group: 일반
+    name: 케어 캘린더
+    scr_id: SCR-HLT-003
+    keywords: [케어 캘린더, 캘린더, 일정 보여줘, 일정 등록, 접종 일정, 다음 접종, 예방접종 예정, 정기검진 일정, 병원 예약]
+  - num: 12
+    group: 일반
+    name: 케어 캘린더 토탈 케어리스트
+    scr_id: SCR-HLT-003
+    keywords: [케어리스트, 토탈 케어리스트, 데일리케어, 일상관리, 정기관리, 투약 체크, 심장사상충, 구충]
+  - num: 13
+    group: 일반
+    name: 건강 일지
+    scr_id: SCR-HLT-002
+    keywords: [건강 일지, 일상 기록, 오늘 기록, 체중, 식사량, 음수량, 배변, 산책 기록, 검진기록, 검진 이력, 진료 내역, 지속 관찰, 관찰 기록]
+  - num: 14
+    group: 일반
+    name: 건강 일지 검진기록
+    scr_id: SCR-HLT-002
+    keywords: [병원 영수증, 약봉투, 진료비 영수증, 영수증으로 검진 등록]
+  - num: 15
+    group: 일반
+    name: 종합 건강기록 처방 및 투약 이력
+    scr_id: SCR-HLT-011
+    keywords: [처방약, 약, 복용 중인 약, 투약 이력]
+  - num: 16
+    group: 일반
+    name: 종합 건강기록 검사 결과
+    scr_id: SCR-HLT-011
+    keywords: [검사 결과, 혈액검사 결과, 검사 수치, 수치 추이, 검사지]
+  - num: 17
+    group: 일반
+    name: 플레이스 미용 화면
+    scr_id: SCR-HOS-001
+    param: "?cat=beauty"
+    keywords: [미용, 애견미용, 미용실, 털 깎]
+  - num: 18
+    group: 일반
+    name: 플레이스 용품 화면
+    scr_id: SCR-HOS-001
+    param: "?cat=goods"
+    keywords: [용품, 사료 파는 곳, 펫샵]
+  - num: 19
+    group: 일반
+    name: 플레이스 동반 화면
+    scr_id: SCR-HOS-001
+    param: "?cat=pet-friendly"
+    keywords: [동반, 같이 갈 수 있는, 애견동반 카페]
+  - num: 20
+    group: 일반
+    name: 플레이스 호텔 화면
+    scr_id: SCR-HOS-001
+    param: "?cat=hotel"
+    keywords: [호텔, 맡길 곳, 펫호텔]
+  - num: 21
+    group: 일반
+    name: 동물병원 요약 카드
+    scr_id: SCR-HOS-002
+    routable: false
+  - num: 22
+    group: 일반
+    name: 펫이야기 글 상세
+    scr_id: SCR-CMU-001-02
+    routable: false
+  - num: 23
+    group: 일반
+    name: 실종센터
+    scr_id: SCR-CMU-002
+    keywords: [실종, 잃어버렸어, 실종센터, 찾아주세요, 제보]
+  - num: 24
+    group: 일반
+    name: 펫뉴스
+    scr_id: SCR-CMU-003-01
+    keywords: [뉴스, 펫뉴스, 소식]
+  - num: 25
+    group: 일반
+    name: 우리동네 펫돌봄
+    scr_id: SCR-CMU-004
+    keywords: [펫돌봄, 돌봄, 펫시터, 산책 도우미, 맡아주실 분]
+  - num: 26
+    group: 일반
+    name: 반려동물 등록·수정
+    scr_id: SCR-MYP-002
+    keywords: [반려동물 등록, 프로필 등록, 우리 애 정보]
+  - num: 27
+    group: 일반
+    name: 공동양육 관리
+    scr_id: SCR-MYP-004
+    keywords: [공동양육, 같이 키우, 초대]
+  - num: 28
+    group: 일반
+    name: 픽셀 캐릭터 상세
+    scr_id: SCR-MYP-011
+    routable: false
+  - num: 29
+    group: 일반
+    name: 케어미션 · 포인트
+    scr_id: SCR-MYP-020
+    keywords: [포인트, 케어미션, 미션]
+  - num: 30
+    group: 일반
+    name: 가계부
+    scr_id: SCR-MYP-030
+    keywords: [가계부, 지출, 얼마 썼, 병원비, 한도, 가계부 영수증]
+  - num: 31
+    group: 일반
+    name: 가계부 전체 내역
+    scr_id: SCR-MYP-031
+    keywords: [전체 내역, 지출 내역 다 보여줘]
+  - num: 32
+    group: 일반
+    name: 회원정보 수정
+    scr_id: SCR-MYP-040
+    keywords: [회원정보, 비밀번호 변경, 닉네임 변경, 탈퇴]
+  - num: 33
+    group: 일반
+    name: FAQ 목록
+    scr_id: SCR-CSC-002-01
+    keywords: [자주하는 질문, FAQ, 도움말]
+  - num: 34
+    group: 일반
+    name: 공지 상세
+    scr_id: SCR-CSC-001-02
+    routable: false
+  - num: 35
+    group: 제외
+    name: 랜딩페이지
+    scr_id: SCR-MAN-002
+    routable: false
+  - num: 36
+    group: 제외
+    name: 로그인 · 회원가입
+    scr_id: SCR-ACC-001 / 002
+    routable: false
+  - num: 37
+    group: 제외
+    name: 기본 레이아웃 · 드롭다운 3종
+    scr_id: SCR-COM-002·004·005·006
+    routable: false
+  - num: 38
+    group: 제외
+    name: AI 매니저 새 창 런처
+    scr_id: SCR-COM-007
+    routable: false
+  - num: 39
+    group: 제외
+    name: 대화창 자신
+    scr_id: SCR-AIM-0xx
+    routable: false
+  - num: 40
+    group: 제외
+    name: OCR 촬영 · 결과 확인 · 실패
+    scr_id: SCR-AIM-008 / 009 / 010
+    routable: false
+  - num: 41
+    group: 제외
+    name: 검진상세
+    scr_id: SCR-HLT-005
+    routable: false
+  - num: 42
+    group: 제외
+    name: 검사 수치 입력
+    scr_id: SCR-HLT-007
+    routable: false
+  - num: 43
+    group: 제외
+    name: 결번
+    scr_id: SCR-HLT-000·001·004·006·008·009
+    routable: false
+  - num: 44
+    group: 제외
+    name: 플레이스 (보류)
+    scr_id: SCR-PLC-001 / 002
+    routable: false
+  - num: 45
+    group: 제외
+    name: 관리자 도메인 전체
+    scr_id: "—"
+    routable: false

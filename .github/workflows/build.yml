@@ -1,0 +1,18 @@
+# PR마다 검증 명령(scripts/check.sh)을 돌린다. 테스트는 가짜 클라이언트로 돌므로 비밀값을 넣지 않는다
+name: build
+
+on:
+  pull_request:
+    branches: [develop]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install
+        run: uv sync --locked
+      # 검증 명령(ruff check, ruff format --check, pytest). 로컬·하네스와 같은 파일을 쓴다
+      - name: Check
+        run: sh scripts/check.sh

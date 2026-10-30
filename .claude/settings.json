@@ -1,0 +1,32 @@
+{
+  "model": "sonnet",
+  "attribution": {
+    "commit": "",
+    "pr": "",
+    "sessionUrl": false
+  },
+  "extraKnownMarketplaces": {
+    "nyangmeong-backend": {
+      "source": {
+        "source": "git",
+        "url": "https://github.com/kkori-lab/nyangmeong-backend.git"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "limit-guard@nyangmeong-backend": true
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$CLAUDE_PROJECT_DIR/scripts/verify-loop.sh\" guard"
+          }
+        ]
+      }
+    ]
+  }
+}

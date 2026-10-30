@@ -1,0 +1,12 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|apply_patch",
+        "hooks": [
+          { "type": "command", "command": "sh \"$(git rev-parse --show-toplevel)/scripts/verify-loop.sh\" guard" }
+        ]
+      }
+    ]
+  }
+}
