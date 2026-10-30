@@ -206,8 +206,11 @@ def build_context(messages: list[ConversationMessage], question_seq: int, turns:
     # Messages API는 사용자 메시지로 시작 필수
     while recent and recent[0].role_cd != ROLE_USER:
         recent = recent[1:]
+    # 저장된 답변의 고지는 떼고 넘김 : 모델이 따라 써 고지가 두 번 붙는 것 방지
     return [
-        {"role": "user" if m.role_cd == ROLE_USER else "assistant", "content": m.cnvrs_cn}
+        {"role": "user", "content": m.cnvrs_cn}
+        if m.role_cd == ROLE_USER
+        else {"role": "assistant", "content": m.cnvrs_cn.removesuffix(DISCLAIMER)}
         for m in recent
     ]
 
