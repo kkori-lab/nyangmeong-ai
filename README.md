@@ -13,7 +13,7 @@ React는 AI 채팅·영수증 OCR·캐릭터 생성·검사결과지 PDF 분석�
 
 ## 개발 환경
 
-Git만 있으면 된다. setup이 Claude Code, uv, Python 3.13, 의존성, VS Code 확장, 커밋 훅, DMS MCP를 맞추고 서버가 뜨는지 확인한다. 여러 번 실행해도 된다.
+Git만 있으면 된다. setup이 Claude Code, uv, Python 3.13(3.12도 지원), 의존성, VS Code 확장, 커밋 훅, DMS MCP를 맞추고 서버가 뜨는지 확인한다. 여러 번 실행해도 된다.
 
 ```bash
 bash setup.sh      # 맥
@@ -58,7 +58,6 @@ sh scripts/check.sh      # ruff check, ruff format --check, pytest. CI와 하네
 2. 로그인이 필요한 `/ai/**` API면 백엔드 저장소에서 `./gradlew bootRun`을 띄우고 쿠키를 받는다.
    - `POST http://localhost:8080/api/auth/dev-tokens`, Headers `X-Requested-With: XMLHttpRequest`, Body → raw → JSON `{"mbrSn": <MBR에 있는 번호>}` → 200
    - 쿠키는 포트와 관계없이 `localhost`에 붙으므로 Postman이 `http://localhost:8000` 요청에도 실어 보낸다. 이 저장소 `.env.local`의 `BACKEND_BASE_URL`이 `http://localhost:8080`이어야 한다(Python이 쿠키를 Java에 넘겨 인증을 확인한다).
-   - Java에 아직 없는 내부 API(대화 저장 등)는 가짜 Java로 확인한다: `uv run uvicorn scripts.fake_backend:app --port 8081`, `BACKEND_BASE_URL=http://localhost:8081`, 쿠키는 Postman에서 `access_token=member-<번호>`를 직접 넣는다.
 3. 내부 API(`/internal/v1/**`, 폐기 예정)는 키 헤더 없이 보낸다. 파일은 Body → form-data에서 필드 종류를 File로 바꿔 고른다.
    - 검사결과지 PDF 분석(`POST /ai/checkups/lab-results`)은 form-data `file`에 PDF를 고른다. LLM_API_KEY가 있어야 실제로 읽는다. 확인용 결과지 PDF는 git에 올리지 않는다.
 4. 목록의 요청을 그대로 보낸다: 메서드·URL, Headers, Body. POST·PUT·PATCH·DELETE의 `/ai/**` 요청에는 `X-Requested-With: XMLHttpRequest`를 넣는다.

@@ -2,9 +2,10 @@ import asyncio
 
 import pytest
 
-from app.chat.clients import Classified, ClassifiedKind
-from app.chat.rules import is_register_request
+from app.chat.clients import Classified, ClassifiedKind, ClassifyError
+from app.chat.rules import is_question, is_register_request
 from app.chat.schemas import IntentKind, MoveType
+from app.chat.service import judge as service_judge
 from app.chat.service import judge_intent
 from tests.chat.fakes import FakeIntentClassifier
 
@@ -14,7 +15,7 @@ class FakeClassifier:
         self.result = result
         self.calls = 0
 
-    async def classify(self, text: str) -> Classified:
+    async def classify(self, text: str, hint=None) -> Classified:
         self.calls += 1
         return self.result
 
@@ -165,3 +166,102 @@ def test_이미지가_첨부되면_문장과_관계없이_RECEIPT(text):
 
     assert judge(text, has_image=True, classifier=classifier).kind is IntentKind.RECEIPT
     assert classifier.calls == 0
+
+
+# 범위 밖 질문 차단(2026-10-30 LJS 추가 요청) : 키워드에 걸린 질문꼴은 AI로 서비스 범위 확인
+
+
+class HintClassifier:
+    def __init__(self, result: Classified | None = None, error: Exception | None = None):
+        self.result = result
+        self.error = error
+        self.hints = []
+
+    async def classify(self, text: str, hint=None) -> Classified:
+        self.hints.append(hint)
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("가계부 작성 방법 알려줘", True),
+        ("가계부는 어떻게 써", True),
+        ("병원비 왜 이렇게 비싸?", True),
+        ("가계부 보여줘", False),
+        ("가계부", False),
+        ("이번 달 얼마 썼어", False),
+        ("알림 꺼줘", False),
+    ],
+)
+def test_질문꼴_판정(text, expected):
+    assert is_question(text) is expected
+
+
+def test_키워드에_걸린_범위_밖_질문은_FALLBACK():
+    classifier = HintClassifier(Classified(ClassifiedKind.UNKNOWN))
+    intent = judge("가계부 작성 방법 알려줘", classifier=classifier)
+
+    assert intent.kind is IntentKind.FALLBACK
+    assert [hint.scr_id for hint in classifier.hints] == ["SCR-MYP-030"]
+
+
+@pytest.mark.parametrize("text", ["가계부 보여줘", "가계부"])
+def test_이동_지시나_키워드만_있으면_AI_없이_ROUTE(text):
+    classifier = HintClassifier(Classified(ClassifiedKind.UNKNOWN))
+    intent = judge(text, classifier=classifier)
+
+    assert intent.kind is IntentKind.ROUTE
+    assert intent.scr_id == "SCR-MYP-030"
+    assert classifier.hints == []
+
+
+def test_키워드에_걸린_범위_안_질문은_AI가_ROUTE면_ROUTE():
+    classifier = HintClassifier(Classified(ClassifiedKind.ROUTE, "SCR-MYP-030"))
+    intent = judge("반려동물 가계부 쓰는 법 알려줘", classifier=classifier)
+
+    assert intent.kind is IntentKind.ROUTE
+    assert intent.scr_id == "SCR-MYP-030"
+    assert len(classifier.hints) == 1
+
+
+def test_키워드에_걸린_범위_안_질문은_AI가_SEARCH면_SEARCH():
+    classifier = HintClassifier(Classified(ClassifiedKind.SEARCH))
+    intent = judge("반려동물 가계부 쓰는 법 알려줘", classifier=classifier)
+
+    assert intent.kind is IntentKind.SEARCH
+
+
+def test_질문꼴_확인_중_분류_장애면_룰대로_ROUTE():
+    # FN-AIM-002-10 : 룰 라우팅은 LLM 장애와 무관
+    classifier = HintClassifier(error=ClassifyError("api_error"))
+    intent = judge("가계부 작성 방법 알려줘", classifier=classifier)
+
+    assert intent.kind is IntentKind.ROUTE
+    assert intent.scr_id == "SCR-MYP-030"
+
+
+def test_룰에_안_걸리는_범위_밖_질문은_FALLBACK():
+    classifier = HintClassifier(Classified(ClassifiedKind.UNKNOWN))
+    intent = judge("파이썬 코딩 알려줘", classifier=classifier)
+
+    assert intent.kind is IntentKind.FALLBACK
+    assert classifier.hints == [None]
+
+
+@pytest.mark.parametrize("text", ["가계부 작성 방법 알려줘", "파이썬 코딩 알려줘"])
+def test_범위_밖_분류는_FALLBACK이고_범위_밖으로_표시(text):
+    classifier = HintClassifier(Classified(ClassifiedKind.OUT_OF_SCOPE))
+    judged = asyncio.run(service_judge(text, False, classifier))
+
+    assert judged.intent.kind is IntentKind.FALLBACK
+    assert judged.out_of_scope is True
+
+
+def test_판단_못_함은_범위_밖으로_표시하지_않는다():
+    judged = asyncio.run(service_judge("ㅁㄴㅇㄹ", False, FakeIntentClassifier()))
+
+    assert judged.intent.kind is IntentKind.FALLBACK
+    assert judged.out_of_scope is False

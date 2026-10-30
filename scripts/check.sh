@@ -19,4 +19,7 @@ run() {
 run "ruff check" uv run ruff check .
 run "ruff format --check" uv run ruff format --check .
 run "pytest" uv run pytest -q
-echo "ruff check · ruff format · pytest 통과"
+# 배포 서버는 uv 없이 pip install -r requirements.txt : uv.lock과 어긋나면 실패
+run "requirements.txt (uv.lock과 다름, 다시 뽑기: uv export --no-dev --no-hashes --no-header --frozen -o requirements.txt)" \
+  sh -c 'uv export --no-dev --no-hashes --no-header --frozen --quiet | diff requirements.txt -'
+echo "ruff check · ruff format · pytest · requirements.txt 통과"

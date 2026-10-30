@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator
 from datetime import date
 
 from app.chat.clients import Classified, ClassifiedKind
+from app.chat.rules import RouteRow
 
 TITLE_LENGTH = 30
 # 가짜 분류기가 질문으로 보는 표현
@@ -17,9 +18,13 @@ class FakeTitleGenerator:
 
 
 class FakeIntentClassifier:
-    """질문 표현이 있으면 검색, 아니면 판단 못 함"""
+    """질문 표현이 있으면 검색, 아니면 판단 못 함. 받은 힌트 기록"""
 
-    async def classify(self, text: str) -> Classified:
+    def __init__(self) -> None:
+        self.hints: list[RouteRow | None] = []
+
+    async def classify(self, text: str, hint: RouteRow | None = None) -> Classified:
+        self.hints.append(hint)
         if QUESTION.search(text):
             return Classified(ClassifiedKind.SEARCH)
         return Classified(ClassifiedKind.UNKNOWN)

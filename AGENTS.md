@@ -18,10 +18,10 @@
 
 ## 기술 스택과 편집기
 
-Python 3.13, FastAPI, pydantic-settings, uv, ruff, pytest. Docker는 쓰지 않는다. Java 호출은 httpx2.
+Python 3.12·3.13(개발 PC 3.13, 배포 서버 3.12), FastAPI, pydantic-settings, uv, ruff, pytest. Docker는 쓰지 않는다. Java 호출은 httpx2.
 
 - VS Code로 작업한다. 저장할 때 Ruff로 포맷한다(`.vscode/settings.json`). 줄바꿈은 LF, 한 줄 100자다.
-- 의존성은 `uv add`·`uv remove`로만 바꾼다. `pyproject.toml`과 `uv.lock`을 같이 커밋한다.
+- 의존성은 `uv add`·`uv remove`로만 바꾼다. `pyproject.toml`·`uv.lock`·`requirements.txt`(배포 서버 pip용, `uv export --no-dev --no-hashes --no-header --frozen -o requirements.txt`)를 같이 커밋한다. 어긋나면 `scripts/check.sh`가 실패한다.
 
 ## 패키지 구조
 
