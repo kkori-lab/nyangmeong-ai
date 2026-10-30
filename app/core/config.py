@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     ocr_timeout_sec: float = 15.0
     # Google Vision API 키. 비어 있으면 영수증 분석 API는 502
     google_vision_api_key: SecretStr = SecretStr("")
+    # FN-HLT-005-04 : 검사결과지 PDF 분석 제한 시간(초). LLM 한 번
+    pdf_analyze_timeout_sec: float = 30.0
 
     # LLM(Anthropic, 2026-10-28 결정). 비어 있으면 LLM이 필요한 API는 502
     llm_api_key: SecretStr = SecretStr("")

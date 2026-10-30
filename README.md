@@ -60,6 +60,7 @@ sh scripts/check.sh      # ruff check, ruff format --check, pytest. CI와 하네
    - 쿠키는 포트와 관계없이 `localhost`에 붙으므로 Postman이 `http://localhost:8000` 요청에도 실어 보낸다. 이 저장소 `.env.local`의 `BACKEND_BASE_URL`이 `http://localhost:8080`이어야 한다(Python이 쿠키를 Java에 넘겨 인증을 확인한다).
    - Java에 아직 없는 내부 API(대화 저장 등)는 가짜 Java로 확인한다: `uv run uvicorn scripts.fake_backend:app --port 8081`, `BACKEND_BASE_URL=http://localhost:8081`, 쿠키는 Postman에서 `access_token=member-<번호>`를 직접 넣는다.
 3. 내부 API(`/internal/v1/**`, 폐기 예정)는 키 헤더 없이 보낸다. 파일은 Body → form-data에서 필드 종류를 File로 바꿔 고른다.
+   - 검사결과지 PDF 분석(`POST /ai/checkups/lab-results`)은 form-data `file`에 PDF를 고른다. LLM_API_KEY가 있어야 실제로 읽는다. 확인용 결과지 PDF는 git에 올리지 않는다.
 4. 목록의 요청을 그대로 보낸다: 메서드·URL, Headers, Body. POST·PUT·PATCH·DELETE의 `/ai/**` 요청에는 `X-Requested-With: XMLHttpRequest`를 넣는다.
 5. 응답 코드와 JSON(또는 이미지)을 기대 결과와 비교한다. 스트리밍 응답은 Postman 응답 창에 이벤트가 차례로 쌓이는지 본다.
 6. Postman으로 만들기 어려운 조건(만료 토큰, 외부 API 시간 초과 등)은 목록의 테스트로 확인한다: `uv run pytest <파일>::<테스트 이름>`
