@@ -32,6 +32,9 @@ TITLE_QUOTES = "\"'“”‘’「」『』"
 class TitleGenerator(Protocol):
     async def generate(self, first_message: str) -> str: ...
 
+    # 실패·거절이면 빈 문자열 : 제목 그대로 유지
+    async def summarize(self, question: str, answer: str) -> str: ...
+
 
 def _head(text: str) -> str:
     return text.strip()[:HEAD_TITLE_LENGTH]
@@ -53,6 +56,12 @@ def _failure_reason(error: anthropic.APIError) -> str:
 
 TITLE_SYSTEM = (
     "사용자가 반려동물 케어 앱의 AI 대화창에 처음 보낸 메시지를 보고 대화 제목을 만든다. "
+    "한국어 한 줄, 30자 안팎으로 쓴다. 따옴표·마침표·설명 없이 제목만 쓴다."
+)
+
+SUMMARY_TITLE_SYSTEM = (
+    "반려동물 케어 앱의 AI 대화창에서 사용자의 첫 질문과 AI의 첫 답변을 보고 대화 제목을 만든다. "
+    "질문에 없는 뜻을 덧붙이지 말고 대화가 다룬 내용을 요약한다. "
     "한국어 한 줄, 30자 안팎으로 쓴다. 따옴표·마침표·설명 없이 제목만 쓴다."
 )
 
@@ -91,6 +100,34 @@ class AnthropicTitleGenerator:
             (time.monotonic() - started) * 1000,
         )
         return title or _head(first_message)
+
+    async def summarize(self, question: str, answer: str) -> str:
+        # 추가 요청(SCR-AIM-011) : 첫 답변까지 보고 제목 다시 생성, 실패하면 빈 문자열
+        started = time.monotonic()
+        content = f"질문:\n{question}\n\n답변:\n{answer}"
+        try:
+            response = await self.client.messages.create(
+                model=self.model,
+                max_tokens=LLM_MAX_TOKENS,
+                system=SUMMARY_TITLE_SYSTEM,
+                messages=[{"role": "user", "content": content}],
+                output_config={"effort": LLM_EFFORT},
+            )
+        except anthropic.APIError as error:
+            _log_failure("제목 요약", started, _failure_reason(error))
+            return ""
+        if response.stop_reason == "refusal":
+            _log_failure("제목 요약", started, "refusal")
+            return ""
+        text = next((block.text for block in response.content if block.type == "text"), "")
+        title = _clean_title(text)
+        logger.info(
+            "LLM 제목 요약: 입력 %d자 → %d자 (%.0fms)",
+            len(content),
+            len(title),
+            (time.monotonic() - started) * 1000,
+        )
+        return title
 
 
 def _clean_title(text: str) -> str:

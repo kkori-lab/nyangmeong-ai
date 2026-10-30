@@ -224,10 +224,11 @@ async def answer_turn(
     ai: AiSettings,
     limits: AnswerLimits,
     register: "RegisterDeps | None" = None,
+    titles: TitleGenerator | None = None,
 ) -> AsyncIterator[Event]:
     queue: asyncio.Queue[Event | None] = asyncio.Queue()
     task = asyncio.create_task(
-        _run_turn(turn, repo, classifier, answers, ai, limits, queue.put_nowait, register)
+        _run_turn(turn, repo, classifier, answers, ai, limits, queue.put_nowait, register, titles)
     )
     _running.add(task)
     task.add_done_callback(_running.discard)
@@ -244,6 +245,7 @@ async def _run_turn(
     limits: AnswerLimits,
     emit: Callable[[Event | None], None],
     register: "RegisterDeps | None" = None,
+    titles: TitleGenerator | None = None,
 ) -> None:
     try:
         text = turn.question.cnvrs_cn
@@ -259,7 +261,9 @@ async def _run_turn(
         emit(("intent", judged.intent))
         kind = judged.intent.kind
         if kind is IntentKind.SEARCH:
-            await _search_answer(turn, repo, answers, ai, limits, judged.shortcut, emit)
+            answer = await _search_answer(turn, repo, answers, ai, limits, judged.shortcut, emit)
+            if answer is not None and titles is not None and _is_first_answer(turn):
+                await _retitle(repo, titles, turn, answer)
         elif kind is IntentKind.FALLBACK:
             fallback = await reply_fallback(repo, turn.room_sn, judged.out_of_scope)
             emit(("done", AnswerDone(message=fallback)))
@@ -291,8 +295,8 @@ async def _search_answer(
     limits: AnswerLimits,
     shortcut: Intent | None,
     emit: Callable[[Event | None], None],
-) -> None:
-    # FN-AIM-002-02·07
+) -> str | None:
+    # FN-AIM-002-02·07 : 완료면 고지 전 본문 반환(제목 요약용), 실패·미완료면 None
     context = build_context(turn.messages, turn.question.msg_seq, ai.context_turns)
     stream = answers.stream(context, ai.max_tokens)
     loop = asyncio.get_running_loop()
@@ -306,7 +310,7 @@ async def _search_answer(
             first = None
         if first is None:
             emit(("error", StreamError(code="EXTERNAL_API_ERROR", message=ANSWER_ERROR_MESSAGE)))
-            return
+            return None
         chunks = [first]
         emit(("delta", {"text": first}))
         complete = False
@@ -321,13 +325,34 @@ async def _search_answer(
             pass
     finally:
         await stream.aclose()
-    text = "".join(chunks)
+    body = "".join(chunks)
+    text = body
     if complete:
         # FN-AIM-002-03 : 고지는 본문 끝에 포함해 저장, 미완료 답변 제외
         emit(("delta", {"text": DISCLAIMER}))
         text += DISCLAIMER
     message = await _save(repo, turn.room_sn, text, complete)
     emit(("done", AnswerDone(message=message, shortcut=shortcut)))
+    return body if complete else None
+
+
+def _is_first_answer(turn: Turn) -> bool:
+    # 의도 종류는 메시지에 없음 : 방의 첫 AI 메시지일 때만 (한 방에 1회)
+    return not any(m.role_cd == ROLE_AI for m in turn.messages)
+
+
+async def _retitle(
+    repo: ConversationRepository, titles: TitleGenerator, turn: Turn, answer: str
+) -> None:
+    # 추가 요청(SCR-AIM-011) : 첫 SEARCH 답변 뒤 질문·답변 요약으로 제목 1회 교체
+    # done 뒤 실행 : 실패해도 이미 보낸 답변 유지, 제목은 그대로 (error 이벤트 없음)
+    try:
+        summary = await titles.summarize(turn.question.cnvrs_cn, answer)
+        title = summary.strip()[:MAX_TITLE_LENGTH]
+        if title:
+            await repo.update_title(turn.room_sn, title)
+    except Exception as error:
+        logger.warning("대화 제목 교체 실패: room=%d (%s)", turn.room_sn, type(error).__name__)
 
 
 async def _save(

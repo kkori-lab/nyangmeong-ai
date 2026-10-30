@@ -11,10 +11,17 @@ QUESTION = re.compile(r"[?？]|뭐|왜|어떻게|알려|어때|될까|되나|나
 
 
 class FakeTitleGenerator:
-    """LLM 없이 첫 메시지 앞부분을 제목으로 사용"""
+    """LLM 없이 첫 메시지 앞부분을 제목으로 사용. 요약은 답변 앞부분, 받은 질문·답변 기록"""
+
+    def __init__(self) -> None:
+        self.summaries: list[tuple[str, str]] = []
 
     async def generate(self, first_message: str) -> str:
         return first_message.strip()[:TITLE_LENGTH]
+
+    async def summarize(self, question: str, answer: str) -> str:
+        self.summaries.append((question, answer))
+        return f"요약 {answer.strip()}"[:TITLE_LENGTH]
 
 
 class FakeIntentClassifier:

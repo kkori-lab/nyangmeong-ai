@@ -17,7 +17,7 @@ from app.chat.service import (
 )
 from app.core.config import get_settings
 from tests.chat.conftest import AJAX, ROLE_USER, FakeJava, _ok, as_member, member_of
-from tests.chat.fakes import FakeIntentClassifier
+from tests.chat.fakes import FakeIntentClassifier, FakeTitleGenerator
 
 SEARCH_TEXT = "강아지 포도 먹어도 돼?"
 
@@ -582,6 +582,137 @@ def test_mock_모드는_LLM_없이_조각을_흘린다(client, java):
     assert names(evs).count("delta") >= 3
     assert "대화 메시지 2개" in deltas(evs)
     assert deltas(evs).endswith(DISCLAIMER)
+
+
+# 첫 답변 요약 제목 (추가 요청, SCR-AIM-011)
+
+
+@pytest.fixture
+def titles(client) -> FakeTitleGenerator:
+    fake = FakeTitleGenerator()
+    client.app.dependency_overrides[clients.get_title_generator] = lambda: fake
+    return fake
+
+
+def title_patches(java: FakeJava) -> list[dict]:
+    return [json.loads(r.content) for r in java.requests if r.method == "PATCH"]
+
+
+class FailingSummary(FakeTitleGenerator):
+    """요약 실패 흉내 : result를 돌려주거나 raise면 예외"""
+
+    def __init__(self, result: str = "", raise_error: bool = False) -> None:
+        super().__init__()
+        self.result = result
+        self.raise_error = raise_error
+
+    async def summarize(self, question: str, answer: str) -> str:
+        if self.raise_error:
+            raise RuntimeError("boom")
+        return self.result
+
+
+def test_첫_검색_답변이_끝나면_질문과_답변_요약으로_제목을_한_번_바꾼다(
+    client, java, answers, titles
+):
+    as_member(client, 1)
+    room = java.add_room(1, "강아지 포도", cn=SEARCH_TEXT)
+    evs = events(send(client, room))
+
+    assert names(evs)[-1] == "done"
+    # 고지 문구는 요약 입력에서 뺀다
+    assert titles.summaries == [(SEARCH_TEXT, "포도는 강아지에게 위험해요.")]
+    expected = "요약 포도는 강아지에게 위험해요."
+    assert title_patches(java) == [{"cnvrsTtl": expected}]
+    assert java.rooms[room]["cnvrsTtl"] == expected
+    patch = next(r for r in java.requests if r.method == "PATCH")
+    assert patch.url.path == f"/internal/ai/conversations/{room}"
+    assert patch.headers["X-Requested-With"] == "XMLHttpRequest"
+
+
+def test_두_번째_검색_답변부터는_제목을_바꾸지_않는다(client, java, answers, titles):
+    as_member(client, 1)
+    room = java.add_room(1, "강아지 포도", cn=SEARCH_TEXT)
+    events(send(client, room))
+    events(send(client, room, "고양이는 어때?"))
+
+    assert len(titles.summaries) == 1
+    assert len(title_patches(java)) == 1
+
+
+@pytest.mark.parametrize("first", ["일정 등록할래", "ㅁㄴㅇㄹ"])
+def test_첫_답변이_이동이나_폴백이면_뒤의_검색도_제목을_바꾸지_않는다(
+    client, java, answers, titles, first
+):
+    as_member(client, 1)
+    room = java.add_room(1, "제목")
+    events(send(client, room, first))
+    events(send(client, room, SEARCH_TEXT))
+
+    assert titles.summaries == []
+    assert title_patches(java) == []
+    assert java.rooms[room]["cnvrsTtl"] == "제목"
+
+
+def test_미완료_답변이면_제목을_바꾸지_않는다(client, java, titles):
+    use(client, Answers(chunks=("부분 ", "답변 ", "나머지"), fail=2))
+    as_member(client, 1)
+    room = java.add_room(1, "제목")
+    events(send(client, room, SEARCH_TEXT))
+
+    assert titles.summaries == []
+    assert title_patches(java) == []
+
+
+def test_첫_글자_전_실패_뒤_다시_시도가_끝나면_제목을_바꾼다(client, java, titles):
+    # 첫 글자 전 실패는 AI 메시지를 저장하지 않으므로 다시 시도가 첫 답변
+    as_member(client, 1)
+    room = java.add_room(1, "제목", cn=SEARCH_TEXT)
+    use(client, Answers(fail=0))
+    events(send(client, room))
+    assert title_patches(java) == []
+
+    use(client, Answers())
+    events(send(client, room))
+    assert len(title_patches(java)) == 1
+
+
+@pytest.mark.parametrize(
+    "summary", [FailingSummary(""), FailingSummary("  "), FailingSummary(raise_error=True)]
+)
+def test_요약이_실패해도_답변과_done은_그대로이고_제목은_유지(client, java, answers, summary):
+    client.app.dependency_overrides[clients.get_title_generator] = lambda: summary
+    as_member(client, 1)
+    room = java.add_room(1, "제목", cn=SEARCH_TEXT)
+    evs = events(send(client, room))
+
+    assert names(evs) == ["intent", "delta", "delta", "delta", "done"]
+    assert evs[-1][1]["message"]["cmptnYn"] is True
+    assert len(java.ai_messages(room)) == 1
+    assert title_patches(java) == []
+    assert java.rooms[room]["cnvrsTtl"] == "제목"
+
+
+def test_제목_수정이_실패해도_답변과_done은_그대로(client, java, answers, titles):
+    java.title_status = 500
+    as_member(client, 1)
+    room = java.add_room(1, "제목", cn=SEARCH_TEXT)
+    evs = events(send(client, room))
+
+    assert names(evs) == ["intent", "delta", "delta", "delta", "done"]
+    assert evs[-1][1]["message"]["cnvrsCn"] == "포도는 강아지에게 위험해요." + DISCLAIMER
+    assert len(title_patches(java)) == 1
+    assert java.rooms[room]["cnvrsTtl"] == "제목"
+
+
+def test_요약_제목은_200자로_자른다(client, java, answers):
+    long = FailingSummary("가" * 250)
+    client.app.dependency_overrides[clients.get_title_generator] = lambda: long
+    as_member(client, 1)
+    room = java.add_room(1, "제목", cn=SEARCH_TEXT)
+    events(send(client, room))
+
+    assert title_patches(java) == [{"cnvrsTtl": "가" * 200}]
 
 
 # 키 없는 PC·CI : 가짜를 끼우지 않으면 실제 API 대신 502
