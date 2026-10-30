@@ -6,6 +6,7 @@ from fastapi import FastAPI
 
 from app.character import router as character_router
 from app.chat import router as chat_router
+from app.checkup import router as checkup_router
 from app.core import health
 from app.core.backend import create_backend_client
 from app.core.errors import register_error_handlers
@@ -37,6 +38,7 @@ def create_app() -> FastAPI:
     app.include_router(ocr_router.router)
     app.include_router(ocr_router.ai_router)
     app.include_router(character_router.router)
+    app.include_router(checkup_router.router)
     app.include_router(chat_router.me_router)
     app.include_router(chat_router.router)
     return app
