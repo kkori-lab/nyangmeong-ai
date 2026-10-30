@@ -1,16 +1,17 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-011 대화창 · 첫 답변 요약 제목 (추가 요청) — 끝 (검증 확인 못 함 있음(연결 남음만), 사람 확인 2026-10-30. 방의 첫 AI 답변이 SEARCH로 끝나면 질문·답변 요약으로 Java PATCH 한 번, 실패해도 답변 유지. Java PATCH 없음 → 연결 남음)
-- 결정: 바꾸는 때는 방의 첫 AI 답변이 SEARCH로 끝까지 나왔을 때(`turn.messages`에 AI 역할 메시지가 없고 `complete`). 첫 답변이 ROUTE·폴백·등록·미완료면 바꾸지 않고, 그 뒤 SEARCH가 와도 바꾸지 않는다(의도 종류가 메시지에 저장되지 않아 "첫 SEARCH"를 알 수 없음). 그래서 한 방에서 한 번만 부른다
-- 결정: 요약 입력은 첫 질문 + 답변 본문(고지 문구 제외), 출력은 기존 제목 규칙(한 줄, 200자 이내, `_clean_title`). 모델은 `llm_model`(Haiku) 한 번. 실패·거절·빈 결과면 제목을 바꾸지 않는다(로그만). 제목 수정 실패도 답변·`done`에 영향 없음(로그만)
-- 결정: 순서는 `done`을 보낸 뒤 같은 작업 안에서 요약·수정(답변 지연 없음). React에 새 이벤트 없음(목록을 다시 읽으면 바뀐 제목). React 계약(`docs/api/chat.md` SSE·Intent) 그대로
-- 명세 차이: FN-AIM-011-11 "생성 시 1회만, 재생성 기능 없음"과 다르다(사용자 변경이 아닌 서버 1회 교체). DMS 반영은 "다음에 할 것"에 모아 둔다
-- (명세 밖, 관련 FN-AIM-011-11) → `app/chat/clients.py`(`TitleGenerator.summarize(question, answer)`, `AnthropicTitleGenerator.summarize`, 요약 프롬프트), `app/chat/repository.py`(`update_title(room_sn, title)`, `JavaConversationRepository`가 `PATCH /internal/ai/conversations/{sn}` `{cnvrsTtl}` 호출), `app/chat/service.py`(`answer_turn`·`_run_turn`·`_search_answer`에 제목 교체), `app/chat/router.py`(메시지 전송에 `get_title_generator` 주입), `tests/chat/fakes.py`(`FakeTitleGenerator.summarize` 호출 기록), `tests/chat/conftest.py` `FakeJava`(PATCH 받기·기록), `tests/chat/test_messages.py`(새 테스트), `docs/api/internal.md`(PATCH 행 초안). 부를 API: Java `PATCH /internal/ai/conversations/{aiCnvrsRoomSn}` 요청 `{cnvrsTtl: String(1~200)}` 응답 ConversationSummary, 200(LJS 백엔드, 아직 없음 — 초안을 이번에 `internal.md`에 "초안(백엔드 PR 전)"으로 적고 가짜는 `tests/chat/conftest.py` `FakeJava`). 완료 조건 — 명령: `sh scripts/check.sh` 통과, 테스트 ① 첫 SEARCH 답변 완료 뒤 요약 제목으로 PATCH 한 번 ② 같은 방 두 번째 SEARCH 답변은 요약·PATCH 안 부름 ③ 첫 답변이 ROUTE·FALLBACK이면 안 부름 ④ 미완료(도중 오류·시간 초과) 답변이면 안 부름 ⑤ 요약 실패·PATCH 실패여도 `done`과 답변 저장 그대로 ⑥ 요약 입력에 고지 문구 없음. 화면: Java PATCH가 생기기 전에는 없음(연결은 "다음에 할 것"), 생긴 뒤 Postman으로 새 대화 → 메시지 전송(SEARCH) → `GET /ai/conversations`에서 제목이 바뀐 것 확인
+SCR-AIM-011 대화창 · 첫 답변 요약 제목 (추가 요청) · Java PATCH 연결 — 끝 (검증 통과, 사람 확인 2026-10-30. internal.md PATCH 행 확정, Python 코드 변경 없음)
+- 상황: LJS 백엔드 작업 트리에 `PATCH /internal/ai/conversations/{aiCnvrsRoomSn}`(`ConversationTitleUpdateRequest {cnvrsTtl: @NotBlank @Size(max=200)}`, 본인 대화 아니면 404 `NOT_FOUND`, 200 ConversationSummary, 암호화 저장)와 백엔드 `docs/api/ai.md` 행이 있다(아직 커밋·PR 전). Python 초안과 경로·본문·응답이 같다. Python 코드(`JavaConversationRepository.update_title`)는 이미 이 계약으로 부른다
+- 결정: Python 코드는 바꾸지 않는다. Python은 200자(코드 포인트)로 자르고 Java `@Size`는 UTF-16 길이라 이모지가 많으면 400이 날 수 있다. 실패해도 로그만 남고 답변은 그대로라 이번에는 두고 남는 위험으로 적는다
+- (명세 밖, 관련 FN-AIM-011-11) → `docs/api/internal.md` PATCH 행의 "초안(백엔드 PR 전, LJS)"를 "확정(10-30, 정본은 백엔드 `docs/api/ai.md`)"으로 바꾸고 "그때까지 `tests/chat/conftest.py` `FakeJava`" 문구를 지운다. 부를 API: Java `PATCH /internal/ai/conversations/{aiCnvrsRoomSn}` `{cnvrsTtl}` → 200 ConversationSummary(LJS 백엔드, 작업 트리에 있음·PR 전). 완료 조건 — 명령: `sh scripts/check.sh` 통과(코드 변경 없음, 기존 테스트 ①~⑥ 그대로). 화면: 로컬 Java(백엔드 LJS 작업 트리)와 Python을 띄워 Postman으로 새 대화(`POST /ai/conversations`) → 메시지 전송(SEARCH 질문, SSE `done`까지) → `GET /ai/conversations`에서 그 방 제목이 요약 제목으로 바뀐 것, 같은 방에 SEARCH를 한 번 더 보내도 제목이 다시 바뀌지 않는 것 확인
+- 결정: 추천안대로. 질문 아님(완료 조건의 "SEARCH 질문"이 걸림), 기획대로 진행. 백엔드 PATCH는 구현 완료(2026-10-30 LJS)
 - 새 의존성: 없음
 
 ## 다음에 할 것
-- 연결 남음: SCR-AIM-011 첫 답변 요약 제목 (Java PATCH 대기, LJS 백엔드. 10-30 15시 backend-3c 세션에 계약 보냄, 아직 작업 시작 전). LJS 백엔드에 `PATCH /internal/ai/conversations/{aiCnvrsRoomSn}` `{cnvrsTtl}`(1~200자, 암호화 저장, 본인 대화 판정, 200 ConversationSummary)를 만들고 백엔드 `docs/api/ai.md`에 행 추가. 생기면 `docs/api/internal.md` 초안을 확정으로 바꾸고 Postman으로 확인
+- 백엔드 PR #75(대화 제목 수정 내부 API) 병합 확인. 배포 전에 병합돼야 제목 교체가 동작한다(병합 전엔 PATCH 실패 → 로그만)
+- 버그 의심(10-30 검증 중 발견): 같은 방 두 번째 SEARCH 답변 끝에 의료 고지 문구 "※ 참고 정보이며…"가 두 번 붙었다
+- 남는 위험: 제목 200자를 Python은 코드 포인트, Java `@Size`는 UTF-16으로 센다. 이모지가 많은 요약 제목은 Java 400(로그만)
 - 프론트(LJS) 알리기: SCR-AIM-011 첫 SEARCH 답변은 `done` 뒤 제목 요약(Haiku 한 번)이 끝나야 SSE 스트림이 닫힌다. 입력창 다시 열기는 스트림 종료가 아닌 `done` 기준으로. 바뀐 제목은 대화 목록을 다시 읽어 반영
 - DMS 반영(모아서): AI매니저 기능명세서 FN-AIM-011-11에 "첫 AI 답변이 SEARCH로 완료되면 질문·답변 요약으로 제목을 한 번 바꾼다(서버, 사용자 변경 없음)" 추가
 - DMS 반영(모아서): AI매니저 화면설계서·기능명세서 SCR-AIM-005에 서비스 범위 밖 질문 안내 문구 "반려동물 케어와 관련된 질문만 도와드릴 수 있어요. 반려동물이나 서비스 이용에 관해 물어봐 주세요."와 판정(룰 키워드 + 물음꼴이면 AI로 범위 확인) 추가. FN-AIM-005-07(같은 폴백)과 문구가 달라짐
