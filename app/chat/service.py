@@ -54,6 +54,11 @@ MAX_TITLE_LENGTH = 200
 DEFAULT_TITLE = "새 대화"
 # FN-AIM-005-02 : 화면설계서 SCR-AIM-005 ② 문구
 FALLBACK_MESSAGE = "질문을 이해하지 못했어요. 다시 입력하거나 아래에서 선택해 주세요."
+# 서비스 범위 밖 질문 안내 (2026-10-30 LJS 추가 요청, 화면설계서 밖 문구)
+OUT_OF_SCOPE_MESSAGE = (
+    "반려동물 케어와 관련된 질문만 도와드릴 수 있어요. "
+    "반려동물이나 서비스 이용에 관해 물어봐 주세요."
+)
 # FN-AIM-002-03 : 화면설계서 SCR-AIM-002 ② 문구, 본문 끝에 붙여 저장
 DISCLAIMER = "\n\n※ 참고 정보이며 의료 진단이 아닙니다. 이상 징후가 있다면 수의사와 상담하세요."
 # FN-AIM-002-07 : 화면설계서 SCR-AIM-002 처리 조건 문구
@@ -94,6 +99,8 @@ class Judged:
     intent: Intent
     # SEARCH일 때 연관 바로가기(FN-AIM-002-04)
     shortcut: Intent | None = None
+    # FALLBACK일 때 서비스 범위 밖 질문 여부 : 안내 문구만 다름
+    out_of_scope: bool = False
 
 
 async def judge(text: str, has_image: bool, classifier: IntentClassifier) -> Judged:
@@ -105,10 +112,18 @@ async def judge(text: str, has_image: bool, classifier: IntentClassifier) -> Jud
         return Judged(Intent(kind=IntentKind.REGISTER))
     # FN-AIM-002-10 : ② 룰 기반 라우팅, AI 분류보다 앞이라 LLM 장애와 무관
     row = rules.match_route(text)
-    if row is not None:
+    if row is None:
+        # ③ AI 분류(①②가 실패한 입력만, FN-AIM-004-02)
+        classified = await classifier.classify(text)
+    elif not rules.is_question(text):
         return Judged(row.to_intent())
-    # ③ AI 분류(①②가 실패한 입력만, FN-AIM-004-02)
-    classified = await classifier.classify(text)
+    else:
+        # 범위 밖 질문 차단(2026-10-30) : 키워드에 걸린 질문꼴은 AI로 서비스 범위 확인
+        try:
+            classified = await classifier.classify(text, hint=row)
+        except ClassifyError:
+            # 룰 라우팅은 LLM 장애와 무관 (FN-AIM-002-10), 원인 로그는 분류기에서 기록
+            return Judged(row.to_intent())
     if classified.kind is ClassifiedKind.SEARCH:
         return Judged(Intent(kind=IntentKind.SEARCH), _shortcut_of(classified))
     if classified.kind is ClassifiedKind.ROUTE and classified.scr_id is not None:
@@ -116,7 +131,8 @@ async def judge(text: str, has_image: bool, classifier: IntentClassifier) -> Jud
         if row is not None:
             return Judged(row.to_intent())
     # ④ FN-AIM-004-12·005-01 : 어디에도 해당하지 않으면 폴백
-    return Judged(Intent(kind=IntentKind.FALLBACK))
+    out_of_scope = classified.kind is ClassifiedKind.OUT_OF_SCOPE
+    return Judged(Intent(kind=IntentKind.FALLBACK), out_of_scope=out_of_scope)
 
 
 def _shortcut_of(classified: Classified) -> Intent | None:
@@ -139,9 +155,13 @@ def route_message(scr_nm: str) -> str:
     return f"{scr_nm}{particle} 이동할게요"
 
 
-async def reply_fallback(repo: ConversationRepository, room_sn: int) -> ConversationMessage:
+async def reply_fallback(
+    repo: ConversationRepository, room_sn: int, out_of_scope: bool = False
+) -> ConversationMessage:
     # FN-AIM-005-02·07 : 실패 사유는 묻지 않고, 부적절 입력도 같은 문구. AI 역할 메시지로 저장
-    return await repo.add_message(room_sn, ROLE_AI, FALLBACK_MESSAGE)
+    # 서비스 범위 밖 질문만 범위 안내 문구 (2026-10-30)
+    message = OUT_OF_SCOPE_MESSAGE if out_of_scope else FALLBACK_MESSAGE
+    return await repo.add_message(room_sn, ROLE_AI, message)
 
 
 @dataclass(frozen=True)
@@ -241,7 +261,8 @@ async def _run_turn(
         if kind is IntentKind.SEARCH:
             await _search_answer(turn, repo, answers, ai, limits, judged.shortcut, emit)
         elif kind is IntentKind.FALLBACK:
-            emit(("done", AnswerDone(message=await reply_fallback(repo, turn.room_sn))))
+            fallback = await reply_fallback(repo, turn.room_sn, judged.out_of_scope)
+            emit(("done", AnswerDone(message=fallback)))
         elif kind is IntentKind.ROUTE:
             # 이동은 React 담당 : 다시 열어도 답이 남게 이동 안내 저장 (2026-10-29 결정)
             move = route_message(judged.intent.scr_nm or "")

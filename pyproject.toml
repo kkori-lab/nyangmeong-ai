@@ -3,7 +3,7 @@ name = "nyangmeong-ai"
 version = "0.1.0"
 description = "냥멍케어 AI 서비스 (AI 대화창, 영수증 OCR, 픽셀 캐릭터 생성)"
 readme = "README.md"
-requires-python = ">=3.13,<3.14"
+requires-python = ">=3.12,<3.14"
 dependencies = [
     "anthropic>=2.3.0",
     "fastapi>=0.115",
@@ -22,7 +22,7 @@ dev = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py313"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

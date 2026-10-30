@@ -3,8 +3,15 @@ from datetime import datetime
 
 import pytest
 
+from app.chat.clients import Classified, ClassifiedKind
 from app.chat.schemas import ROLE_AI, ConversationMessage, IntentKind
-from app.chat.service import FALLBACK_MESSAGE, judge_intent, reply_fallback
+from app.chat.service import (
+    FALLBACK_MESSAGE,
+    OUT_OF_SCOPE_MESSAGE,
+    judge,
+    judge_intent,
+    reply_fallback,
+)
 from tests.chat.fakes import FakeIntentClassifier
 
 
@@ -68,3 +75,35 @@ def test_매칭되면_폴백_문구를_저장하지_않는다(text):
     assert intent.kind is not IntentKind.FALLBACK
     assert saved is None
     assert repo.added == []
+
+
+class OutOfScopeClassifier:
+    # 서비스 범위 밖으로 답하는 분류기
+    async def classify(self, text: str, hint=None) -> Classified:
+        return Classified(ClassifiedKind.OUT_OF_SCOPE)
+
+
+def test_범위_밖_안내_문구():
+    assert OUT_OF_SCOPE_MESSAGE == (
+        "반려동물 케어와 관련된 질문만 도와드릴 수 있어요. "
+        "반려동물이나 서비스 이용에 관해 물어봐 주세요."
+    )
+
+
+@pytest.mark.parametrize("text", ["가계부 작성 방법 알려줘", "파이썬 코딩 알려줘"])
+def test_서비스_범위_밖_질문은_FALLBACK이고_범위_안내를_저장(text):
+    # 2026-10-30 추가 요청 : 의도는 FALLBACK 그대로(칩·연속 실패 카운트 같음), 문구만 다름
+    repo = FakeRepository()
+    judged = asyncio.run(judge(text, False, OutOfScopeClassifier()))
+    asyncio.run(reply_fallback(repo, 3, judged.out_of_scope))
+
+    assert judged.intent.kind is IntentKind.FALLBACK
+    assert repo.added == [(3, ROLE_AI, OUT_OF_SCOPE_MESSAGE)]
+
+
+def test_판단_못_함은_기존_폴백_문구():
+    repo = FakeRepository()
+    judged = asyncio.run(judge("ㅁㄴㅇㄹ", False, FakeIntentClassifier()))
+    asyncio.run(reply_fallback(repo, 3, judged.out_of_scope))
+
+    assert repo.added == [(3, ROLE_AI, FALLBACK_MESSAGE)]

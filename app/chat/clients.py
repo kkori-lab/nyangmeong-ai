@@ -107,6 +107,8 @@ class ClassifiedKind(StrEnum):
     ROUTE = "ROUTE"
     SEARCH = "SEARCH"
     UNKNOWN = "UNKNOWN"
+    # 서비스 범위 밖 질문(2026-10-30) : 폴백이지만 안내 문구가 다름
+    OUT_OF_SCOPE = "OUT_OF_SCOPE"
 
 
 @dataclass(frozen=True)
@@ -130,7 +132,8 @@ class ClassifyError(Exception):
 
 class IntentClassifier(Protocol):
     # FN-AIM-004-02 : 룰 매칭에 실패한 입력에만 부르는 보조 분류. 장애면 ClassifyError
-    async def classify(self, text: str) -> Classified: ...
+    # hint : 키워드에 걸린 질문꼴 입력의 룰 행(서비스 범위 확인용, 2026-10-30)
+    async def classify(self, text: str, hint: rules.RouteRow | None = None) -> Classified: ...
 
 
 class ClassifyOutput(BaseModel):
@@ -151,8 +154,21 @@ def classify_system() -> str:
     )
     return (
         "반려동물 케어 앱 AI 대화창의 사용자 입력을 하나로 분류한다.\n"
-        "- ROUTE: 아래 화면 중 하나로 가려는 요청. route_num에 그 화면 번호를 쓴다.\n"
-        "- SEARCH: 반려동물이나 앱에 관해 답을 찾아 줘야 하는 질문.\n"
+        "서비스 범위: 반려동물의 건강·증상·질병·사료·간식·행동·훈련·미용·산책·병원·"
+        "케어 일정, 반려동물 지출(가계부), 이 앱의 화면과 기능 사용법.\n"
+        "병원·진료·미용·산책·사료·간식·예방접종·펫시터처럼 이 앱에서 반려동물 일로 읽히는 "
+        "말과 알림·설정·게시판처럼 앱 기능을 가리키는 말은 그것만으로 범위 안이다. "
+        "가계부·일정·지출처럼 앱 밖 일상에서도 쓰는 말은 "
+        "반려동물(반려동물·강아지·고양이·우리 아이·반려동물 이름 등)이나 이 앱(앱·여기·"
+        "이 화면 등)을 가리키는 말이 함께 없으면, 그 일반 방법·지식을 묻는 질문은 범위 밖이다. "
+        "예: '가계부 작성 방법 알려줘'·'일정 관리 잘하는 법'은 OUT_OF_SCOPE,"
+        "'강아지 가계부 쓰는 법 알려줘'·'앱에서 가계부 어떻게 써'·'병원 어디가 좋아?'는 범위 안.\n"
+        "- ROUTE: 서비스 범위 안에서 아래 화면 중 하나로 가려는 요청. "
+        "route_num에 그 화면 번호를 쓴다.\n"
+        "- SEARCH: 서비스 범위 안에서 답을 찾아 줘야 하는 질문.\n"
+        "- OUT_OF_SCOPE: 뜻은 분명하지만 서비스 범위 밖인 질문·요청(반려동물·이 앱과 관계없는 "
+        "일반 질문, 예: 집 가계부 쓰는 법·요리·코딩). "
+        "화면 키워드가 들어 있어도 서비스 범위 밖이면 OUT_OF_SCOPE.\n"
         "- UNKNOWN: 그 밖의 입력(뜻 없는 글자, 욕설, 판단하기 어려운 것). "
         "확실하지 않으면 UNKNOWN.\n"
         "ROUTE가 아니면 route_num은 null.\n"
@@ -182,6 +198,18 @@ def _search_of(related_num: int | None) -> Classified:
     return Classified(ClassifiedKind.SEARCH, related_scr_id=row.scr_id, related_param=row.param)
 
 
+def _hint_note(hint: rules.RouteRow | None) -> str:
+    # 키워드에 걸린 화면 알림 : 범위 안 이동이면 ROUTE, 범위 밖이면 OUT_OF_SCOPE
+    if hint is None:
+        return ""
+    return (
+        f"\n\n이 입력은 키워드로 {hint.no}번 화면({hint.name})에 걸렸다. "
+        "키워드가 걸린 것만으로 범위 안이 아니다. 위 서비스 범위 규칙대로 범위 밖이면 OUT_OF_SCOPE."
+        "범위 안에서 그 화면으로 가려는 요청이나 그 화면에 있는 내 기록을 묻는 질문"
+        "(예: '이번 달 병원비 얼마 나왔어?')이면 ROUTE, 그 밖의 범위 안 질문이면 SEARCH."
+    )
+
+
 class AnthropicIntentClassifier:
     # FN-AIM-004-02 : API 오류·시간 초과 -> ClassifyError (error 이벤트, 2026-10-29 결정)
     # 거절·깨진 출력은 입력 탓으로 보고 UNKNOWN (FN-AIM-004-12 폴백)
@@ -189,13 +217,13 @@ class AnthropicIntentClassifier:
         self.client = client
         self.model = model
 
-    async def classify(self, text: str) -> Classified:
+    async def classify(self, text: str, hint: rules.RouteRow | None = None) -> Classified:
         started = time.monotonic()
         try:
             response = await self.client.messages.parse(
                 model=self.model,
                 max_tokens=LLM_MAX_TOKENS,
-                system=classify_system(),
+                system=classify_system() + _hint_note(hint),
                 messages=[{"role": "user", "content": text}],
                 output_config={"effort": LLM_EFFORT},
                 output_format=ClassifyOutput,

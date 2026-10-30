@@ -11,6 +11,7 @@ from app.chat.service import (
     ANSWER_ERROR_MESSAGE,
     DISCLAIMER,
     FALLBACK_MESSAGE,
+    OUT_OF_SCOPE_MESSAGE,
     build_context,
     route_message,
 )
@@ -79,7 +80,7 @@ class FixedClassifier:
     def __init__(self, result: Classified) -> None:
         self.result = result
 
-    async def classify(self, text: str) -> Classified:
+    async def classify(self, text: str, hint=None) -> Classified:
         return self.result
 
 
@@ -88,7 +89,7 @@ class BrokenClassifier:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def classify(self, text: str) -> Classified:
+    async def classify(self, text: str, hint=None) -> Classified:
         self.calls += 1
         raise ClassifyError("api_error")
 
@@ -320,6 +321,23 @@ def test_매칭_실패는_안내_문구를_AI_메시지로_저장(client, java, 
     assert evs[0][1]["kind"] == "FALLBACK"
     assert evs[1][1]["message"]["cnvrsCn"] == FALLBACK_MESSAGE
     assert [m["cnvrsCn"] for m in java.ai_messages(room)] == [FALLBACK_MESSAGE]
+    assert answers.calls == []
+
+
+@pytest.mark.parametrize("text", ["가계부 작성 방법 알려줘", "파이썬 코딩 알려줘"])
+def test_서비스_범위_밖_질문은_범위_안내_문구를_저장(client, java, answers, text):
+    # 2026-10-30 추가 요청 : 의도는 FALLBACK 그대로, 문구만 범위 안내
+    client.app.dependency_overrides[clients.get_intent_classifier] = lambda: FixedClassifier(
+        Classified(ClassifiedKind.OUT_OF_SCOPE)
+    )
+    as_member(client, 1)
+    room = java.add_room(1, "제목")
+    evs = events(send(client, room, text))
+
+    assert names(evs) == ["intent", "done"]
+    assert evs[0][1]["kind"] == "FALLBACK"
+    assert evs[1][1]["message"]["cnvrsCn"] == OUT_OF_SCOPE_MESSAGE
+    assert [m["cnvrsCn"] for m in java.ai_messages(room)] == [OUT_OF_SCOPE_MESSAGE]
     assert answers.calls == []
 
 
