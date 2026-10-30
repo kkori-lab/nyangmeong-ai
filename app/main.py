@@ -21,7 +21,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def configure_logging() -> None:
-    # app.* 로거의 INFO(건수·소요 시간)를 uvicorn 콘솔에 보인다. 원문은 원래 남기지 않는다
+    # app.* 로거의 INFO(건수·소요 시간)를 uvicorn 콘솔에 노출 : 원문은 원래 로그 제외
     logger = logging.getLogger("app")
     if not logger.handlers:
         handler = logging.StreamHandler()

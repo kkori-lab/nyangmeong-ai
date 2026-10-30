@@ -8,7 +8,7 @@ class _Camel(BaseModel):
 
 
 class LabResultItem(_Camel):
-    # 백엔드 InspectionAnalysisItem(INSP_NVL 컬럼)과 같은 이름. `registered`는 Java·React가 정한다
+    # 백엔드 InspectionAnalysisItem(INSP_NVL 컬럼)과 같은 이름 (registered는 Java·React 결정)
     insp_artcl_cd: str | None = None
     insp_artcl_drct_inpt_nm: str | None = None
     rslt_nvl: float | None = None

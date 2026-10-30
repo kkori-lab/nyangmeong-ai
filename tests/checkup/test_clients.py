@@ -32,7 +32,7 @@ STRUCTURED = {
 
 
 class FakeAnthropic:
-    """MockTransport로 Anthropic API를 흉내 낸다. 받은 요청 본문을 requests에 남긴다"""
+    """MockTransport로 Anthropic API를 흉내. 받은 요청 본문은 requests에 기록"""
 
     def __init__(self, respond) -> None:
         self.respond = respond

@@ -54,7 +54,7 @@ MAX_TITLE_LENGTH = 200
 DEFAULT_TITLE = "새 대화"
 # FN-AIM-005-02 : 화면설계서 SCR-AIM-005 ② 문구
 FALLBACK_MESSAGE = "질문을 이해하지 못했어요. 다시 입력하거나 아래에서 선택해 주세요."
-# FN-AIM-002-03 : 화면설계서 SCR-AIM-002 ② 문구. 본문 끝에 붙여 저장한다
+# FN-AIM-002-03 : 화면설계서 SCR-AIM-002 ② 문구, 본문 끝에 붙여 저장
 DISCLAIMER = "\n\n※ 참고 정보이며 의료 진단이 아닙니다. 이상 징후가 있다면 수의사와 상담하세요."
 # FN-AIM-002-07 : 화면설계서 SCR-AIM-002 처리 조건 문구
 ANSWER_ERROR_MESSAGE = "일시적으로 답변할 수 없어요"
@@ -68,7 +68,7 @@ async def create_conversation(
 ) -> ConversationSummary:
     # FN-AIM-011-11 : 제목은 첫 메시지로 1회 생성, 200자 제한은 서버에서 적용
     title = (await titles.generate(request.cnvrs_cn)).strip()[:MAX_TITLE_LENGTH] or DEFAULT_TITLE
-    # FN-AIM-011-07·14 : 방과 첫 메시지를 함께 저장(Java가 한 트랜잭션으로 묶는다)
+    # FN-AIM-011-07·14 : 방과 첫 메시지 함께 저장 (Java 단일 트랜잭션)
     return await repo.create_room(request.pet_sn, title, request.cnvrs_cn)
 
 
@@ -80,7 +80,7 @@ async def list_conversations(
 
 
 async def get_conversation(repo: ConversationRepository, room_sn: int) -> ConversationDetail:
-    # FN-AIM-011-10 : 남의 방은 Java가 없는 방과 같은 404로 답한다
+    # FN-AIM-011-10 : 남의 방은 Java가 없는 방과 같은 404 응답
     return await repo.get_room(room_sn)
 
 
@@ -103,7 +103,7 @@ async def judge(text: str, has_image: bool, classifier: IntentClassifier) -> Jud
     # ① 등록 판정 — FN-AIM-004-13 : 라우팅 키워드가 있어도 등록이 먼저
     if rules.is_register_request(text):
         return Judged(Intent(kind=IntentKind.REGISTER))
-    # ② 룰 기반 라우팅. FN-AIM-002-10 : AI 분류보다 앞이라 LLM 장애와 무관하다
+    # FN-AIM-002-10 : ② 룰 기반 라우팅, AI 분류보다 앞이라 LLM 장애와 무관
     row = rules.match_route(text)
     if row is not None:
         return Judged(row.to_intent())
@@ -120,7 +120,7 @@ async def judge(text: str, has_image: bool, classifier: IntentClassifier) -> Jud
 
 
 def _shortcut_of(classified: Classified) -> Intent | None:
-    # FN-AIM-004-08과 같이 매핑표의 라우팅 가능 행만 인정한다
+    # FN-AIM-004-08과 같이 매핑표의 라우팅 가능 행만 인정
     if classified.related_scr_id is None:
         return None
     row = rules.find_route(classified.related_scr_id, classified.related_param)
@@ -169,7 +169,7 @@ async def prepare_turn(
     cn: str | None,
     draft: RegisterDraft | None = None,
 ) -> Turn:
-    # ① 사용자 메시지를 먼저 저장한다. 여기서 실패하면(남의 방·없는 방 포함) LLM을 부르지 않는다
+    # ① 사용자 메시지 선저장 : 실패 시(남의 방·없는 방 포함) LLM 미호출
     if cn is not None:
         await repo.add_message(room_sn, ROLE_USER, cn)
     room = await repo.get_room(room_sn)
@@ -183,7 +183,7 @@ def build_context(messages: list[ConversationMessage], question_seq: int, turns:
     # FN-AIM-002-11·011-15 : 현재 대화의 답할 메시지까지, 미완료 답변 제외, 최근 turns턴(질문+답변)
     usable = [m for m in messages if m.msg_seq <= question_seq and m.cmptn_yn]
     recent = usable[-turns * 2 :]
-    # Messages API는 사용자 메시지로 시작해야 한다
+    # Messages API는 사용자 메시지로 시작 필수
     while recent and recent[0].role_cd != ROLE_USER:
         recent = recent[1:]
     return [
@@ -192,7 +192,7 @@ def build_context(messages: list[ConversationMessage], question_seq: int, turns:
     ]
 
 
-# 브라우저 연결이 끊겨도 답변 생성·저장을 끝까지 하도록 작업을 따로 잡아 둔다(architecture.md)
+# 브라우저 연결이 끊겨도 답변 생성·저장을 끝까지 하도록 별도 작업으로 분리 (architecture.md)
 _running: set[asyncio.Task] = set()
 
 
@@ -229,7 +229,7 @@ async def _run_turn(
         text = turn.question.cnvrs_cn
         card = None
         if register is not None and turn.draft is not None:
-            # FN-AIM-012-05·10 : 초안이 있으면 이 메시지로 칸을 채우거나 고친다.
+            # FN-AIM-012-05·10 : 초안이 있으면 이 메시지로 칸 채움·수정
             # 뽑힌 칸이 없으면 일반 판정
             card = await build_card(text, turn.pet_sn, turn.draft, register)
         if card is not None:
@@ -243,7 +243,7 @@ async def _run_turn(
         elif kind is IntentKind.FALLBACK:
             emit(("done", AnswerDone(message=await reply_fallback(repo, turn.room_sn))))
         elif kind is IntentKind.ROUTE:
-            # 이동은 React가 한다. 다시 열어도 답이 남게 이동 안내를 저장한다(2026-10-29 결정)
+            # 이동은 React 담당 : 다시 열어도 답이 남게 이동 안내 저장 (2026-10-29 결정)
             move = route_message(judged.intent.scr_nm or "")
             emit(("done", AnswerDone(message=await _save(repo, turn.room_sn, move, True))))
         elif kind is IntentKind.REGISTER and register is not None:
@@ -253,7 +253,7 @@ async def _run_turn(
             # RECEIPT는 SCR-AIM-013에서 잇는다
             emit(("done", AnswerDone()))
     except ClassifyError:
-        # 분류 LLM 장애는 폴백이 아니라 일시 오류(2026-10-29 결정). 원인 로그는 분류기가 남긴다
+        # 분류 LLM 장애는 폴백이 아닌 일시 오류 (2026-10-29 결정), 원인 로그는 분류기에서 기록
         emit(("error", StreamError(code="EXTERNAL_API_ERROR", message=ANSWER_ERROR_MESSAGE)))
     except Exception:
         logger.exception("대화 응답 처리 실패")
@@ -277,7 +277,7 @@ async def _search_answer(
     loop = asyncio.get_running_loop()
     deadline = loop.time() + limits.total_sec
     try:
-        # 첫 글자 전 실패 : 저장하지 않고 안내. 사용자 메시지는 남아 [다시 시도]로 다시 부른다
+        # 첫 글자 전 실패 : 미저장·안내, 사용자 메시지는 남아 [다시 시도]로 재호출
         try:
             async with asyncio.timeout_at(min(deadline, loop.time() + limits.first_token_sec)):
                 first = await anext(stream, None)
@@ -302,7 +302,7 @@ async def _search_answer(
         await stream.aclose()
     text = "".join(chunks)
     if complete:
-        # FN-AIM-002-03 : 고지는 본문 끝에 포함해 저장한다. 미완료 답변에는 붙이지 않는다
+        # FN-AIM-002-03 : 고지는 본문 끝에 포함해 저장, 미완료 답변 제외
         emit(("delta", {"text": DISCLAIMER}))
         text += DISCLAIMER
     message = await _save(repo, turn.room_sn, text, complete)
@@ -312,7 +312,7 @@ async def _search_answer(
 async def _save(
     repo: ConversationRepository, room_sn: int, text: str, complete: bool
 ) -> ConversationMessage | None:
-    # 저장이 실패해도 이미 보낸 답변은 그대로 둔다(1,000자 상한은 두지 않음, 2026-10-28 결정)
+    # 저장 실패해도 이미 보낸 답변 유지 (1,000자 상한 없음, 2026-10-28 결정)
     try:
         return await repo.add_message(room_sn, ROLE_AI, text, cmptn_yn=complete)
     except (AppError, BackendError) as error:
@@ -375,7 +375,7 @@ def _draft_values(draft: RegisterDraft) -> dict:
 
 
 def _answer_fill(text: str, draft: RegisterDraft, pet_names: list[str]) -> dict:
-    # 되물음에 답만 한 경우("발톱 깎기", "산책", "기타") : 물었던 이름 칸을 이 답으로 채운다
+    # 되물음에 답만 한 경우("발톱 깎기", "산책", "기타") : 물었던 이름 칸에 이 답 채움
     missing = _missing(_draft_values(draft))
     answer = rules.care_item_name(text, 0, pet_names)
     if not answer:
@@ -392,7 +392,7 @@ def _answer_fill(text: str, draft: RegisterDraft, pet_names: list[str]) -> dict:
 def _pick_pet(
     pets: list[PetInfo], named: list[PetInfo], draft_pet: int | None, room_pet: int | None
 ) -> PetInfo | None:
-    # FN-AIM-012-04 : 반려동물은 항상 서버 규칙으로 정한다. None이면 이름 칩으로 되묻는다
+    # FN-AIM-012-04 : 반려동물은 항상 서버 규칙으로 결정, None이면 이름 칩으로 되물음
     if len(named) == 1:
         return named[0]
     if named:
@@ -422,7 +422,7 @@ async def build_card(
             return None
         values = _draft_values(draft) | found
     if _missing(values):
-        # FN-AIM-012-03 : 빈 칸만 AI로 채운다. 반려동물 목록은 보내지 않는다
+        # FN-AIM-012-03 : 빈 칸만 AI 보충, 반려동물 목록 제외
         try:
             raw = await deps.extractor.extract(text, deps.today)
         except Exception:
@@ -457,7 +457,7 @@ async def build_card(
 
 
 def _same_name(name: str | None, existing: tuple[str, ...]) -> bool:
-    # 띄어쓰기만 다른 이름도 같은 이름으로 본다("발톱깎기" = "발톱 깎기")
+    # 띄어쓰기만 다른 이름도 동일 이름 처리 ("발톱깎기" = "발톱 깎기")
     if not name:
         return False
     return re.sub(r"\s+", "", name) in {re.sub(r"\s+", "", n) for n in existing}
@@ -495,8 +495,8 @@ async def _register_reply(
     card: RegisterCard,
     emit: Callable[[Event | None], None],
 ) -> None:
-    # FN-AIM-012-05·06·07 : 되물음은 AI 메시지로 저장한다. 미리보기 카드는 저장하지 않는다
-    # (결과만 텍스트 요약으로 남긴다, FN-AIM-012-16)
+    # FN-AIM-012-05·06·07 : 되물음은 AI 메시지로 저장, 미리보기 카드는 미저장
+    # (결과만 텍스트 요약으로 저장, FN-AIM-012-16)
     message = None
     if card.card_type is CardType.ASK:
         message = await _save(repo, room_sn, ask_message(card), True)
@@ -508,7 +508,7 @@ def _md(day: date) -> str:
 
 
 def result_message(request: RegisterResultRequest) -> str:
-    # FN-AIM-012-16 : 카드 결과를 담은 텍스트 요약. 다시 열면 버튼 없이 이 글만 보인다
+    # FN-AIM-012-16 : 카드 결과를 담은 텍스트 요약, 다시 열면 버튼 없이 이 글만 표시
     card = request.card
     if card.card_type is CardType.ASK or not card.pet_nm or _missing(_draft_values(card)):
         raise AppError("INVALID_REQUEST", 400, "등록 카드의 칸이 비어 있습니다.")
@@ -532,7 +532,7 @@ def result_message(request: RegisterResultRequest) -> str:
 async def save_register_result(
     repo: ConversationRepository, room_sn: int, request: RegisterResultRequest
 ) -> ConversationMessage:
-    # FN-AIM-012-11·16 : 등록(React → Java)과 취소의 결과를 AI 메시지로 저장한다
+    # FN-AIM-012-11·16 : 등록(React → Java)과 취소의 결과를 AI 메시지로 저장
     return await repo.add_message(room_sn, ROLE_AI, result_message(request))
 
 
@@ -545,7 +545,7 @@ RECEIPT_MESSAGES = {
 
 
 def receipt_result_message(request: ReceiptResultRequest) -> str:
-    # FN-AIM-013-09 : 결과 요약 한 줄. 다시 열면 버튼 없이 이 글만 보인다
+    # FN-AIM-013-09 : 결과 요약 한 줄, 다시 열면 버튼 없이 이 글만 표시
     if request.result is not ReceiptResult.RECOGNIZED:
         return RECEIPT_PREFIX + RECEIPT_MESSAGES[request.result]
     parts = []
@@ -561,7 +561,7 @@ def receipt_result_message(request: ReceiptResultRequest) -> str:
 async def save_receipt_result(
     repo: ConversationRepository, room_sn: int, request: ReceiptResultRequest
 ) -> list[ConversationMessage]:
-    # FN-AIM-013-02 : 함께 보낸 텍스트는 의도 판정 없이 사용자 메시지로 저장한다(분석에는 쓰지 않음)
+    # FN-AIM-013-02 : 함께 보낸 텍스트는 의도 판정 없이 사용자 메시지로 저장 (분석에는 미사용)
     saved = []
     if request.cnvrs_cn is not None:
         saved.append(await repo.add_message(room_sn, ROLE_USER, request.cnvrs_cn))

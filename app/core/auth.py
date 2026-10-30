@@ -25,7 +25,7 @@ async def require_member(
     settings: Annotated[Settings, Depends(get_settings)],
     client: Annotated[httpx2.AsyncClient, Depends(get_backend_client)],
 ) -> int:
-    """브라우저 Cookie를 실어 Java /internal/auth/check 호출 후 회원 번호 반환. 캐시하지 않음"""
+    """브라우저 Cookie로 Java /internal/auth/check 호출 -> 회원 번호 (캐시 없음)"""
     base_url = settings.backend_base_url.rstrip("/")
     if not base_url:
         raise external_error()

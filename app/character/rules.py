@@ -14,5 +14,5 @@ def png_size(data: bytes) -> tuple[int, int] | None:
 
 
 def matches_spec(data: bytes) -> bool:
-    """FN-MYP-010-18 : 캔버스가 512×512 PNG 인지 (백엔드 CharacterSpec.matches 와 같은 기준)"""
+    """FN-MYP-010-18 : 512×512 PNG 여부 (백엔드 CharacterSpec.matches와 같은 기준)"""
     return png_size(data) == (CANVAS_SIZE, CANVAS_SIZE)

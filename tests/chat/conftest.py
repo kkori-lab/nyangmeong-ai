@@ -43,9 +43,9 @@ def fake_auth_check(request: httpx2.Request) -> httpx2.Response:
 
 
 class FakeJava:
-    """Java 대화 내부 API를 메모리로 흉내 낸다. 회원은 쿠키로 정한다
-
-    대화 API로 온 요청은 requests에 남긴다
+    """[Java 대화 내부 API 메모리 흉내]
+    - 회원은 쿠키로 결정
+    - 대화 API로 온 요청은 requests에 기록
     """
 
     def __init__(self) -> None:
@@ -153,7 +153,7 @@ def java() -> FakeJava:
 
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch, java: FakeJava) -> TestClient:
-    # 외부 AI는 가짜를 끼운다. 테스트가 따로 바꿔 끼울 수 있다
+    # 외부 AI는 가짜 주입 : 테스트별 교체 가능
     monkeypatch.setenv("BACKEND_BASE_URL", "http://backend.test")
     get_settings.cache_clear()
     app = create_app()

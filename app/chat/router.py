@@ -36,7 +36,7 @@ from app.core import response
 from app.core.auth import require_member, require_requested_with
 from app.core.config import Settings, get_settings
 
-# 대화 API는 Java 대화 내부 API가 Cookie로 회원을 판정한다 : 여기서 따로 인증 확인을 부르지 않는다
+# 대화 API의 회원 판정은 Java 대화 내부 API(Cookie) : 별도 인증 확인 호출 없음
 router = APIRouter(prefix="/ai/conversations", dependencies=[Depends(require_requested_with)])
 me_router = APIRouter(prefix="/ai", dependencies=[Depends(require_requested_with)])
 
@@ -46,7 +46,7 @@ Repo = Annotated[ConversationRepository, Depends(get_conversation_repository)]
 
 @me_router.get("/me")
 async def me(mbr_sn: Member) -> JSONResponse:
-    # FN-AIM-011-03 : 인증 확인용. Java /internal/auth/check 결과만 돌려준다
+    # FN-AIM-011-03 : 인증 확인용. Java /internal/auth/check 결과만 반환
     return response.success({"mbrSn": mbr_sn})
 
 
@@ -115,7 +115,7 @@ async def save_register_result(
     repo: Repo,
     room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
 ) -> JSONResponse:
-    # FN-AIM-012-11·16 : 등록 카드의 결과(등록됨·취소됨)를 텍스트 요약으로 저장한다
+    # FN-AIM-012-11·16 : 등록 카드의 결과(등록됨·취소됨) 텍스트 요약 저장
     result = await service.save_register_result(repo, room_sn, body)
     return response.success(result.model_dump(by_alias=True), http_code=201)
 
@@ -127,13 +127,13 @@ async def save_receipt_result(
     repo: Repo,
     room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
 ) -> JSONResponse:
-    # FN-AIM-013-02·09 : 영수증 분석이 끝난 뒤 함께 보낸 텍스트와 결과 요약을 저장한다
+    # FN-AIM-013-02·09 : 영수증 분석 후 함께 보낸 텍스트·결과 요약 저장
     saved = await service.save_receipt_result(repo, room_sn, body)
     return response.success([m.model_dump(by_alias=True) for m in saved], http_code=201)
 
 
 async def _sse(events: AsyncIterator[service.Event]) -> AsyncIterator[str]:
-    # 이 API만 ApiResponse 껍데기 대신 SSE 이벤트로 준다
+    # 이 API만 ApiResponse 대신 SSE 이벤트 응답
     async for name, data in events:
         payload = data.model_dump(by_alias=True) if isinstance(data, BaseModel) else data
         text = json.dumps(jsonable_encoder(payload), ensure_ascii=False)

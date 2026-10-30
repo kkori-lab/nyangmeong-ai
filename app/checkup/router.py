@@ -13,14 +13,14 @@ from app.core.config import Settings, get_settings
 router = APIRouter(prefix="/ai/checkups", dependencies=[Depends(require_requested_with)])
 
 
-# 인증을 클라이언트보다 먼저 : 쿠키 없는 요청은 키와 관계없이 401
+# 인증 먼저 : 쿠키 없는 요청은 키와 무관하게 401
 @router.post("/lab-results", dependencies=[Depends(require_member)])
 async def analyze_lab_result(
     file: UploadFile,
     client: Annotated[LabResultClient | None, Depends(get_lab_result_client)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> JSONResponse:
-    # 10MB를 넘는 부분은 읽지 않는다(1바이트만 더 읽어 초과 판정)
+    # 10MB + 1바이트까지만 읽기 : 초과 판정용
     pdf = await file.read(MAX_PDF_BYTES + 1)
     result = await service.analyze_lab_result(
         client, pdf, file.filename or "", settings.pdf_analyze_timeout_sec

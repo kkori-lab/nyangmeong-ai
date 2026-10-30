@@ -17,7 +17,7 @@ def java() -> MessageJava:
 
 @pytest.fixture
 def spies(client):
-    # 영수증 결과 저장은 의도 판정·답변 생성을 부르지 않는다(FN-AIM-013-02)
+    # FN-AIM-013-02 : 영수증 결과 저장은 의도 판정·답변 생성 미호출
     classifier, answers = BrokenClassifier(), Answers()
     client.app.dependency_overrides[clients.get_intent_classifier] = lambda: classifier
     client.app.dependency_overrides[clients.get_answer_generator] = lambda: answers
@@ -141,7 +141,7 @@ def test_쿠키가_없으면_401이고_저장하지_않는다(client, java):
         ({"result": "FAILED"}, "영수증 분석 — 영수증을 읽지 못했어요"),
         ({"result": "ERROR"}, "영수증 분석 — 일시적인 오류로 분석하지 못했어요"),
         ({"result": "CANCELED"}, "영수증 분석 — 취소했어요"),
-        # RECOGNIZED가 아니면 값은 무시한다
+        # RECOGNIZED가 아니면 값 무시
         ({"result": "CANCELED", "hsptlNm": "메이 동물병원"}, "영수증 분석 — 취소했어요"),
     ],
 )

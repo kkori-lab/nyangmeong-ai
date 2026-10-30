@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class CharacterFailure(StrEnum):
-    # 실패 사유. Java 내부 API가 생기면 그쪽 값으로 맞춘다
+    # 실패 사유 : Java 내부 API 확정 시 그쪽 값으로 맞춤
     API_ERROR = "CHARACTER_API_ERROR"  # 생성기 오류
     SPEC_MISMATCH = "CHARACTER_SPEC_MISMATCH"  # 512×512 규격 밖
 
@@ -42,10 +42,9 @@ class SavedJob:
 
 
 class FakeCharacterJobRepository:
-    """Java 캐릭터 작업 내부 API가 생기기 전의 가짜. 메모리에 기록만 한다
-
-    주양육자 여부·이미 캐릭터 있음·생성 중 판정은 Java가 작업 생성 때 한다.
-    연결은 LJS 백엔드 캐릭터 흐름 재설계 뒤(docs/api/internal.md "Python → Java" 미정 행)
+    """[캐릭터 작업 가짜 저장소]
+    - Java 캐릭터 작업 내부 API 연결 전까지 메모리 기록만 : 판정은 Java 몫
+    - 연결 시점 : LJS 백엔드 캐릭터 흐름 재설계 뒤 (docs/api/internal.md "Python → Java" 미정 행)
     """
 
     def __init__(self) -> None:

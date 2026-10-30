@@ -1,7 +1,7 @@
 """사람 확인용 LLM 실제 호출. .env.local의 LLM_API_KEY로 Anthropic API를 부른다(비용이 든다)
 
 돌리기: uv run python -m scripts.llm_smoke
-pytest가 모으지 않는다(tests/ 밖). 테스트·CI에서 부르지 않는다(AGENTS.md 5번)
+pytest 수집 제외(tests/ 밖), 테스트·CI에서 미호출(AGENTS.md 5번)
 """
 
 import asyncio

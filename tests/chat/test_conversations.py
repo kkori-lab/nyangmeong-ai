@@ -15,7 +15,7 @@ URL = "/ai/conversations"
 
 
 def test_생성_Java에_쿠키와_평문으로_저장_요청하고_201(client, java):
-    # FN-AIM-011-07·11·14 : 암호화·회원 판정은 Java 몫, Python은 쿠키와 평문을 넘긴다
+    # FN-AIM-011-07·11·14 : 암호화·회원 판정은 Java 몫, Python은 쿠키와 평문 전달
     as_member(client, 1)
     res = client.post(
         URL, json={"petSn": 5, "cnvrsCn": "강아지 예방접종 순서 알려줘"}, headers=AJAX
@@ -169,7 +169,7 @@ def test_삭제_헤더_없으면_403이고_남아_있다(client, java):
 
 
 def test_목록_쿠키_없으면_Java_401_그대로이고_인증_확인은_부르지_않는다(client, java):
-    # 추가-1 : 대화 API는 Java 대화 내부 API가 쿠키로 회원을 판정한다
+    # 추가-1 : 대화 API의 회원 판정은 Java 대화 내부 API가 쿠키로 수행
     paths: list[str] = []
 
     def handler(request: httpx2.Request) -> httpx2.Response:
@@ -202,7 +202,7 @@ def test_Java_403은_본문과_Set_Cookie를_그대로(client):
 
 
 def test_Java_오류의_내부_경로는_ai_경로로_바꾼다(client):
-    # 추가-3 : /internal/** 경로를 React에 드러내지 않는다. 나머지 필드·Set-Cookie는 그대로
+    # 추가-3 : /internal/** 경로 비노출, 나머지 필드·Set-Cookie는 그대로
     body = {
         "status": "error",
         "httpCode": 404,

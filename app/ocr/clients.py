@@ -33,7 +33,7 @@ class OcrClient(Protocol):
 
 
 class ReceiptOutput(BaseModel):
-    # 구조화 출력 모양. 읽지 못한 값은 null, 날짜는 YYYY-MM-DD 문자열
+    # 구조화 출력 모양 : 못 읽은 값은 null, 날짜는 YYYY-MM-DD 문자열
     hsptl_nm: str | None = None
     ckup_ymd: str | None = None
     recpt_amt: int | None = None
@@ -67,8 +67,8 @@ def _parse_date(value: str | None) -> date | None:
 
 
 class GoogleVisionOcrClient:
-    # FN-AIM-008-06 : Vision으로 글자를 읽고(DOCUMENT_TEXT_DETECTION) LLM이 항목으로 정리한다.
-    # 로그에는 영수증 원문을 남기지 않는다(길이·소요 시간만)
+    # FN-AIM-008-06 : Vision 글자 읽기(DOCUMENT_TEXT_DETECTION) -> LLM 항목 정리
+    # 로그에는 길이·소요 시간만
     def __init__(
         self,
         api_key: str,
@@ -121,7 +121,7 @@ class GoogleVisionOcrClient:
         if "error" in response:
             logger.warning("Vision 오류 응답 (%.0fms)", _elapsed(started))
             raise OcrApiError("vision")
-        # 줄 순서를 낱말 위치로 다시 세운다(품목과 금액이 같은 줄에 오게)
+        # 줄 순서를 낱말 위치로 재구성 (품목과 금액을 같은 줄에)
         text = layout_text(response.get("fullTextAnnotation") or {})
         logger.info("Vision 글자 %d자 (%.0fms)", len(text), _elapsed(started))
         return text
@@ -129,7 +129,7 @@ class GoogleVisionOcrClient:
     async def _structure(self, text: str) -> ReceiptOcrResponse:
         started = time.monotonic()
         try:
-            # 대화창용 제한(10초·재시도 1번) 대신 분석 제한 시간 하나로 : 정리가 10초를 넘기도 한다
+            # 대화창용 제한(10초·재시도 1번) 대신 분석 제한 시간 하나만 적용
             llm = self._llm.with_options(timeout=self._timeout_sec, max_retries=0)
             response = await llm.messages.parse(
                 model=self._model,
@@ -174,7 +174,7 @@ def _elapsed(started: float) -> float:
 def get_ocr_client(settings: Annotated[Settings, Depends(get_settings)]) -> OcrClient:
     api_key = settings.google_vision_api_key.get_secret_value()
     if not api_key:
-        # 키 없는 PC·CI : 실제 API를 부르지 않고 502. 키 값은 남기지 않는다
+        # 키 없는 PC·CI : 실제 API 미호출, 502 (키 값은 로그 제외)
         logger.error("OCR 호출 불가: .env.local의 GOOGLE_VISION_API_KEY가 비어 있습니다")
         raise external_error()
     return GoogleVisionOcrClient(

@@ -13,7 +13,7 @@ from app.core.llm import get_anthropic_client
 
 logger = logging.getLogger(__name__)
 
-# 항목이 많은 결과지도 담기게. thinking 토큰도 이 안에서 쓴다
+# 항목 많은 결과지 수용 : thinking 토큰 포함
 LLM_MAX_TOKENS = 8192
 LLM_EFFORT = "low"
 
@@ -23,7 +23,7 @@ class PdfAnalyzeApiError(Exception):
 
 
 class LabRow(BaseModel):
-    # 구조화 출력의 한 행. 결과지에 찍힌 글자 그대로, 못 읽은 값은 null
+    # 구조화 출력의 한 행 : 결과지 표기 그대로, 못 읽은 값은 null
     name: str | None = None
     value: str | None = None
     unit: str | None = None
@@ -56,8 +56,8 @@ READ_SYSTEM = (
 
 
 class ClaudePdfClient:
-    # FN-HLT-005-04 : PDF를 document 블록으로 그대로 보낸다(텍스트·스캔 PDF 모두).
-    # 로그에는 결과지 내용을 남기지 않는다(크기·건수·소요 시간만)
+    # FN-HLT-005-04 : PDF를 document 블록으로 그대로 전송 (텍스트·스캔 PDF 모두)
+    # 로그에는 건수·크기·소요 시간만
     def __init__(self, llm: AsyncAnthropic, model: str, timeout_sec: float) -> None:
         self._llm = llm
         self._model = model
@@ -74,7 +74,7 @@ class ClaudePdfClient:
             },
         }
         try:
-            # 대화창용 제한(10초·재시도 1번) 대신 분석 제한 시간 하나로
+            # 대화창용 제한(10초·재시도 1번) 대신 분석 제한 시간 하나만 적용
             llm = self._llm.with_options(timeout=self._timeout_sec, max_retries=0)
             response = await llm.messages.parse(
                 model=self._model,
@@ -118,7 +118,7 @@ def _elapsed(started: float) -> float:
 def get_lab_result_client(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> LabResultClient | None:
-    # 키가 없으면 None : 업로드 검증을 먼저 하고 502는 service에서 준다
+    # 키 없으면 None : 업로드 검증 먼저, 502는 service에서
     if not settings.llm_api_key.get_secret_value():
         logger.error("PDF 분석 불가: .env.local의 LLM_API_KEY가 비어 있습니다")
         return None

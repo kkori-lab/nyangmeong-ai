@@ -1,8 +1,8 @@
-"""개발 환경 점검·설정. setup.sh·setup.ps1이 uv sync 다음에 부른다. 직접 실행해도 된다.
+"""개발 환경 점검·설정. setup.sh·setup.ps1이 uv sync 다음에 호출, 직접 실행도 가능
 
     uv run python scripts/doctor.py
 
-이미 맞는 것은 건너뛴다. 사람이 직접 할 일이 남으면 [직접] 줄로 알리고 종료 코드 3으로 끝낸다.
+이미 맞는 것은 건너뜀. 사람이 직접 할 일이 남으면 [직접] 줄로 안내하고 종료 코드 3으로 종료
 """
 
 import json
@@ -54,7 +54,7 @@ def run(*args: str, check: bool = False) -> subprocess.CompletedProcess[str]:
 
 
 def ask(prompt: str) -> str | None:
-    """입력을 받는다. 입력할 수 없는 환경(CI 등)이면 None."""
+    """입력 받기. 입력할 수 없는 환경(CI 등)이면 None"""
     try:
         return input(f"  {prompt}").strip()
     except EOFError:
@@ -62,7 +62,7 @@ def ask(prompt: str) -> str | None:
 
 
 def read_env() -> dict[str, str]:
-    """.env.local의 KEY=값을 읽는다. 따옴표와 주석은 다루지 않는다(예시 파일 형식 그대로)."""
+    """.env.local의 KEY=값 읽기. 따옴표와 주석은 미처리(예시 파일 형식 그대로)"""
     values: dict[str, str] = {}
     for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
         line = line.strip()
@@ -75,7 +75,7 @@ def read_env() -> dict[str, str]:
 def git_setup() -> None:
     step("git")
 
-    # 전역 설정(회사 계정 등)은 건드리지 않고 이 저장소에만 둔다
+    # 전역 설정(회사 계정 등) 미변경, 이 저장소에만 적용
     for key in ("user.name", "user.email"):
         local = run("git", "config", "--local", key).stdout.strip()
         if local:
@@ -87,7 +87,7 @@ def git_setup() -> None:
             answer = ask(f"이 저장소에도 전역 git {key}({value}) 값을 사용하시겠습니까? [Y/n] ")
             if answer is None or answer.lower().startswith("n"):
                 value = ""
-        # 입력할 수 없는 환경이면 다시 묻지 않는다
+        # 입력 불가 환경은 재질문 생략
         while not value and answer is not None:
             answer = ask(f"이 저장소에 사용할 git {key} 값을 입력하세요: ")
             value = answer or ""
@@ -97,7 +97,7 @@ def git_setup() -> None:
         else:
             todo(f"git config --local {key} <값> 으로 설정해 주세요")
 
-    # 커밋 훅: AI 도구가 붙인 Co-Authored-By 줄을 지운다(.githooks/commit-msg)
+    # 커밋 훅 : AI 도구가 붙인 Co-Authored-By 줄 제거(.githooks/commit-msg)
     if run("git", "config", "--local", "core.hooksPath").stdout.strip() == ".githooks":
         skip("git 커밋 훅 (.githooks)")
     else:
@@ -115,7 +115,7 @@ def env_setup() -> dict[str, str]:
         ok(".env.local (예시 복사). 실제 값은 디스코드에서 받아 바꿔 주세요")
     env = read_env()
 
-    # mock 모드는 없다. 연결된 AI 키가 비면 할 일, 아직 연결 전인 키는 비어 있다고만 보여 준다
+    # mock 모드 없음 : 연결된 AI 키가 비면 할 일, 연결 전인 키는 빈 상태만 표시
     groups = {
         "인증": ("BACKEND_BASE_URL",),
         "LLM": ("LLM_API_KEY",),
@@ -139,7 +139,7 @@ def vscode_cli() -> str | None:
     found = shutil.which("code")
     if found:
         return found
-    # 맥은 PATH에 없어도 앱 안의 명령을 쓴다
+    # 맥은 PATH에 없어도 앱 안의 명령 사용
     mac_app = Path("/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code")
     return str(mac_app) if mac_app.exists() else None
 
@@ -172,7 +172,7 @@ def mcp_setup(env: dict[str, str]) -> None:
     codex = shutil.which("codex")
 
     if claude:
-        # claude.ai 에서 연결한 커넥터는 claude mcp get 으로 찾을 수 없어 목록에서 찾는다
+        # claude.ai 에서 연결한 커넥터는 claude mcp get으로 조회 불가 : 목록에서 검색
         listed = run(claude, "mcp", "list").stdout.splitlines()
         connector = next(
             (
@@ -201,7 +201,7 @@ def mcp_setup(env: dict[str, str]) -> None:
         if run(codex, "mcp", "get", "dms").returncode == 0:
             skip("Codex MCP dms")
         elif url:
-            # 원격 서버는 등록하면 바로 브라우저 로그인이 시작되므로 출력을 가리지 않는다
+            # 원격 서버는 등록 즉시 브라우저 로그인 시작 : 출력 미차단
             if subprocess.run([codex, "mcp", "add", "dms", "--url", url], cwd=ROOT).returncode == 0:
                 ok("Codex MCP dms")
             else:
@@ -231,7 +231,7 @@ def check() -> None:
             die(f"{title} 에 실패했습니다. 위 출력을 확인해 주세요.")
         ok(title)
 
-    # 서버가 .env.local을 읽고 뜨는지 /health로 보고 끈다. 포트는 비어 있는 아무 포트를 쓴다
+    # 서버의 .env.local 로딩을 /health로 확인 후 종료, 포트는 비어 있는 아무 포트
     port = free_port()
     server = subprocess.Popen(
         (python, "-m", "uvicorn", "app.main:app", "--port", str(port)),
@@ -270,7 +270,7 @@ def main() -> None:
     check()
 
     print(f"\n설치가 끝났습니다. 직접 할 일 {todo_count}개(위 [직접] 줄).")
-    # 직접 할 일이 남으면 0이 아닌 코드로 끝낸다
+    # 직접 할 일이 남으면 0이 아닌 코드로 종료
     sys.exit(3 if todo_count else 0)
 
 

@@ -14,7 +14,7 @@ def symbol(text: str, x: int, y: int, width: int = 10, height: int = 20) -> dict
 
 
 def word(text: str, x: int, y: int, gaps: dict[int, int] | None = None) -> dict:
-    """글자 폭 10, 붙여 쓴 낱말. gaps={i: n}이면 i번째 글자 앞을 n만큼 띄운다"""
+    """글자 폭 10, 붙여 쓴 낱말. gaps={i: n}이면 i번째 글자 앞을 n만큼 띄움"""
     symbols, cursor = [], x
     for i, ch in enumerate(text):
         cursor += (gaps or {}).get(i, 0)
@@ -24,7 +24,7 @@ def word(text: str, x: int, y: int, gaps: dict[int, int] | None = None) -> dict:
 
 
 def annotation(*words: dict, text: str = "") -> dict:
-    # Vision은 칸(블록)마다 따로 읽는다 : 낱말마다 다른 블록에 둔다
+    # Vision은 칸(블록)마다 따로 읽는다 : 낱말마다 다른 블록에 배치
     blocks = [{"paragraphs": [{"words": [w]}]} for w in words]
     return {"text": text, "pages": [{"blocks": blocks}]}
 
@@ -44,7 +44,7 @@ def test_다른_블록으로_읽힌_품목과_금액을_같은_줄로_잇는다(
 @pytest.mark.parametrize(
     ("gaps", "expected"),
     [
-        # FN-AIM-008-06 : 수량 1과 금액이 한 낱말로 붙어도 글자 간격이 넓으면 나눈다
+        # FN-AIM-008-06 : 수량 1과 금액이 한 낱말로 붙어도 글자 간격이 넓으면 분리
         ({1: 40}, "1 60,000"),
         # 간격이 좁으면 한 낱말(160,000)
         ({1: 2}, "160,000"),

@@ -33,7 +33,7 @@ class RouteRow:
 
 
 def _compact(text: str) -> str:
-    # 키워드·사전은 공백을 뺀 문장에 대조한다("털 깎기" = "털깎기")
+    # 키워드·사전은 공백을 뺀 문장과 대조 ("털 깎기" = "털깎기")
     return re.sub(r"\s+", "", text)
 
 
@@ -92,14 +92,14 @@ def match_route(text: str) -> RouteRow | None:
 
 
 def find_route(scr_id: str, param: str | None) -> RouteRow | None:
-    # FN-AIM-004-08 : AI 분류 결과는 매핑표의 라우팅 가능 행에 있는 화면만 인정한다
+    # FN-AIM-004-08 : AI 분류 결과는 매핑표의 라우팅 가능 행에 있는 화면만 인정
     for row in routing_table():
         if row.routable and row.scr_id == scr_id and row.param == param:
             return row
     return None
 
 
-# 서머타임이 없어 고정 오프셋으로 둔다(Windows에는 tzdata가 없다)
+# 서버 서머타임 없음 : 고정 오프셋 사용 (Windows에는 tzdata 없음)
 KST = timezone(timedelta(hours=9))
 WEEKDAYS = "월화수목금토일"
 # 공통코드(백엔드 db/20261029_insert_base_data_v0.10.sql)
@@ -201,7 +201,7 @@ def _next_month_day(today: date, day: int) -> date | None:
 
 _RELATIVE_DAYS = {"오늘": 0, "내일": 1, "모레": 2, "글피": 3, "어제": -1, "그제": -2}
 
-# 순서대로 대조하고 맞은 자리는 가린다(뒤 규칙이 다시 읽지 않게). 띄어쓰기는 허용한다
+# 순서대로 대조, 맞은 자리는 가림 (뒤 규칙의 재판독 방지). 띄어쓰기 허용
 _DATE_RULES = (
     (r"(\d{4})-(\d{1,2})-(\d{1,2})", lambda m, t: _ymd(int(m[1]), int(m[2]), int(m[3]))),
     (r"(이번|다음|지난)\s*주\s*([월화수목금토일])요일", lambda m, t: _week_day(t, m[1], m[2])),
@@ -241,7 +241,7 @@ _NOT_HOSPITAL_PREFIX = re.compile(
     r"\d|요일|^(내일|오늘|모레|어제|다음|이번|지난|일정|예약|가까운|근처|단골|그|우리|동네|동물|주)$"
 )
 _PARTICLE_END = re.compile(r"(에서|에게|한테|으로|에|의|로|은|는|이|가|을|를|도)$")
-# 등록·수정 동사부터 절 끝까지는 항목명이 아니다
+# 등록·수정 동사부터 절 끝까지는 항목명 제외
 _VERB_TAIL = re.compile(
     r"\s*(잡아|등록해|넣어|추가해|예약해|만들어|바꿔|변경해|수정해)\s*(줘|주세요|주|줄래|줄|요)?.*$"
 )
@@ -252,7 +252,7 @@ def _mask(text: str, start: int, end: int) -> str:
 
 
 def _hour(period: str | None, hour: int) -> int | None:
-    # 오전·오후가 없으면 1~7시는 오후로 본다(반려동물 일정은 대개 낮 시간)
+    # 오전·오후가 없으면 1~7시는 오후 처리 : 반려동물 일정은 대개 낮 시간
     if hour > 24:
         return None
     if period in ("오후", "저녁", "밤") and hour < 12:
@@ -315,7 +315,7 @@ def _parse_time(result: RegisterFields, masked: str) -> str:
 
 
 def parse_register(text: str, today: date, pet_names: list[str]) -> RegisterFields:
-    # FN-AIM-012-02 : 일정 종류 키워드·날짜·시간·주기를 규칙으로 뽑는다. 반려동물은 서비스가 정한다
+    # FN-AIM-012-02 : 일정 종류 키워드·날짜·시간·주기의 규칙 추출, 반려동물은 서비스가 결정
     result = RegisterFields()
     masked, cycle_span = _parse_cycle(result, text)
     masked = _parse_dates(result, masked, today)
@@ -368,7 +368,7 @@ def care_item_name(masked: str, anchor: int, pet_names: list[str]) -> str | None
 
 
 def valid_ymd(value) -> date | None:
-    # FN-AIM-012-03 : AI가 준 날짜는 서버에서 다시 검증한다(형식·실재 날짜)
+    # FN-AIM-012-03 : AI가 준 날짜의 서버 재검증 (형식·실재 날짜)
     try:
         return date.fromisoformat(str(value))
     except (TypeError, ValueError):
@@ -396,8 +396,8 @@ def next_due(zone: str | None, cycle: str | None, days: int | None, last: date) 
 
 
 def clean_ai_fields(raw: dict) -> RegisterFields:
-    # FN-AIM-012-03 : AI 출력은 그대로 믿지 않는다. 코드는 허용값, 날짜·시간은 형식과 실재 날짜,
-    # 글자 수는 컬럼 길이로 다시 맞추고, 틀린 칸은 비운다
+    # FN-AIM-012-03 : AI 출력 재검증 (코드는 허용값, 날짜·시간은 형식과 실재 날짜)
+    # 글자 수는 컬럼 길이로 재조정, 틀린 칸은 비움
     def text(name: str, limit: int) -> str | None:
         value = raw.get(name)
         return value.strip()[:limit] or None if isinstance(value, str) else None

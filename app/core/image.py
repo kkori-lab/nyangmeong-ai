@@ -17,7 +17,7 @@ def detect_image_type(data: bytes) -> str | None:
 
 
 def validate_upload(image: bytes, file_name: str | None) -> None:
-    """확장자와 실제 형식을 함께 검증, 10MB 이하. PDF는 받지 않는다"""
+    """확장자 + 실제 형식 검증, 10MB 이하 (PDF 불가)"""
     if len(image) > MAX_IMAGE_BYTES:
         raise AppError("FILE_SIZE_EXCEEDED", 400, "파일 용량은 10MB 이하여야 합니다.")
     _, dot, extension = (file_name or "").rpartition(".")

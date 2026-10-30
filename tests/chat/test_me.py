@@ -7,7 +7,7 @@ URL = "/ai/me"
 
 
 def test_쿠키_있으면_회원_번호(client, java):
-    # FN-AIM-011-03 : 인증만 거치고 DB·대화 API는 부르지 않는다
+    # FN-AIM-011-03 : 인증만 거치고 DB·대화 API 미호출
     as_member(client, 42)
     res = client.get(URL)
 

@@ -25,7 +25,7 @@ async def recognize_receipt(
     return response.success(result)
 
 
-# 인증을 OCR 클라이언트보다 먼저 : 쿠키 없는 요청은 키와 관계없이 401
+# 인증 먼저 : 쿠키 없는 요청은 키와 무관하게 401
 @ai_router.post("", dependencies=[Depends(require_member)])
 async def analyze_receipt(
     request: Request,
@@ -37,7 +37,7 @@ async def analyze_receipt(
     repo: Annotated[ReceiptRepository, Depends(get_receipt_repository)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> JSONResponse:
-    # 10MB를 넘는 부분은 읽지 않는다(1바이트만 더 읽어 초과 판정)
+    # 10MB + 1바이트까지만 읽기 : 초과 판정용
     image = await file.read(MAX_IMAGE_BYTES + 1)
     result = await service.analyze_receipt(
         client,
