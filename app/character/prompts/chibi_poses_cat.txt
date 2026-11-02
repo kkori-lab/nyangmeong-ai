@@ -1,0 +1,61 @@
+The FIRST image is a style reference sheet of several chibi pixel animals. The
+LAST image is a photo of a CAT. You are drawing a CAT, not a dog.
+Draw ONE 2x2 sheet of the cat from the LAST image, in exactly the art style of
+the FIRST image. TOP row = SITTING: left FRONT view, right side view facing LEFT.
+BOTTOM row = STANDING on all four legs: left FRONT view, right side view facing
+LEFT. Exactly four figures of the same cat, nothing else.
+
+OUTLINE FIRST - the most important style rule:
+Every figure is enclosed by a THICK BLACK OUTLINE, two to three pixels wide, pure
+black, unbroken all the way around the silhouette - around the ears, the head,
+every leg, every paw and the tail. A figure without a full black outline is
+wrong, no matter how fluffy the cat is.
+
+Copy only the art STYLE of the reference - never its animals, colors or layout.
+
+The result must be unmistakably a cat:
+- ears exactly as the photo shows them: folded flat if the cat has folded ears,
+  triangular and upright otherwise
+- a short flat muzzle with a small pink nose - no protruding snout
+- a tail matching the photo's fur length
+
+VIEW LOCK
+- Four panels in a 2x2 layout. Top row: the cat SITTING. Bottom row: the cat
+  STANDING squarely on all four legs. Left column: FRONT view. Right column:
+  side view facing LEFT.
+- Same cat in all four panels: identical fur colors, markings, ear shape and
+  pixel scale. Figures in the same row stand on the same floor line.
+- Leave clear empty background around every figure. No figure may touch or cross
+  the middle of the canvas, horizontally or vertically, and none may touch the
+  canvas edges.
+- Left column: the cat faces the viewer, both eyes visible, body symmetric.
+- Right column: the cat faces LEFT in profile, exactly ONE eye visible, nose
+  pointing left. If both eyes are visible in the right column, that panel is
+  wrong.
+- Do not reproduce the grid of the reference sheet. Exactly four figures, never
+  more, no dividing lines between panels.
+
+STYLE
+- Thick black outline, one heavy pixel line, closed all the way around each
+  figure with no gaps. The outline must be dark and bold, never faint or broken.
+- Big chunky pixels, low resolution look, crisp hard pixel edges, no
+  anti-aliasing, no blur.
+- 4 to 6 flat colors per figure, almost no gradients, no fur strands.
+- Ignore the fur TEXTURE of the photo: no fur strands, no shading streaks, no
+  fluffy texture - flat color areas only. Take only the colors and markings.
+- Chibi proportions in ALL four figures, standing ones included: the head is as
+  large as the whole body, the body is small and round, the legs are short
+  stubby nubs. Do not draw realistic cat proportions or long legs.
+- Simple face: pink blush on the cheeks, small happy smile.
+{eyes}
+
+Keep the cat's own fur colors, markings and ear shape faithful to the photo.
+What makes this cat recognizable comes from its fur colors, its markings and
+face mask, its ear shape and ear color, and its tail.
+Do not copy the fur color of the reference animals.
+
+No collar, no clothing, no accessories, no lettering, no logo.
+
+Flat solid pure magenta (#FF00FF) background covering the entire canvas edge to
+edge, one color only, no border, no gradient, no shadow, no ground line, no text.
+Never use magenta on the animal or the item.
