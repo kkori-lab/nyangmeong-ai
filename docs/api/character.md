@@ -13,6 +13,7 @@ React가 부르는 `/ai/**` API다. 공통 규칙은 `docs/api/README.md`에 있
 | 메서드 | 경로 | 설명 | 기능 ID | 담당 | 요청 DTO | 응답 DTO |
 | --- | --- | --- | --- | --- | --- | --- |
 | POST | /ai/characters | 사진과 반려동물로 픽셀 캐릭터 생성을 시작한다. 202와 작업 번호를 바로 주고, 생성은 응답 뒤에 한다. 결과(성공이면 512×512 PNG, 실패면 `CHARACTER_API_ERROR`·`CHARACTER_SPEC_MISMATCH`)는 Java에 보고한다. 오류: 형식(확장자·실제 형식 불일치, PDF 포함) 400 `FILE_TYPE_NOT_ALLOWED`, 10MB 초과 400 `FILE_SIZE_EXCEEDED`, `petSn`·`photo` 없음 400 `INVALID_REQUEST`(검증 실패는 Java 작업을 만들지 않는다), 생성기가 없음 502 `EXTERNAL_API_ERROR`(Java 작업을 만들기 전에 판정), 주양육자 아님·이미 캐릭터 있음·생성 중 등 Java 4xx 그대로, Java 연결 실패 502 `EXTERNAL_API_ERROR` | MYP-010-08·09·17·18 | LJS | CharacterCreateRequest | CharacterCreateResponse |
+| POST | /ai/characters/{pixelCharSn}/preview | 아이템을 입힌 512×512 PNG를 돌려준다. 저장하지 않는다. 합성 순서는 머리 착용 그림(없으면 맨몸) → 의상 → 가방 → 목 → 얼굴. 착용 확정은 Java `PUT /pixel-characters/{pixelCharSn}/equipped-items`. 오류: 아이템 번호가 굽기 대상이 아님(신발 포함)·같은 부위 2개 400 `INVALID_REQUEST`, 캐릭터 없음 404 `PIXEL_CHARACTER_NOT_FOUND`(Java 4xx 그대로), 아직 안 구움 409 `ITEM_BAKING`(굽기가 켜져 있으면 그 아이템을 큐 맨 앞으로 올린다. 다시 요청한다), 굽기 실패·합성 실패 502 `CHARACTER_API_ERROR`, 생성기 없음 502 `EXTERNAL_API_ERROR` | MYP-011-01, MYP-010-13 | LJS | CharacterPreviewRequest | `image/png` |
 
 ## DTO
 
@@ -28,3 +29,9 @@ React가 부르는 `/ai/**` API다. 공통 규칙은 `docs/api/README.md`에 있
 | 필드 | 타입 | 필수 | 검증·설명 | 근거 |
 | --- | --- | --- | --- | --- |
 | chrcJobSn | Long | Y | Java가 만든 생성 작업 번호. 상태 조회에 쓴다. 이름은 Java 작업 테이블이 정해지면 맞춘다 | MYP-010-09 |
+
+### CharacterPreviewRequest
+쓰는 API: POST /ai/characters/{pixelCharSn}/preview
+| 필드 | 타입 | 필수 | 검증·설명 | 근거 |
+| --- | --- | --- | --- | --- |
+| itemSns | List\<Long\> | Y | 입혀 볼 아이템 번호(`ITEM_SN`). 상점에서는 아직 안 산 아이템도 입혀 보므로 보유 번호가 아니다. 부위당 1개. 빈 목록이면 맨몸 | MYP-011-01, MYP-010-13 |

@@ -33,37 +33,65 @@ class CharacterRequest:
     chrc_cn: str | None = None
 
 
+@dataclass(frozen=True)
+class GeneratedCharacter:
+    """512 결과와 굽기·합성에 다시 쓸 맨몸 시트·배치값"""
+
+    image: bytes
+    sheet: bytes = b""
+    layout: canvas.Layout | None = None
+
+
 class CharacterClient(Protocol):
-    async def generate(self, request: CharacterRequest) -> bytes: ...
+    async def generate(self, request: CharacterRequest) -> GeneratedCharacter: ...
+
+    async def bake(self, sheet: bytes, pet_se_cd: PetSeCd, item: engine.BakeItem) -> bytes: ...
 
 
 @dataclass(frozen=True)
 class Rendered:
-    """서기 정면 컷과 512 배치 결과 (눈을 못 찾으면 placement 없음)"""
+    """맨몸 시트·서기 정면 컷과 512 배치 결과 (눈을 못 찾으면 placement 없음)"""
 
+    sheet: bytes
     front: bytes
     placement: canvas.Placement | None
 
 
 class OpenAICharacterClient:
-    """FN-MYP-010-08·17 : 눈 판별 -> 2×2 시트 1회 생성 -> 서기 정면 512 배치
-
-    - 맨몸 시트·배치값은 Java 저장 자리가 정해질 때까지 버림
-    """
+    """FN-MYP-010-08·17 : 눈 판별 -> 2×2 시트 1회 생성 -> 서기 정면 512 배치"""
 
     def __init__(self, client: Any, image_model: str, vision_model: str) -> None:
         self._client = client
         self._image_model = image_model
         self._vision_model = vision_model
 
-    async def generate(self, request: CharacterRequest) -> bytes:
+    async def generate(self, request: CharacterRequest) -> GeneratedCharacter:
         rendered = await asyncio.to_thread(self.render, request)
         if rendered.placement is None:
             logger.warning("캐릭터 눈을 찾지 못함: 규격 실패로 보고")
-            return NOT_PLACED
+            return GeneratedCharacter(NOT_PLACED)
         if rendered.placement.clipped:
             logger.warning("캐릭터가 512 캔버스 밖으로 잘림: 배율 %.3f", rendered.placement.scale)
-        return rendered.placement.png
+        return GeneratedCharacter(rendered.placement.png, rendered.sheet, rendered.placement.layout)
+
+    async def bake(self, sheet: bytes, pet_se_cd: PetSeCd, item: engine.BakeItem) -> bytes:
+        return await asyncio.to_thread(self._bake, sheet, pet_se_cd, item)
+
+    def _bake(self, sheet: bytes, pet_se_cd: PetSeCd, item: engine.BakeItem) -> bytes:
+        try:
+            prompt = engine.build_wear_prompt(engine.species_of(pet_se_cd), item)
+            response = self._client.images.edit(
+                model=self._image_model,
+                prompt=prompt,
+                image=[("character.png", io.BytesIO(sheet), "image/png")],
+                size=IMAGE_SIZE,
+                quality=IMAGE_QUALITY,
+                n=1,
+            )
+            return base64.b64decode(response.data[0].b64_json)
+        except Exception as exc:
+            logger.error("아이템 굽기 실패: %s, %s", item.item_id, type(exc).__name__)
+            raise CharacterApiError from exc
 
     def render(self, request: CharacterRequest) -> Rendered:
         """동기 SDK·이미지 처리 전체 (샘플 검증 스크립트도 사용)"""
@@ -77,10 +105,11 @@ class OpenAICharacterClient:
                 request.colr_nm,
                 request.chrc_cn,
             )
-            front = engine.stand_front(self._draw_sheet(prompt, photo))
+            sheet = self._draw_sheet(prompt, photo)
+            front = engine.stand_front(sheet)
             buffer = io.BytesIO()
             front.save(buffer, "PNG")
-            return Rendered(buffer.getvalue(), canvas.place(front))
+            return Rendered(sheet, buffer.getvalue(), canvas.place(front))
         except Exception as exc:
             # 예외 본문 제외 : 요청 번호·내부 경로 포함 가능
             logger.error("캐릭터 생성 실패: %s", type(exc).__name__)

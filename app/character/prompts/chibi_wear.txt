@@ -1,0 +1,28 @@
+The image is a 2x2 sheet of one chibi pixel {species}: top row SITTING, bottom row
+STANDING, left column FRONT view, right column side view facing LEFT.
+Redraw the SAME 2x2 sheet with the {species} wearing {wear}.
+
+CHANGE NOTHING ELSE - most important rule:
+The {species}'s fur colors, markings, ear shape, face, proportions, poses, the
+position and size of every figure, the pixel scale, the outline weight and the
+background color all stay IDENTICAL to the image. The worn item is the ONLY
+addition. Do not add any other clothing or objects.
+
+VIEW LOCK
+- Keep the 2x2 layout exactly: four figures, same panels, same poses.
+- Left column keeps facing the viewer with both eyes visible. Right column keeps
+  facing LEFT in profile; if both eyes are visible in the right column, that
+  panel is wrong.
+- The item appears on all four figures, drawn from the matching angle in each.
+- No figure or item may touch or cross the middle of the canvas, horizontally or
+  vertically, and none may touch the canvas edges.
+- Do not reproduce the grid of any reference. No dividing lines between panels.
+
+STYLE
+- The item is drawn in the same pixel art style as the {species}: big chunky
+  pixels, 4 to 6 flat colors, and a thick black outline closed all the way around.
+- Crisp hard pixel edges, no anti-aliasing, no blur.
+
+Flat solid pure magenta (#FF00FF) background covering the entire canvas edge to
+edge, one color only, no border, no gradient, no shadow, no ground line, no text.
+Never use magenta on the animal or the item.
