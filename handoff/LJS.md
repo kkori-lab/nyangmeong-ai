@@ -1,12 +1,36 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-MYP-011 아이템 상점 모달 (굽기·합성·미리보기 서버) — 끝 (검증 통과, 사람 확인 2026-11-02)
-- `POST /ai/characters/{pixelCharSn}/preview` 추가. 5부위 26개, 머리 착용 컷을 바탕으로 의상 → 가방 → 목 → 얼굴 레이어 합성. 어두운 털은 털을 밝힌 시트로 굽고 차이를 낸다. 동시 10, 굽기·합성 시간 로그
-- 실제 그림은 강아지·고양이 사람 확인. 시트는 가짜 저장소(메모리), `CHARACTER_BAKE_ENABLED` 기본 false
+SCR-MYP-011 아이템 상점 모달 (캐릭터 작업·시트 Java 연결, SCR-MYP-010 공통) — 구현 중 (승인 2026-11-02 14:28, 시작 2026-11-02 14:23)
+
+범위: 시트만 잇지 않고 작업 생성·결과 보고까지 함께 연결한다. `pixelCharSn`은 성공 보고가 돌려주고 맨몸 시트도 그 보고로 저장되므로, 시트 API만으로는 동작하지 않는다.
+
+- 계약 확정(FN-MYP-011-01·010-13·010-08·09): `docs/api/internal.md` 미정 5행(작업 생성·결과 보고·시트 저장/실패·굽기 대상·시트 조회)을 아래 경로로 바꾼다. 부르는 쪽 Python, 만드는 쪽 Java(LJS 백엔드). 작업 번호는 Java 이름 `charCrtJobSn`으로 통일한다(`character.md` 응답 포함, 프론트 미사용 확인). 초안에 있던 이름과 다른 이유: Java 테이블 `CHAR_CRT_JOB_SN`에 맞춤
+  - POST /internal/ai/characters/jobs : 요청 `{petSn}`, 응답 `{charCrtJobSn, petSeCd, vrtyNm, colrNm, chrcCn}`. 쿠키로 주양육자 판정, 4xx 그대로 전달
+  - POST /internal/ai/characters/jobs/{charCrtJobSn}/success : multipart `image`·`sheet`, `scale`·`originX`·`originY`. 응답 `{pixelCharSn}`
+  - POST /internal/ai/characters/jobs/{charCrtJobSn}/failure : `{failRsn}`
+  - GET /internal/ai/characters/bake-items : `[{itemSn, engineItemKey}]`
+  - PUT /internal/ai/characters/{pixelCharSn}/item-sheets/{itemSn} : multipart `sheet`
+  - POST /internal/ai/characters/{pixelCharSn}/item-sheets/{itemSn}/failure : 본문 없음
+  - GET /internal/ai/characters/{pixelCharSn}/sheets?itemSns= : `{petSeCd, sheetFileSn, scale, originX, originY, items:[{itemSn, atchFileSn, bakeFailed}]}`. 쿠키로 주양육자·소유 판정, 없으면 404 `PIXEL_CHARACTER_NOT_FOUND`
+  - GET /internal/ai/characters/{pixelCharSn}/sheet-files/{atchFileSn} : `image/png`
+- 결정: 시트는 base64로 JSON에 담지 않고 파일 번호를 받아 따로 내려받는다. 미리보기 1회에 최대 6장이라 본문이 크다
+- 결정: 응답 뒤 백그라운드 호출(성공·실패 보고, 착용 시트 저장, 굽기 실패 보고)은 쿠키를 보내지 않는다. 생성이 access_token 수명보다 길 수 있어서다. 작업·캐릭터 번호로 처리하고, 내부 API는 nginx 밖이라는 2026-10-26 결정에 기댄다
+- 결정: 시트 업로드·다운로드 제한 시간은 기본 3초가 아니라 15초
+- FN-MYP-010-08·09·011-01·010-13 / `app/character/repository.py`: `JavaCharacterJobRepository` 추가, `get_character_job_repository`를 교체, `CharacterJobRepository` 메서드 시그니처는 유지, 필드명 `chrc_job_sn` → `char_crt_job_sn`. `app/character/service.py`·`router.py`·`schemas.py`는 이름만 바꾼다
+  - 명령: `sh scripts/check.sh` 통과, httpx `MockTransport` 테스트로 8개 호출의 경로·본문·쿠키 유무, 4xx 그대로 전달, 5xx·모양 불일치 502, 시트 응답 → `CharacterSheets` 변환을 확인
+  - 명령: 앱 코드에 `FakeCharacterJobRepository`가 없고 `tests/character/fakes.py`로 옮겨져 기존 테스트가 그대로 통과한다
+- `app/core/backend.py`: PNG를 받는 `fetch_backend_bytes` 추가(`call_backend`는 JSON 전용)
+- FN-MYP-011-06 / 권한: 시트 조회 4xx를 그대로 전달해 "로그인만 하면 어느 `pixelCharSn`이든 합성" 문제를 닫는다
+  - 명령: Java 403·404가 `/preview` 응답으로 본문 그대로 나오는 테스트
+- 사람 확인: 화면: Java 로컬 + Python으로 Postman 생성 → 맨몸 시트 저장 확인 → `/preview` 맨몸 PNG → 재시작 뒤에도 같은 결과 → 남의 `pixelCharSn` 403. Java API가 필요해 백엔드 구현 뒤에 한다
+
+다음에 할 백엔드 몫(이 저장소 밖, LJS 백엔드 `/start`): 위 API 구현, 착용 시트 테이블·맨몸 시트 역할 코드·배치값 컬럼·`ITEM` 엔진 키 컬럼, `CharacterCreationWorker`·`PythonCharacterGenerator` 정리. 병합은 백엔드 먼저: Python이 먼저 들어가면 캐릭터 생성이 502가 된다.
+
+새 의존성: 없음
 
 ### 추가 요청
-- 추가-1 동시 호출 10 / 추가-2 얼굴 영역 조건을 "레이어가 덮지 않은 화소는 맨몸과 같다"로 변경 / 추가-3 `.env.local.example` 굽기 설정 / 추가-4 밝혀서 굽기·외곽선 복구·정렬 2단계 탐색 / 추가-5 굽기·합성 시간 로그 / 추가-6 머리·의상·얼굴 착용 지시를 엔진 문구로
+| 추가-1 | `app/character/service.py` | 명령: `BAKE_CONCURRENCY`가 13이고 `sh scripts/check.sh` 통과 | 요청 2026-11-02 15:01 "13으로 올리자" |
 
 ## 다음에 할 것
 - 연결 남음: FN-MYP-011-01·FN-MYP-010-13 Java 시트 저장·조회 내부 API(`docs/api/internal.md` 미정 행). 연결 전에는 로그인만 하면 어느 `pixelCharSn`이든 합성되고 시트가 재시작 때 사라진다 (LJS 백엔드)

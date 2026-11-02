@@ -8,9 +8,10 @@ from PIL import Image, ImageDraw
 from app.character import bake, compose, engine, service
 from app.character.canvas import Layout
 from app.character.clients import CharacterApiError, GeneratedCharacter
-from app.character.repository import CharacterJob, FakeCharacterJobRepository, SavedJob
+from app.character.repository import CharacterJob
 from app.character.rules import matches_spec
 from app.character.schemas import FACE_W, FACE_X, FACE_Y
+from tests.character.fakes import FakeCharacterJobRepository, SavedJob
 
 MAGENTA = (255, 0, 255, 255)
 FUR = (200, 150, 100, 255)

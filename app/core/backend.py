@@ -43,10 +43,9 @@ def get_backend_client(request: Request) -> httpx2.AsyncClient:
     return request.app.state.backend_client
 
 
-async def call_backend(
+async def _send(
     client: httpx2.AsyncClient, settings: Settings, method: str, path: str, **kwargs: Any
-) -> Any:
-    """Java 내부 API 호출 -> ApiResponse의 data (4xx 그대로 전달, 그 외 실패 502)"""
+) -> httpx2.Response:
     base_url = settings.backend_base_url.rstrip("/")
     if not base_url:
         raise external_error()
@@ -58,6 +57,24 @@ async def call_backend(
         raise BackendError.of(res)
     if not res.is_success:
         raise external_error()
+    return res
+
+
+async def fetch_backend_bytes(
+    client: httpx2.AsyncClient, settings: Settings, path: str, **kwargs: Any
+) -> bytes:
+    """Java 내부 API에서 파일 내려받기 (4xx 그대로 전달, 그 외 실패·빈 본문 502)"""
+    res = await _send(client, settings, "GET", path, **kwargs)
+    if not res.content:
+        raise external_error()
+    return res.content
+
+
+async def call_backend(
+    client: httpx2.AsyncClient, settings: Settings, method: str, path: str, **kwargs: Any
+) -> Any:
+    """Java 내부 API 호출 -> ApiResponse의 data (4xx 그대로 전달, 그 외 실패 502)"""
+    res = await _send(client, settings, method, path, **kwargs)
     if not res.content:
         return None
     try:

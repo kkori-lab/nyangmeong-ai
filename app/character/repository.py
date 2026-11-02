@@ -1,49 +1,34 @@
-import logging
+import asyncio
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Protocol
+from typing import Annotated, Any, Protocol
+
+import httpx2
+from fastapi import Depends, Request
+from pydantic import BaseModel, Field, ValidationError
 
 from app.character.canvas import Layout
 from app.character.schemas import PetSeCd
-from app.core.backend import BackendError
+from app.core.auth import REQUESTED_WITH
+from app.core.backend import (
+    call_backend,
+    external_error,
+    fetch_backend_bytes,
+    get_backend_client,
+)
+from app.core.config import Settings, get_settings
 
-logger = logging.getLogger(__name__)
-
-_NOT_FOUND = b'{"code":"PIXEL_CHARACTER_NOT_FOUND"}'
-# 가짜 번호 : ITEM에 엔진 키 컬럼이 생기기 전 임시. 시드의 얼굴·목·가방 ITEM_SN은 그대로
-_FAKE_ITEM_SNS = {
-    5: "round-glasses",
-    6: "sunglasses",
-    7: "heart-glasses",
-    8: "monocle",
-    9: "bell-necklace",
-    10: "check-scarf",
-    11: "bow-tie",
-    12: "pearl-necklace",
-    17: "small-backpack",
-    18: "crossbody-bag",
-    19: "lunch-bag",
-    20: "flower-basket",
-    101: "red-beanie",
-    102: "straw-hat",
-    103: "baseball-cap",
-    104: "bucket-hat",
-    105: "winter-earflap-hat",
-    106: "pink-bucket-hat",
-    107: "green-earflap-hat",
-    108: "green-sweater",
-    109: "yellow-raincoat",
-    110: "denim-jacket",
-    111: "hoodie",
-    112: "puffer-vest",
-    113: "purple-denim-jacket",
-    114: "teal-puffer-vest",
-}
+# Java 캐릭터 내부 API (docs/api/internal.md "Python → Java")
+CHARACTERS_PATH = "/internal/ai/characters"
+JOBS_PATH = f"{CHARACTERS_PATH}/jobs"
+REQUESTED_WITH_HEADER = "X-Requested-With"
+# 시트는 1024 PNG : 기본 3초로는 전송이 끊길 수 있음
+SHEET_TIMEOUT_SEC = 15.0
 
 
 class CharacterFailure(StrEnum):
-    # 실패 사유 : Java 내부 API 확정 시 그쪽 값으로 맞춤
+    # 실패 사유 : Java CHAR_CRT_JOB 실패 사유로 저장
     API_ERROR = "CHARACTER_API_ERROR"  # 생성기 오류
     SPEC_MISMATCH = "CHARACTER_SPEC_MISMATCH"  # 512×512 규격 밖
 
@@ -52,7 +37,7 @@ class CharacterFailure(StrEnum):
 class CharacterJob:
     """Java가 만든 생성 작업과 반려동물 등록 정보(FN-MYP-010-08 읽기 전용 값)"""
 
-    chrc_job_sn: int
+    char_crt_job_sn: int
     pet_se_cd: PetSeCd
     vrty_nm: str | None = None
     colr_nm: str | None = None
@@ -74,10 +59,10 @@ class CharacterJobRepository(Protocol):
     async def create_job(self, pet_sn: int) -> CharacterJob: ...
 
     async def report_success(
-        self, chrc_job_sn: int, image: bytes, sheet: bytes, layout: Layout | None
+        self, char_crt_job_sn: int, image: bytes, sheet: bytes, layout: Layout | None
     ) -> int: ...
 
-    async def report_failure(self, chrc_job_sn: int, reason: CharacterFailure) -> None: ...
+    async def report_failure(self, char_crt_job_sn: int, reason: CharacterFailure) -> None: ...
 
     async def list_bake_items(self) -> dict[int, str]: ...
 
@@ -88,75 +73,158 @@ class CharacterJobRepository(Protocol):
     async def find_sheets(self, pixel_char_sn: int, item_sns: Iterable[int]) -> CharacterSheets: ...
 
 
-@dataclass
-class SavedJob:
-    job: CharacterJob
-    pet_sn: int
-    image: bytes | None = None
-    sheet: bytes = b""
-    layout: Layout | None = None
-    failure: CharacterFailure | None = None
-    item_sheets: dict[int, bytes] = field(default_factory=dict)
-    failed_items: set[int] = field(default_factory=set)
+class _JobResponse(BaseModel):
+    char_crt_job_sn: int = Field(alias="charCrtJobSn")
+    pet_se_cd: PetSeCd = Field(alias="petSeCd")
+    vrty_nm: str | None = Field(default=None, alias="vrtyNm")
+    colr_nm: str | None = Field(default=None, alias="colrNm")
+    chrc_cn: str | None = Field(default=None, alias="chrcCn")
 
 
-class FakeCharacterJobRepository:
-    """[캐릭터 작업 가짜 저장소]
-    - Java 캐릭터 작업·시트 내부 API 연결 전까지 메모리 기록만 : 판정은 Java 몫
-    - 캐릭터 번호는 작업 번호와 같음, petSn이 짝수면 고양이 : 고양이 경로 확인용
-    - 연결 시점 : LJS 백엔드 캐릭터 흐름 재설계 뒤 (docs/api/internal.md "Python → Java" 미정 행)
-    """
+class _SuccessResponse(BaseModel):
+    pixel_char_sn: int = Field(alias="pixelCharSn")
 
-    def __init__(self) -> None:
-        self.jobs: dict[int, SavedJob] = {}
-        self._next = 1
+
+class _BakeItem(BaseModel):
+    item_sn: int = Field(alias="itemSn")
+    engine_item_key: str = Field(alias="engineItemKey")
+
+
+class _SheetItem(BaseModel):
+    item_sn: int = Field(alias="itemSn")
+    atch_file_sn: int | None = Field(default=None, alias="atchFileSn")
+    bake_failed: bool = Field(default=False, alias="bakeFailed")
+
+
+class _SheetsResponse(BaseModel):
+    pet_se_cd: PetSeCd = Field(alias="petSeCd")
+    sheet_file_sn: int = Field(alias="sheetFileSn")
+    scale: float
+    origin_x: float = Field(alias="originX")
+    origin_y: float = Field(alias="originY")
+    items: list[_SheetItem] = []
+
+
+def _png(name: str, content: bytes) -> tuple[str, bytes, str]:
+    return name, content, "image/png"
+
+
+class JavaCharacterJobRepository:
+    # 회원 판정은 Java(브라우저 Cookie) : 4xx 그대로 전달, 연결 실패·5xx·응답 모양 불일치는 502
+    # 응답 뒤 호출은 쿠키 없이 작업·캐릭터 번호로 처리 : 생성이 access_token 수명보다 길 수 있음
+    def __init__(self, client: httpx2.AsyncClient, settings: Settings, cookie: str | None) -> None:
+        self._client = client
+        self._settings = settings
+        # Java RequestedWithFilter가 /internal/**의 POST에도 적용
+        self._server_headers = {REQUESTED_WITH_HEADER: REQUESTED_WITH}
+        self._member_headers = dict(self._server_headers)
+        if cookie:
+            self._member_headers["Cookie"] = cookie
+
+    async def _call(self, method: str, path: str, **kwargs: Any) -> Any:
+        kwargs.setdefault("headers", self._server_headers)
+        return await call_backend(self._client, self._settings, method, path, **kwargs)
 
     async def create_job(self, pet_sn: int) -> CharacterJob:
-        job = CharacterJob(self._next, "PETC0002" if pet_sn % 2 == 0 else "PETC0001")
-        self._next += 1
-        self.jobs[job.chrc_job_sn] = SavedJob(job, pet_sn)
-        logger.info("가짜 Java 캐릭터 작업 생성: chrcJobSn=%d", job.chrc_job_sn)
-        return job
+        # FN-MYP-010-08 : 주양육자·이미 캐릭터 있음·생성 중 판정은 Java
+        data = await self._call(
+            "POST", JOBS_PATH, headers=self._member_headers, json={"petSn": pet_sn}
+        )
+        try:
+            job = _JobResponse.model_validate(data)
+        except ValidationError:
+            raise external_error() from None
+        return CharacterJob(
+            job.char_crt_job_sn, job.pet_se_cd, job.vrty_nm, job.colr_nm, job.chrc_cn
+        )
 
     async def report_success(
-        self, chrc_job_sn: int, image: bytes, sheet: bytes, layout: Layout | None
+        self, char_crt_job_sn: int, image: bytes, sheet: bytes, layout: Layout | None
     ) -> int:
-        saved = self.jobs[chrc_job_sn]
-        saved.image, saved.sheet, saved.layout = image, sheet, layout
-        logger.info("가짜 Java 캐릭터 성공 보고: chrcJobSn=%d, %d바이트", chrc_job_sn, len(image))
-        return chrc_job_sn
+        # FN-MYP-010-09·17 : 결과와 합성에 쓸 맨몸 시트·배치값을 함께 저장 요청
+        placement = {}
+        if layout is not None:
+            placement = {
+                "scale": str(layout.scale),
+                "originX": str(layout.origin_x),
+                "originY": str(layout.origin_y),
+            }
+        data = await self._call(
+            "POST",
+            f"{JOBS_PATH}/{char_crt_job_sn}/success",
+            files={"image": _png("image.png", image), "sheet": _png("sheet.png", sheet)},
+            data=placement,
+            timeout=SHEET_TIMEOUT_SEC,
+        )
+        try:
+            return _SuccessResponse.model_validate(data).pixel_char_sn
+        except ValidationError:
+            raise external_error() from None
 
-    async def report_failure(self, chrc_job_sn: int, reason: CharacterFailure) -> None:
-        self.jobs[chrc_job_sn].failure = reason
-        logger.info("가짜 Java 캐릭터 실패 보고: chrcJobSn=%d, %s", chrc_job_sn, reason)
+    async def report_failure(self, char_crt_job_sn: int, reason: CharacterFailure) -> None:
+        await self._call(
+            "POST", f"{JOBS_PATH}/{char_crt_job_sn}/failure", json={"failRsn": reason.value}
+        )
 
     async def list_bake_items(self) -> dict[int, str]:
-        return dict(_FAKE_ITEM_SNS)
+        data = await self._call("GET", f"{CHARACTERS_PATH}/bake-items")
+        try:
+            items = [_BakeItem.model_validate(item) for item in data]
+        except (TypeError, ValidationError):
+            raise external_error() from None
+        return {item.item_sn: item.engine_item_key for item in items}
 
     async def save_item_sheet(self, pixel_char_sn: int, item_sn: int, sheet: bytes) -> None:
-        self.jobs[pixel_char_sn].item_sheets[item_sn] = sheet
-        logger.info("가짜 Java 착용 시트 저장: %d, itemSn=%d", pixel_char_sn, item_sn)
+        await self._call(
+            "PUT",
+            f"{CHARACTERS_PATH}/{pixel_char_sn}/item-sheets/{item_sn}",
+            files={"sheet": _png("sheet.png", sheet)},
+            timeout=SHEET_TIMEOUT_SEC,
+        )
 
     async def report_bake_failure(self, pixel_char_sn: int, item_sn: int) -> None:
-        self.jobs[pixel_char_sn].failed_items.add(item_sn)
-        logger.info("가짜 Java 굽기 실패 보고: %d, itemSn=%d", pixel_char_sn, item_sn)
+        await self._call("POST", f"{CHARACTERS_PATH}/{pixel_char_sn}/item-sheets/{item_sn}/failure")
 
     async def find_sheets(self, pixel_char_sn: int, item_sns: Iterable[int]) -> CharacterSheets:
-        saved = self.jobs.get(pixel_char_sn)
-        if saved is None or saved.layout is None:
-            raise BackendError(404, _NOT_FOUND, "application/json", [])
+        # FN-MYP-011-06 : 주양육자·소유 판정은 Java, 시트는 커서 파일 번호로 따로 받음
         wanted = set(item_sns)
+        data = await self._call(
+            "GET",
+            f"{CHARACTERS_PATH}/{pixel_char_sn}/sheets",
+            headers=self._member_headers,
+            params={"itemSns": sorted(wanted)},
+        )
+        try:
+            found = _SheetsResponse.model_validate(data)
+        except ValidationError:
+            raise external_error() from None
+        items = [item for item in found.items if item.item_sn in wanted]
+        baked = [item for item in items if item.atch_file_sn is not None]
+        files = await asyncio.gather(
+            self._fetch_sheet(pixel_char_sn, found.sheet_file_sn),
+            *(self._fetch_sheet(pixel_char_sn, item.atch_file_sn) for item in baked),
+        )
         return CharacterSheets(
-            saved.job.pet_se_cd,
-            saved.sheet,
-            saved.layout,
-            {sn: sheet for sn, sheet in saved.item_sheets.items() if sn in wanted},
-            frozenset(saved.failed_items & wanted),
+            found.pet_se_cd,
+            files[0],
+            Layout(found.scale, found.origin_x, found.origin_y),
+            {item.item_sn: sheet for item, sheet in zip(baked, files[1:], strict=True)},
+            frozenset(item.item_sn for item in items if item.bake_failed),
+        )
+
+    async def _fetch_sheet(self, pixel_char_sn: int, atch_file_sn: int | None) -> bytes:
+        return await fetch_backend_bytes(
+            self._client,
+            self._settings,
+            f"{CHARACTERS_PATH}/{pixel_char_sn}/sheet-files/{atch_file_sn}",
+            headers=self._member_headers,
+            timeout=SHEET_TIMEOUT_SEC,
         )
 
 
-_fake = FakeCharacterJobRepository()
-
-
-def get_character_job_repository() -> CharacterJobRepository:
-    return _fake
+def get_character_job_repository(
+    request: Request,
+    client: Annotated[httpx2.AsyncClient, Depends(get_backend_client)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> CharacterJobRepository:
+    return JavaCharacterJobRepository(client, settings, request.headers.get("cookie"))

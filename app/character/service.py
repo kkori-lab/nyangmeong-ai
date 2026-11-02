@@ -22,7 +22,7 @@ from app.core.response import AppError
 logger = logging.getLogger(__name__)
 
 # OpenAI 동시 호출 상한
-BAKE_CONCURRENCY = 10
+BAKE_CONCURRENCY = 13
 BAKE_ATTEMPTS = 2
 
 
@@ -124,11 +124,11 @@ async def generate_and_report(
         return
     try:
         pixel_char_sn = await repo.report_success(
-            job.chrc_job_sn, character.image, character.sheet, character.layout
+            job.char_crt_job_sn, character.image, character.sheet, character.layout
         )
     except Exception:
         # 보고 실패로 멈춘 작업은 Java가 타임아웃으로 정리
-        logger.exception("캐릭터 성공 보고 실패: chrcJobSn=%d", job.chrc_job_sn)
+        logger.exception("캐릭터 성공 보고 실패: charCrtJobSn=%d", job.char_crt_job_sn)
         return
     if not bake_enabled:
         return
@@ -261,6 +261,6 @@ async def _report_failure(
     repo: CharacterJobRepository, job: CharacterJob, reason: CharacterFailure
 ) -> None:
     try:
-        await repo.report_failure(job.chrc_job_sn, reason)
+        await repo.report_failure(job.char_crt_job_sn, reason)
     except Exception:
-        logger.exception("캐릭터 실패 보고 실패: chrcJobSn=%d, %s", job.chrc_job_sn, reason)
+        logger.exception("캐릭터 실패 보고 실패: charCrtJobSn=%d, %s", job.char_crt_job_sn, reason)
