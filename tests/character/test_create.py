@@ -14,13 +14,13 @@ from app.character.clients import (
 from app.character.repository import (
     CharacterFailure,
     CharacterJob,
-    FakeCharacterJobRepository,
     get_character_job_repository,
 )
 from app.character.rules import matches_spec
 from app.core.backend import BackendError, get_backend_client
 from app.core.config import get_settings
 from app.main import create_app
+from tests.character.fakes import FakeCharacterJobRepository
 
 URL = "/ai/characters"
 AJAX = {"X-Requested-With": "XMLHttpRequest"}
@@ -77,8 +77,8 @@ class InfoRepository(FakeCharacterJobRepository):
 
     async def create_job(self, pet_sn: int) -> CharacterJob:
         job = await super().create_job(pet_sn)
-        saved = self.jobs[job.chrc_job_sn]
-        saved.job = CharacterJob(job.chrc_job_sn, **JOB_INFO)
+        saved = self.jobs[job.char_crt_job_sn]
+        saved.job = CharacterJob(job.char_crt_job_sn, **JOB_INFO)
         return saved.job
 
 
@@ -92,7 +92,7 @@ class ConflictRepository(FakeCharacterJobRepository):
 class BrokenReportRepository(InfoRepository):
     """결과 보고에서 Java 오류"""
 
-    async def report_success(self, chrc_job_sn: int, image: bytes, sheet, layout) -> int:
+    async def report_success(self, char_crt_job_sn: int, image: bytes, sheet, layout) -> int:
         raise BackendError(500, b"", None, [])
 
 
@@ -138,7 +138,7 @@ def test_요청하면_202와_작업_번호를_주고_응답_뒤_성공과_PNG를
     response = post(client)
 
     assert response.status_code == 202
-    assert response.json()["data"] == {"chrcJobSn": 1}
+    assert response.json()["data"] == {"charCrtJobSn": 1}
     saved = repo.jobs[1]
     assert saved.pet_sn == 3
     assert matches_spec(saved.image)

@@ -41,7 +41,7 @@ async def create_character(
         image,
         settings.character_bake_enabled,
     )
-    return response.success(CharacterCreateResponse(chrc_job_sn=job.chrc_job_sn), 202)
+    return response.success(CharacterCreateResponse(char_crt_job_sn=job.char_crt_job_sn), 202)
 
 
 @router.post("/{pixel_char_sn}/preview", dependencies=[Depends(require_member)])

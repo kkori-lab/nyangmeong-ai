@@ -6,8 +6,6 @@ from app.character import engine
 from app.character.clients import CharacterApiError, get_character_client
 from app.character.repository import (
     CharacterJob,
-    FakeCharacterJobRepository,
-    SavedJob,
     get_character_job_repository,
 )
 from app.character.rules import matches_spec
@@ -15,6 +13,7 @@ from app.character.service import BakeQueue, get_bake_queue
 from app.core.backend import get_backend_client
 from app.core.config import get_settings
 from app.main import create_app
+from tests.character.fakes import FakeCharacterJobRepository, SavedJob
 from tests.character.test_bake import LAYOUT, sheet
 
 URL = "/ai/characters/1/preview"

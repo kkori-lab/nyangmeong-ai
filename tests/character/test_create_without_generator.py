@@ -2,10 +2,11 @@ import httpx2
 import pytest
 from fastapi.testclient import TestClient
 
-from app.character.repository import FakeCharacterJobRepository, get_character_job_repository
+from app.character.repository import get_character_job_repository
 from app.core.backend import get_backend_client
 from app.core.config import get_settings
 from app.main import create_app
+from tests.character.fakes import FakeCharacterJobRepository
 
 URL = "/ai/characters"
 HEADERS = {"X-Requested-With": "XMLHttpRequest", "Cookie": "access_token=member-7"}

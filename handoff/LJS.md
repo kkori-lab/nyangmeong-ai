@@ -1,27 +1,30 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-MYP-011 아이템 상점 모달 (굽기·합성·미리보기 서버) — 끝 (검증 통과, 사람 확인 2026-11-02)
-- `POST /ai/characters/{pixelCharSn}/preview` 추가. 5부위 26개, 머리 착용 컷을 바탕으로 의상 → 가방 → 목 → 얼굴 레이어 합성. 어두운 털은 털을 밝힌 시트로 굽고 차이를 낸다. 동시 10, 굽기·합성 시간 로그
-- 실제 그림은 강아지·고양이 사람 확인. 시트는 가짜 저장소(메모리), `CHARACTER_BAKE_ENABLED` 기본 false
+SCR-MYP-011 아이템 상점 모달 (캐릭터 작업·시트 Java 연결, SCR-MYP-010 공통) — 끝 (검증 `확인 못 함 있음`=연결만 남음, 로컬 Java 연동 확인, 사람 확인 2026-11-02)
+- `FakeCharacterJobRepository`를 `JavaCharacterJobRepository`로 교체(`/internal/ai/characters/**` 8개, 모두 쿠키). 작업 번호 이름 `charCrtJobSn`. 가짜는 `tests/character/fakes.py`
+- 로컬 확인: 생성 202 → Java 완료, 맨몸 시트·배치값 저장, `/preview` 512 PNG, 재시작 뒤 같은 md5, 다른 회원 403 `PET_ACCESS_DENIED`
 
 ### 추가 요청
-- 추가-1 동시 호출 10 / 추가-2 얼굴 영역 조건을 "레이어가 덮지 않은 화소는 맨몸과 같다"로 변경 / 추가-3 `.env.local.example` 굽기 설정 / 추가-4 밝혀서 굽기·외곽선 복구·정렬 2단계 탐색 / 추가-5 굽기·합성 시간 로그 / 추가-6 머리·의상·얼굴 착용 지시를 엔진 문구로
+- 추가-1 굽기 동시 호출 13 / 추가-2 내부 API 8개 모두 쿠키 전송(backend-67 제안에 사람이 "쿠키로 진행")
 
 ## 다음에 할 것
-- 연결 남음: FN-MYP-011-01·FN-MYP-010-13 Java 시트 저장·조회 내부 API(`docs/api/internal.md` 미정 행). 연결 전에는 로그인만 하면 어느 `pixelCharSn`이든 합성되고 시트가 재시작 때 사라진다 (LJS 백엔드)
-- 굽기·합성 최적화: 서버 로그의 "굽기 시간"·"전체 굽기 시간"·"합성 시간" 실측으로 대상을 정한다. 합성 1.4초는 시험 그림 값, 동시 10의 약 1분은 추정이다. 후보는 이미지 품질 `low`(엔진 일부 경로), 동시 호출 수 (LJS)
+- 병합 순서: 백엔드 PR #105(`d73ca54`, 캐릭터 내부 API 포함) 먼저 → 병합 직후 공용 DB v0.12 적용(사람) → AI `LJS` PR. 순서가 바뀌면 캐릭터 생성 502 (LJS)
+- 옛 흐름으로 만든 캐릭터는 맨몸 시트가 없어 `/preview`가 404 `PIXEL_CHARACTER_NOT_FOUND`다. 다시 만들어야 한다. 무료 재생성(FN-MYP-010-23)은 사진이 Java로 오지 않아 SCR-ADM-042 전에 계약을 정한다 (LJS 백엔드)
+- 아이템을 입힌 미리보기와 굽기는 실제 Java로 확인하지 않았다(굽기 꺼짐). Java 시드는 엔진 키가 14개뿐이라 나머지 12개는 400 `INVALID_REQUEST` (LJS)
+- 문서: `docs/design/pixel-character-engine.md`에 `chrcJobSn`·`FakeCharacterJobRepository` 옛 설명이 남아 있다 (LJS)
+- 하네스 수정 PR 후보(공용): `verify-loop.sh guard`가 읽기 전용 비교(`git diff --no-index`)까지 막아 verify 절차와 어긋난다
+- 굽기·합성 최적화: 굽기 26개 실측 1회 104.2초(동시 10, 아이템당 31.5~37.0초, 재시도 없음). 동시 13으로 올린 값은 미측정. 합성 1.4초는 시험 그림 값. 후보는 전용 스레드 풀(기본 풀은 CPU+4라 코어 9개 미만 서버에서 13이 안 나온다), 429 대기 후 재시도, OpenAI 계정 한도 확인, 이미지 품질 `low` (LJS)
 - 고양이 꼬리 경계선·다리 사이 분홍 점: 원인 미확인(착용 지시 변경의 영향 포함). 정렬 2단계 탐색은 촘촘한 무늬에서 빗나갈 수 있고 그림체 샘플 1장으로만 확인 (LJS)
 - 테스트 보강: 겹침 순서 테스트(`test_render_얼굴은_의상_위에_겹친다`)가 순서를 증명하지 못한다, `OpenAICharacterClient._bake` 저장소 테스트 없음 (LJS)
 - 문서: `docs/design/pixel-character-engine.md` 6번 부위 표가 5부위 결정 전 내용, `docs/convention/milestone.md` 담당 표가 "SCR-MYP-010만" (LJS)
-- 굽기 켜기: 팀 비용 결정(26개 기준 캐릭터당 약 $1.64), Java 시트 저장 연결 뒤 (LJS)
+- 굽기 켜기: 팀 비용 결정(26개 기준 캐릭터당 약 $1.64), Java 시트 저장 연결 뒤. 켜기 전 access_token(30분) 만료 대책을 정한다: 만료 뒤 아이템은 비용을 내고도 저장·실패 표시가 안 되어 "안 구운 아이템"으로 남고, 성공 보고 401이면 결과를 잃고 작업은 시간 초과 실패가 된다 (LJS)
 - 백엔드(LJS): `ITEM`에 엔진 아이템 키 컬럼 추가, 시드 아이템을 엔진 14개에 맞출지 결정. 신발을 안 넣기로 해서 공통코드 `MYPC0006`과 시드 신발 4개는 정리 대상이다(공통코드는 DB에서만 고친다) (LJS)
 - DMS 모음: FN-MYP-010-13 겹침 순서(캐릭터 → 의상 → … → 머리장식) vs 합성 순서(머리 착용 바탕 위에 의상) (LJS)
 - DMS 모음: FN-MYP-010-13 "고정 좌표로 겹쳐 표시" vs 서버 합성, FN-MYP-010-17 "기준 좌표 고정" vs 상단 보정(눈 y가 캐릭터마다 다를 수 있음), 얼굴 영역 값 변경 (LJS)
 - 눈 찾기 위험: `dog_fluffy` 512 재검출이 눈이 아닌 쌍을 잡았다. 실제 배치 경로에서는 샘플 10건 모두 맞았으나, 틀리면 규격을 통과한 채 조용히 어긋난다. 검은 털은 하이라이트 기준이라 눈 높이가 몇 px 다를 수 있고 측정하지 않았다 (LJS)
 - 약한 테스트: EXIF 제거·회전 테스트 입력에 EXIF가 없다. 고양이 분기는 가짜 저장소가 짝수 `petSn`일 때만 `PETC0002`를 준다(실제 값은 Java 연결 뒤 확인) (LJS)
 - 얼굴 영역 `(128, 64, 256, 256)` → `(96, 32, 320, 320)` 변경 (LJS 결정 2026-11-02): 백엔드 `CharacterSpec.FACE`·`cropFace`의 256 축소 여부·AI `schemas.py`를 같이 바꾼다(`AGENTS.md` 4번, 백엔드 PR과 함께). AI는 눈 y=207 계산이 `FACE_Y`에 묶여 있어 상수를 분리한다 (LJS)
-- 연결 남음: FN-MYP-010-09 Java 캐릭터 작업 생성·결과 보고 내부 API(LJS 백엔드, 캐릭터 흐름 재설계). 연결되면 `app/character/repository.py` `FakeCharacterJobRepository` 교체, 작업 번호 이름(`chrcJobSn`)·실패 사유를 Java에 맞춘다. 초안은 `docs/api/internal.md` "Python → Java" 미정 행
 - 프론트(LJS) 알리기: SCR-AIM-011 첫 SEARCH 답변은 `done` 뒤 제목 요약(Haiku 한 번)이 끝나야 SSE 스트림이 닫힌다. 입력창 다시 열기는 스트림 종료가 아닌 `done` 기준으로. 바뀐 제목은 대화 목록을 다시 읽어 반영
 - 프론트(LJS) 알리기: 범위 밖 질문도 `intent.kind` FALLBACK 그대로(칩·연속 실패 카운트 같음), `done.message.cnvrsCn`만 범위 안내 문구. 프론트가 폴백 문구를 하드코딩하면 `done.message`를 쓰게 맞춘다
 - backend-90에 알리기: requirements.txt 커밋됨(`bf28ade`, LJS). 배포는 develop → master 병합 뒤. 서버 gunicorn은 워커 1개(`_in_progress` 프로세스 메모리)
@@ -41,7 +44,6 @@ SCR-MYP-011 아이템 상점 모달 (굽기·합성·미리보기 서버) — �
 - 프론트(LJS)가 맞출 것: ROUTE 뒤 `done.message`(저장된 이동 안내)와 화면 안내 겹침 정리, 분류 장애 `error`는 연속 실패로 세지 않고 [다시 시도]. 프론트 세션에 알림(2026-10-29)
 - 백엔드에 요청(LJS 백엔드): AI 설정값 조회 내부 API(SYS_STNG_AI_TKN_UPLMT_CNT·SYS_STNG_AI_CNVRS_TURN_CNT, 연결되면 가짜 `get_ai_settings` 교체), AI 역할 메시지 `cnvrsCn` 1,000자 상한 확대(상한 없이 저장 요청 중, 넘으면 저장 실패). `docs/api/internal.md` "미정" 행은 "설정값 조회"만 남긴다(최근 6턴은 GET 대화, 미완료 완료 처리는 불필요)
 - 프론트(LJS)와 맞출 것: 메시지 API SSE 이벤트(`intent`·`delta`·`done`·`error`, `chat.md` MessageEvent), 화면 ID → 프론트 경로 변환, 칩 재노출·연속 실패 카운트·FAQ 버튼(FN-AIM-005-03~06)은 프론트 몫
-- 백엔드에 요청(LJS 백엔드, 캐릭터 흐름 재설계): Python이 부를 캐릭터 작업 생성·결과·상태 보고 내부 API. 계약은 이 저장소 `docs/api/internal.md`의 `/internal/v1/**` 삭제와 같은 때 병합
 - 계약은 백엔드 PR과 함께 낸다(`AGENTS.md` 4번): 백엔드 LJS의 `ai` 도메인(대화 내부 API, 정본 백엔드 `docs/api/ai.md`, 10-27 PR 전)·서버 간 키 제거. 이 저장소 `docs/api/internal.md`와 같은 때 병합
 - 각자 `.env.local` 정리: `BACKEND_INTERNAL_KEY`·`INTERNAL_API_KEY`·`APP_PROFILE`·`*_DB_*`·`CONVERSATION_ENC_KEY` 삭제, `BACKEND_BASE_URL` 필수(없으면 `/ai/**` 전부 502). 운영 Nginx가 `/internal`을 막는지 확인
 - 하네스 수정 PR 후보(공용): `verify-collect.sh:18` `cut -c8-` 멀티바이트 문제, `start-check.sh` 수정분, macOS BSD `sed`(`milestone-status.sh`·`impl-check.sh`·`api-row.sh`. `sed -i`가 실패해도 두 스크립트 모두 종료 코드 0이고 `impl-check.sh`는 "바꿈:"까지 출력한다, 2026-10-28 실측), `verify-collect.sh:37-38` `case` 문법, `impl-check.sh:18`이 "질문" 글자가 든 줄(제목 "검색 질문/응답" 등)을 모두 질문으로 읽음
