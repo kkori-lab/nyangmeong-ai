@@ -111,25 +111,22 @@ def _png(name: str, content: bytes) -> tuple[str, bytes, str]:
 
 class JavaCharacterJobRepository:
     # 회원 판정은 Java(브라우저 Cookie) : 4xx 그대로 전달, 연결 실패·5xx·응답 모양 불일치는 502
-    # 응답 뒤 호출은 쿠키 없이 작업·캐릭터 번호로 처리 : 생성이 access_token 수명보다 길 수 있음
+    # 응답 뒤 호출도 요청에서 복사해 둔 쿠키를 쓴다 : 쿠키가 만료되면 Java가 401 (보고 실패로 남음)
     def __init__(self, client: httpx2.AsyncClient, settings: Settings, cookie: str | None) -> None:
         self._client = client
         self._settings = settings
         # Java RequestedWithFilter가 /internal/**의 POST에도 적용
-        self._server_headers = {REQUESTED_WITH_HEADER: REQUESTED_WITH}
-        self._member_headers = dict(self._server_headers)
+        self._headers = {REQUESTED_WITH_HEADER: REQUESTED_WITH}
         if cookie:
-            self._member_headers["Cookie"] = cookie
+            self._headers["Cookie"] = cookie
 
     async def _call(self, method: str, path: str, **kwargs: Any) -> Any:
-        kwargs.setdefault("headers", self._server_headers)
+        kwargs.setdefault("headers", self._headers)
         return await call_backend(self._client, self._settings, method, path, **kwargs)
 
     async def create_job(self, pet_sn: int) -> CharacterJob:
         # FN-MYP-010-08 : 주양육자·이미 캐릭터 있음·생성 중 판정은 Java
-        data = await self._call(
-            "POST", JOBS_PATH, headers=self._member_headers, json={"petSn": pet_sn}
-        )
+        data = await self._call("POST", JOBS_PATH, json={"petSn": pet_sn})
         try:
             job = _JobResponse.model_validate(data)
         except ValidationError:
@@ -191,7 +188,6 @@ class JavaCharacterJobRepository:
         data = await self._call(
             "GET",
             f"{CHARACTERS_PATH}/{pixel_char_sn}/sheets",
-            headers=self._member_headers,
             params={"itemSns": sorted(wanted)},
         )
         try:
@@ -217,7 +213,7 @@ class JavaCharacterJobRepository:
             self._client,
             self._settings,
             f"{CHARACTERS_PATH}/{pixel_char_sn}/sheet-files/{atch_file_sn}",
-            headers=self._member_headers,
+            headers=self._headers,
             timeout=SHEET_TIMEOUT_SEC,
         )
 

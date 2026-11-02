@@ -53,7 +53,7 @@ def make_repo(handler: Handler, requests: list[httpx2.Request] | None = None):
     return JavaCharacterJobRepository(client, SETTINGS, COOKIE)
 
 
-# 호출마다 경로·메서드·쿠키 : 쿠키는 회원 판정이 필요한 호출에만 보낸다
+# 호출마다 경로·메서드·쿠키 : 8개 모두 쿠키를 보낸다(Java 쿠키 인증)
 
 
 def test_create_job은_쿠키와_함께_보내고_등록_정보를_돌려준다() -> None:
@@ -77,7 +77,7 @@ def test_create_job은_쿠키와_함께_보내고_등록_정보를_돌려준다(
     assert json.loads(request.content) == {"petSn": 3}
 
 
-def test_report_success는_쿠키_없이_이미지_시트_배치값을_보낸다() -> None:
+def test_report_success는_쿠키와_함께_이미지_시트_배치값을_보낸다() -> None:
     requests: list[httpx2.Request] = []
     repo = make_repo(lambda _: ok({"pixelCharSn": 77}), requests)
 
@@ -86,14 +86,14 @@ def test_report_success는_쿠키_없이_이미지_시트_배치값을_보낸다
     assert sn == 77
     request = requests[0]
     assert (request.method, str(request.url)) == ("POST", f"{BASE}/jobs/9/success")
-    assert "cookie" not in request.headers
+    assert request.headers["cookie"] == COOKIE
     assert request.headers["x-requested-with"] == "XMLHttpRequest"
     assert request.headers["content-type"].startswith("multipart/form-data")
     for part in (b'name="image"', b"IMAGE", b'name="sheet"', b"SHEET", b'name="originX"', b"10.5"):
         assert part in request.content
 
 
-def test_report_failure는_쿠키_없이_사유를_보낸다() -> None:
+def test_report_failure는_쿠키와_함께_사유를_보낸다() -> None:
     requests: list[httpx2.Request] = []
     repo = make_repo(lambda _: httpx2.Response(200), requests)
 
@@ -101,7 +101,7 @@ def test_report_failure는_쿠키_없이_사유를_보낸다() -> None:
 
     request = requests[0]
     assert (request.method, str(request.url)) == ("POST", f"{BASE}/jobs/9/failure")
-    assert "cookie" not in request.headers
+    assert request.headers["cookie"] == COOKIE
     assert json.loads(request.content) == {"failRsn": "CHARACTER_SPEC_MISMATCH"}
 
 
@@ -113,10 +113,10 @@ def test_list_bake_items는_번호와_엔진_키를_돌려준다() -> None:
 
     assert targets == {5: "round-glasses"}
     assert (requests[0].method, str(requests[0].url)) == ("GET", f"{BASE}/bake-items")
-    assert "cookie" not in requests[0].headers
+    assert requests[0].headers["cookie"] == COOKIE
 
 
-def test_save_item_sheet는_쿠키_없이_PUT으로_보낸다() -> None:
+def test_save_item_sheet는_쿠키와_함께_PUT으로_보낸다() -> None:
     requests: list[httpx2.Request] = []
     repo = make_repo(lambda _: httpx2.Response(200), requests)
 
@@ -124,11 +124,11 @@ def test_save_item_sheet는_쿠키_없이_PUT으로_보낸다() -> None:
 
     request = requests[0]
     assert (request.method, str(request.url)) == ("PUT", f"{BASE}/77/item-sheets/5")
-    assert "cookie" not in request.headers
+    assert request.headers["cookie"] == COOKIE
     assert b'name="sheet"' in request.content and b"WORN" in request.content
 
 
-def test_report_bake_failure는_쿠키_없이_보낸다() -> None:
+def test_report_bake_failure는_쿠키와_함께_보낸다() -> None:
     requests: list[httpx2.Request] = []
     repo = make_repo(lambda _: httpx2.Response(200), requests)
 
@@ -136,7 +136,7 @@ def test_report_bake_failure는_쿠키_없이_보낸다() -> None:
 
     request = requests[0]
     assert (request.method, str(request.url)) == ("POST", f"{BASE}/77/item-sheets/5/failure")
-    assert "cookie" not in request.headers
+    assert request.headers["cookie"] == COOKIE
 
 
 def sheets_handler(request: httpx2.Request) -> httpx2.Response:
