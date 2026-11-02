@@ -1,41 +1,17 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-MYP-011 아이템 상점 모달 (캐릭터 작업·시트 Java 연결, SCR-MYP-010 공통) — 구현 중 (승인 2026-11-02 14:28, 시작 2026-11-02 14:23)
-
-범위: 시트만 잇지 않고 작업 생성·결과 보고까지 함께 연결한다. `pixelCharSn`은 성공 보고가 돌려주고 맨몸 시트도 그 보고로 저장되므로, 시트 API만으로는 동작하지 않는다.
-
-- 계약 확정(FN-MYP-011-01·010-13·010-08·09): `docs/api/internal.md` 미정 5행(작업 생성·결과 보고·시트 저장/실패·굽기 대상·시트 조회)을 아래 경로로 바꾼다. 부르는 쪽 Python, 만드는 쪽 Java(LJS 백엔드). 작업 번호는 Java 이름 `charCrtJobSn`으로 통일한다(`character.md` 응답 포함, 프론트 미사용 확인). 초안에 있던 이름과 다른 이유: Java 테이블 `CHAR_CRT_JOB_SN`에 맞춤
-  - POST /internal/ai/characters/jobs : 요청 `{petSn}`, 응답 `{charCrtJobSn, petSeCd, vrtyNm, colrNm, chrcCn}`. 쿠키로 주양육자 판정, 4xx 그대로 전달
-  - POST /internal/ai/characters/jobs/{charCrtJobSn}/success : multipart `image`·`sheet`, `scale`·`originX`·`originY`. 응답 `{pixelCharSn}`
-  - POST /internal/ai/characters/jobs/{charCrtJobSn}/failure : `{failRsn}`
-  - GET /internal/ai/characters/bake-items : `[{itemSn, engineItemKey}]`
-  - PUT /internal/ai/characters/{pixelCharSn}/item-sheets/{itemSn} : multipart `sheet`
-  - POST /internal/ai/characters/{pixelCharSn}/item-sheets/{itemSn}/failure : 본문 없음
-  - GET /internal/ai/characters/{pixelCharSn}/sheets?itemSns= : `{petSeCd, sheetFileSn, scale, originX, originY, items:[{itemSn, atchFileSn, bakeFailed}]}`. 쿠키로 주양육자·소유 판정, 없으면 404 `PIXEL_CHARACTER_NOT_FOUND`
-  - GET /internal/ai/characters/{pixelCharSn}/sheet-files/{atchFileSn} : `image/png`
-- 결정: 시트는 base64로 JSON에 담지 않고 파일 번호를 받아 따로 내려받는다. 미리보기 1회에 최대 6장이라 본문이 크다
-- 결정: 응답 뒤 백그라운드 호출(성공·실패 보고, 착용 시트 저장, 굽기 실패 보고)은 쿠키를 보내지 않는다. 생성이 access_token 수명보다 길 수 있어서다. 작업·캐릭터 번호로 처리하고, 내부 API는 nginx 밖이라는 2026-10-26 결정에 기댄다
-- 결정: 시트 업로드·다운로드 제한 시간은 기본 3초가 아니라 15초
-- FN-MYP-010-08·09·011-01·010-13 / `app/character/repository.py`: `JavaCharacterJobRepository` 추가, `get_character_job_repository`를 교체, `CharacterJobRepository` 메서드 시그니처는 유지, 필드명 `chrc_job_sn` → `char_crt_job_sn`. `app/character/service.py`·`router.py`·`schemas.py`는 이름만 바꾼다
-  - 명령: `sh scripts/check.sh` 통과, httpx `MockTransport` 테스트로 8개 호출의 경로·본문·쿠키 유무, 4xx 그대로 전달, 5xx·모양 불일치 502, 시트 응답 → `CharacterSheets` 변환을 확인
-  - 명령: 앱 코드에 `FakeCharacterJobRepository`가 없고 `tests/character/fakes.py`로 옮겨져 기존 테스트가 그대로 통과한다
-- `app/core/backend.py`: PNG를 받는 `fetch_backend_bytes` 추가(`call_backend`는 JSON 전용)
-- FN-MYP-011-06 / 권한: 시트 조회 4xx를 그대로 전달해 "로그인만 하면 어느 `pixelCharSn`이든 합성" 문제를 닫는다
-  - 명령: Java 403·404가 `/preview` 응답으로 본문 그대로 나오는 테스트
-- 사람 확인: 화면: Java 로컬 + Python으로 Postman 생성 → 맨몸 시트 저장 확인 → `/preview` 맨몸 PNG → 재시작 뒤에도 같은 결과 → 남의 `pixelCharSn` 403. Java API가 필요해 백엔드 구현 뒤에 한다
-
-다음에 할 백엔드 몫(이 저장소 밖, LJS 백엔드 `/start`): 위 API 구현, 착용 시트 테이블·맨몸 시트 역할 코드·배치값 컬럼·`ITEM` 엔진 키 컬럼, `CharacterCreationWorker`·`PythonCharacterGenerator` 정리. 병합은 백엔드 먼저: Python이 먼저 들어가면 캐릭터 생성이 502가 된다.
-
-새 의존성: 없음
+SCR-MYP-011 아이템 상점 모달 (캐릭터 작업·시트 Java 연결, SCR-MYP-010 공통) — 끝 (검증 `확인 못 함 있음`=연결만 남음, 로컬 Java 연동 확인, 사람 확인 2026-11-02)
+- `FakeCharacterJobRepository`를 `JavaCharacterJobRepository`로 교체(`/internal/ai/characters/**` 8개, 모두 쿠키). 작업 번호 이름 `charCrtJobSn`. 가짜는 `tests/character/fakes.py`
+- 로컬 확인: 생성 202 → Java 완료, 맨몸 시트·배치값 저장, `/preview` 512 PNG, 재시작 뒤 같은 md5, 다른 회원 403 `PET_ACCESS_DENIED`
 
 ### 추가 요청
-| 추가-1 | `app/character/service.py` | 명령: `BAKE_CONCURRENCY`가 13이고 `sh scripts/check.sh` 통과 | 요청 2026-11-02 15:01 "13으로 올리자" |
-| 추가-2 | `app/character/repository.py`, `docs/api/internal.md`, `tests/character/test_repository.py` | 명령: 내부 API 8개 호출 모두 쿠키를 보내는 테스트와 `sh scripts/check.sh` 통과 | 요청 2026-11-02 15:45 "쿠키로 진행" (backend-67의 쿠키 인증 전환 제안에 사람이 답함) |
+- 추가-1 굽기 동시 호출 13 / 추가-2 내부 API 8개 모두 쿠키 전송(backend-67 제안에 사람이 "쿠키로 진행")
 
 ## 다음에 할 것
-- 사람 확인 못 함: Java `/internal/ai/characters/**` 8개·시트 테이블·`ITEM` 엔진 키 컬럼 구현 대기(LJS 백엔드, backend 세션에 전달함). 구현되면 로컬에서 Java와 Python을 함께 띄워 확인하고 `/end`. 추가-1은 사람이 맞다고 확인함(2026-11-02)
-- 병합 순서: Python 커밋은 푸시됐고 PR은 아직 없다. 백엔드 PR 먼저 병합. Python이 먼저 들어가면 캐릭터 생성이 502
+- 병합 순서: 백엔드 PR #105(`d73ca54`, 캐릭터 내부 API 포함) 먼저 → 병합 직후 공용 DB v0.12 적용(사람) → AI `LJS` PR. 순서가 바뀌면 캐릭터 생성 502 (LJS)
+- 옛 흐름으로 만든 캐릭터는 맨몸 시트가 없어 `/preview`가 404 `PIXEL_CHARACTER_NOT_FOUND`다. 다시 만들어야 한다. 무료 재생성(FN-MYP-010-23)은 사진이 Java로 오지 않아 SCR-ADM-042 전에 계약을 정한다 (LJS 백엔드)
+- 아이템을 입힌 미리보기와 굽기는 실제 Java로 확인하지 않았다(굽기 꺼짐). Java 시드는 엔진 키가 14개뿐이라 나머지 12개는 400 `INVALID_REQUEST` (LJS)
 - 문서: `docs/design/pixel-character-engine.md`에 `chrcJobSn`·`FakeCharacterJobRepository` 옛 설명이 남아 있다 (LJS)
 - 하네스 수정 PR 후보(공용): `verify-loop.sh guard`가 읽기 전용 비교(`git diff --no-index`)까지 막아 verify 절차와 어긋난다
 - 굽기·합성 최적화: 굽기 26개 실측 1회 104.2초(동시 10, 아이템당 31.5~37.0초, 재시도 없음). 동시 13으로 올린 값은 미측정. 합성 1.4초는 시험 그림 값. 후보는 전용 스레드 풀(기본 풀은 CPU+4라 코어 9개 미만 서버에서 13이 안 나온다), 429 대기 후 재시도, OpenAI 계정 한도 확인, 이미지 품질 `low` (LJS)
