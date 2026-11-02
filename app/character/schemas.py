@@ -16,3 +16,10 @@ class CharacterCreateResponse(BaseModel):
 
     # 이름 : Java 작업 테이블 확정 시 맞춤
     chrc_job_sn: int
+
+
+class CharacterPreviewRequest(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    # FN-MYP-011-01 : 안 산 아이템도 입혀 봄 -> 보유 번호가 아닌 ITEM_SN
+    item_sns: list[int]

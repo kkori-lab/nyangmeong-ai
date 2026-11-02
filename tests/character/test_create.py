@@ -5,7 +5,12 @@ import httpx2
 import pytest
 from fastapi.testclient import TestClient
 
-from app.character.clients import CharacterApiError, CharacterRequest, get_character_client
+from app.character.clients import (
+    CharacterApiError,
+    CharacterRequest,
+    GeneratedCharacter,
+    get_character_client,
+)
 from app.character.repository import (
     CharacterFailure,
     CharacterJob,
@@ -60,11 +65,11 @@ class FakeGenerator:
         self.result = result
         self.calls: list[CharacterRequest] = []
 
-    async def generate(self, request: CharacterRequest) -> bytes:
+    async def generate(self, request: CharacterRequest) -> GeneratedCharacter:
         self.calls.append(request)
         if isinstance(self.result, Exception):
             raise self.result
-        return self.result
+        return GeneratedCharacter(self.result)
 
 
 class InfoRepository(FakeCharacterJobRepository):
@@ -87,7 +92,7 @@ class ConflictRepository(FakeCharacterJobRepository):
 class BrokenReportRepository(InfoRepository):
     """결과 보고에서 Java 오류"""
 
-    async def report_success(self, chrc_job_sn: int, image: bytes) -> None:
+    async def report_success(self, chrc_job_sn: int, image: bytes, sheet, layout) -> int:
         raise BackendError(500, b"", None, [])
 
 

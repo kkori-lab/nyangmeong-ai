@@ -1,23 +1,31 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-MYP-010 픽셀 캐릭터 관리 (생성기 붙이기) — 끝 (검증 통과, 사람 확인 2026-11-02)
-- pixel-dog-generator `pipeline/chibi-style` 138f722의 생성 경로를 `app/character/`로 이식. 눈 판별 → 2×2 시트 1회 생성 → 서기 정면 컷 → 높이 341px·눈 (256, 207), 상단이 y=100 아래면 100으로 보정해 512 PNG. 검은 털은 흰 하이라이트로 눈을 찾는다
-- 샘플 10건(개 6·고양이 4, 검은 털 7건) 실제 생성: 눈 찾음 10/10, 잘림 0건, 마젠타 0화소. 상단 보정은 저장된 컷 재처리로 확인
+SCR-MYP-011 아이템 상점 모달 (굽기·합성·미리보기 서버) — 끝 (검증 통과, 사람 확인 2026-11-02)
+- `POST /ai/characters/{pixelCharSn}/preview` 추가. 5부위 26개, 머리 착용 컷을 바탕으로 의상 → 가방 → 목 → 얼굴 레이어 합성. 어두운 털은 털을 밝힌 시트로 굽고 차이를 낸다. 동시 10, 굽기·합성 시간 로그
+- 실제 그림은 강아지·고양이 사람 확인. 시트는 가짜 저장소(메모리), `CHARACTER_BAKE_ENABLED` 기본 false
+
+### 추가 요청
+- 추가-1 동시 호출 10 / 추가-2 얼굴 영역 조건을 "레이어가 덮지 않은 화소는 맨몸과 같다"로 변경 / 추가-3 `.env.local.example` 굽기 설정 / 추가-4 밝혀서 굽기·외곽선 복구·정렬 2단계 탐색 / 추가-5 굽기·합성 시간 로그 / 추가-6 머리·의상·얼굴 착용 지시를 엔진 문구로
 
 ## 다음에 할 것
-- 굽기·합성·`/preview` 이식 마일스톤: FN-MYP-011 담당, Java 저장 자리(맨몸 시트·착용 시트·배치값 `scale, originX, originY`), 비용, `generate` 반환형을 정한 뒤. 머리 착용 그림을 바탕으로 쓰는 합성은 엔진에도 아직 없다. 지금 만든 캐릭터는 맨몸 시트를 저장하지 않는다 (LJS)
+- 연결 남음: FN-MYP-011-01·FN-MYP-010-13 Java 시트 저장·조회 내부 API(`docs/api/internal.md` 미정 행). 연결 전에는 로그인만 하면 어느 `pixelCharSn`이든 합성되고 시트가 재시작 때 사라진다 (LJS 백엔드)
+- 굽기·합성 최적화: 서버 로그의 "굽기 시간"·"전체 굽기 시간"·"합성 시간" 실측으로 대상을 정한다. 합성 1.4초는 시험 그림 값, 동시 10의 약 1분은 추정이다. 후보는 이미지 품질 `low`(엔진 일부 경로), 동시 호출 수 (LJS)
+- 고양이 꼬리 경계선·다리 사이 분홍 점: 원인 미확인(착용 지시 변경의 영향 포함). 정렬 2단계 탐색은 촘촘한 무늬에서 빗나갈 수 있고 그림체 샘플 1장으로만 확인 (LJS)
+- 테스트 보강: 겹침 순서 테스트(`test_render_얼굴은_의상_위에_겹친다`)가 순서를 증명하지 못한다, `OpenAICharacterClient._bake` 저장소 테스트 없음 (LJS)
+- 문서: `docs/design/pixel-character-engine.md` 6번 부위 표가 5부위 결정 전 내용, `docs/convention/milestone.md` 담당 표가 "SCR-MYP-010만" (LJS)
+- 굽기 켜기: 팀 비용 결정(26개 기준 캐릭터당 약 $1.64), Java 시트 저장 연결 뒤 (LJS)
+- 백엔드(LJS): `ITEM`에 엔진 아이템 키 컬럼 추가, 시드 아이템을 엔진 14개에 맞출지 결정. 신발을 안 넣기로 해서 공통코드 `MYPC0006`과 시드 신발 4개는 정리 대상이다(공통코드는 DB에서만 고친다) (LJS)
+- DMS 모음: FN-MYP-010-13 겹침 순서(캐릭터 → 의상 → … → 머리장식) vs 합성 순서(머리 착용 바탕 위에 의상) (LJS)
 - DMS 모음: FN-MYP-010-13 "고정 좌표로 겹쳐 표시" vs 서버 합성, FN-MYP-010-17 "기준 좌표 고정" vs 상단 보정(눈 y가 캐릭터마다 다를 수 있음), 얼굴 영역 값 변경 (LJS)
 - 눈 찾기 위험: `dog_fluffy` 512 재검출이 눈이 아닌 쌍을 잡았다. 실제 배치 경로에서는 샘플 10건 모두 맞았으나, 틀리면 규격을 통과한 채 조용히 어긋난다. 검은 털은 하이라이트 기준이라 눈 높이가 몇 px 다를 수 있고 측정하지 않았다 (LJS)
-- 약한 테스트: EXIF 제거·회전 테스트 입력에 EXIF가 없다. 고양이 분기는 가짜 저장소가 항상 `PETC0001`을 줘 API 경로로는 안 지나간다(Java 연결 뒤 확인) (LJS)
+- 약한 테스트: EXIF 제거·회전 테스트 입력에 EXIF가 없다. 고양이 분기는 가짜 저장소가 짝수 `petSn`일 때만 `PETC0002`를 준다(실제 값은 Java 연결 뒤 확인) (LJS)
 - 얼굴 영역 `(128, 64, 256, 256)` → `(96, 32, 320, 320)` 변경 (LJS 결정 2026-11-02): 백엔드 `CharacterSpec.FACE`·`cropFace`의 256 축소 여부·AI `schemas.py`를 같이 바꾼다(`AGENTS.md` 4번, 백엔드 PR과 함께). AI는 눈 y=207 계산이 `FACE_Y`에 묶여 있어 상수를 분리한다 (LJS)
 - 연결 남음: FN-MYP-010-09 Java 캐릭터 작업 생성·결과 보고 내부 API(LJS 백엔드, 캐릭터 흐름 재설계). 연결되면 `app/character/repository.py` `FakeCharacterJobRepository` 교체, 작업 번호 이름(`chrcJobSn`)·실패 사유를 Java에 맞춘다. 초안은 `docs/api/internal.md` "Python → Java" 미정 행
 - 프론트(LJS) 알리기: SCR-AIM-011 첫 SEARCH 답변은 `done` 뒤 제목 요약(Haiku 한 번)이 끝나야 SSE 스트림이 닫힌다. 입력창 다시 열기는 스트림 종료가 아닌 `done` 기준으로. 바뀐 제목은 대화 목록을 다시 읽어 반영
 - 프론트(LJS) 알리기: 범위 밖 질문도 `intent.kind` FALLBACK 그대로(칩·연속 실패 카운트 같음), `done.message.cnvrsCn`만 범위 안내 문구. 프론트가 폴백 문구를 하드코딩하면 `done.message`를 쓰게 맞춘다
 - backend-90에 알리기: requirements.txt 커밋됨(`bf28ade`, LJS). 배포는 develop → master 병합 뒤. 서버 gunicorn은 워커 1개(`_in_progress` 프로세스 메모리)
-- 다듬기(선택): `app/chat/clients.py` 분류 프롬프트 두 곳(`"…OUT_OF_SCOPE,"` 뒤, `_hint_note`의 `"…OUT_OF_SCOPE."` 뒤) 문자열 이음 공백
 - frontend-83 세션에 알리기: 영수증 원본·상태가 실제 Java 영수증 내부 API로 저장된다(SCR-AIM-008·013, 대화창은 `ocrRqstSrcCd=AIMC0031`)
-- 로컬 Java DB 정리(선택): 검증으로 생긴 RECPT 515~527과 원본 파일
 - JAJ에 요청(2026-10-30 LJS 결정): 검사결과지 PDF 분석은 React → Python `POST /ai/checkups/lab-results`로 고정한다. 백엔드 `docs/api/health.md`의 Java `POST /pets/{petSn}/checkup-attachments/{ckupRcdAtchSn}/analyses`와 InspectionAnalysisResponse(`anlysRslt`)는 지운다. 항목 이름은 Python이 InspectionAnalysisItem(INSP_NVL)에 맞췄다(`registered`는 React가 검진상세 목록으로 판정). HLTG12에 SDMA 코드가 없어 지금은 직접입력명 `SDMA`로 보낸다. 명세대로 드롭다운에 넣으려면 JAJ가 SDMA 코드를 추가하고 `data/lab_items.yaml`에 `cd`를 넣는다
 - 프론트(LJS) 대기: 검진상세 첨부 자료 [PDF 분석] → `POST /ai/checkups/lab-results`(파일 다시 올림) → 성공 시 SCR-HLT-007에 채움, `excludedArtclNms`는 저장 대상 밖으로 안내, `registered`(이미 등록됨)는 검진상세 혈액검사 목록으로 판정, 실패·422·504는 SCR-HLT-005에서 사유 안내, 다시 분석 중복 요청은 버튼 잠금
 - 검사결과지 인식률: 합성 결과지 1건으로만 확인(2026-10-30). 실제 병원 결과지·스캔본으로 더 확인(원본은 git 제외)

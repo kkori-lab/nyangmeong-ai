@@ -19,6 +19,17 @@ from app.character.schemas import PetSeCd
 PROMPTS = Path(__file__).resolve().parent / "prompts"
 STYLE_REF = PROMPTS / "style_ref.png"
 _PROMPT_FILES = {"dog": "chibi_poses.txt", "cat": "chibi_poses_cat.txt"}
+_WEAR_PROMPT = PROMPTS / "chibi_wear.txt"
+_ITEMS = PROMPTS / "items.json"
+# 부위별 착용 지시 : 엔진 CHIBI_WEAR_SLOT. 머리 착용 컷은 합성 바탕이라 귀까지 지시로 가림
+_WEAR_SLOT = {
+    "MYPC0001": "ONE {hint} on its head in all four figures, pulled down over the ears so "
+    "the ears are completely hidden under it - no ear sticks out",
+    "MYPC0002": "{hint} on its face in all four figures, over the eyes and resting on the "
+    "muzzle, the eyes stay visible; in the side view only the near lens shows",
+    "MYPC0004": "ONE {hint} on its torso in all four figures, wrapping the body while the "
+    "head, the paws and the tail stay uncovered",
+}
 _SPECIES: dict[PetSeCd, str] = {"PETC0001": "dog", "PETC0002": "cat"}
 
 # 입력 토큰 비용 상한
@@ -84,6 +95,22 @@ class Eyes:
     shape: str = "round"
     # None : 사진의 눈 색을 따르게 프롬프트 작성
     color: str | None = None
+
+
+@dataclass(frozen=True)
+class Cut:
+    """서기 정면 컷과 시트 위 왼쪽 위 좌표"""
+
+    image: Image.Image
+    left: int
+    top: int
+
+
+@dataclass(frozen=True)
+class BakeItem:
+    item_id: str
+    regn_cd: str
+    bake_hint: str
 
 
 def species_of(pet_se_cd: PetSeCd) -> str:
@@ -240,7 +267,11 @@ def _crop(rgb: np.ndarray, mask: np.ndarray) -> Image.Image:
 
 
 def stand_front(sheet_png: bytes) -> Image.Image:
-    """2×2 시트(윗줄 앉기, 아랫줄 서기 / 왼쪽 정면, 오른쪽 옆모습)의 서기 정면 컷
+    return stand_front_cut(sheet_png).image
+
+
+def stand_front_cut(sheet_png: bytes) -> Cut:
+    """2×2 시트(윗줄 앉기, 아랫줄 서기 / 왼쪽 정면, 오른쪽 옆모습)의 서기 정면 컷과 시트 위 위치
 
     - 칸을 고정 분할하지 않음 : 옆모습 코가 가운데 선을 넘는 경우가 많음
     """
@@ -271,4 +302,18 @@ def stand_front(sheet_png: bytes) -> Image.Image:
     blob = quadrants[(1, 0)]
     if alpha is None:
         blob = _defringe(_fill_holes(blob, rgb), rgb)
-    return _crop(rgb, blob)
+    ys, xs = np.where(blob)
+    return Cut(_crop(rgb, blob), int(xs.min()), int(ys.min()))
+
+
+def load_items() -> dict[str, BakeItem]:
+    """FN-MYP-011-01 : 굽기 대상 아이템 (키는 ITEM과 잇는 엔진 아이템 id)"""
+    rows = json.loads(_ITEMS.read_text(encoding="utf-8"))
+    return {row["id"]: BakeItem(row["id"], row["regn_cd"], row["bake_hint"]) for row in rows}
+
+
+def build_wear_prompt(species: str, item: BakeItem) -> str:
+    # 지시 문장의 dog : 강아지 기준으로 쓴 아이템의 종 치환
+    hint = item.bake_hint.replace("dog", species)
+    wear = _WEAR_SLOT.get(item.regn_cd, "{hint}").format(hint=hint)
+    return _WEAR_PROMPT.read_text(encoding="utf-8").format(species=species, wear=wear)

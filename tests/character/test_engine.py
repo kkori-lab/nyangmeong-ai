@@ -68,7 +68,7 @@ class FakeOpenAI:
 
 def _generate(fake: FakeOpenAI, request: CharacterRequest | None = None) -> bytes:
     client = OpenAICharacterClient(fake, "image-model", "vision-model")
-    return asyncio.run(client.generate(request or CharacterRequest(_photo(), "PETC0002")))
+    return asyncio.run(client.generate(request or CharacterRequest(_photo(), "PETC0002"))).image
 
 
 # FN-MYP-010-17 : 512 배치

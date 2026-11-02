@@ -37,12 +37,25 @@ Point = tuple[float, float]
 
 
 @dataclass(frozen=True)
+class Layout:
+    """맨몸 컷에서 잰 배치값 : 모든 착장에 재사용 -> 얼굴 자리 고정"""
+
+    scale: float
+    origin_x: float
+    origin_y: float
+
+
+@dataclass(frozen=True)
 class Placement:
     png: bytes
     eyes: tuple[Point, Point]
     scale: float
     origin: Point
     clipped: bool
+
+    @property
+    def layout(self) -> Layout:
+        return Layout(self.scale, *self.origin)
 
     @property
     def canvas_eyes(self) -> tuple[Point, Point]:
