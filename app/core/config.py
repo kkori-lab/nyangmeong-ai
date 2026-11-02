@@ -20,6 +20,13 @@ class Settings(BaseSettings):
     # FN-HLT-005-04 : 검사결과지 PDF 분석 제한 시간(초) : LLM 한 번
     pdf_analyze_timeout_sec: float = 30.0
 
+    # 이미지 생성(OpenAI, 2026-10-28 결정) : 비면 캐릭터 생성 API 502
+    openai_api_key: SecretStr = SecretStr("")
+    character_image_model: str = "gpt-image-2"
+    character_vision_model: str = "gpt-5-nano"
+    # FN-MYP-010-09 : 외부 호출 한 번의 제한 시간(초), 백그라운드 생성
+    character_timeout_sec: float = 180.0
+
     # LLM(Anthropic, 2026-10-28 결정) : 비면 LLM 필요 API 502
     llm_api_key: SecretStr = SecretStr("")
     # 2026-10-28 결정 : 일단 Haiku (변경은 LLM_MODEL만)

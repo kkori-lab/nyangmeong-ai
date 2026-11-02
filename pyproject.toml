@@ -8,9 +8,13 @@ dependencies = [
     "anthropic>=2.3.0",
     "fastapi>=0.115",
     "httpx2>=2.16.0",
+    "numpy>=2.0",
+    "openai>=2.0",
+    "pillow>=11.0",
     "pydantic-settings>=2.6",
     "python-multipart>=0.0.32",
     "pyyaml>=6.0.3",
+    "scipy>=1.14",
     "uvicorn[standard]>=0.32",
 ]
 
