@@ -216,6 +216,43 @@ def test_generate_사진을_읽을_수_없으면_CharacterApiError():
         _generate(FakeOpenAI(_sheet()), CharacterRequest(b"not image", "PETC0001"))
 
 
+# FN-MYP-011-01 : 굽기 (이미지 API 호출)
+SWEATER = engine.BakeItem(7, "MYPC0004", "a green knitted dog sweater")
+
+
+def _bake(fake: FakeOpenAI, bare: bytes, pet_se_cd="PETC0002") -> bytes:
+    client = OpenAICharacterClient(fake, "image-model", "vision-model")
+    return asyncio.run(client.bake(bare, pet_se_cd, SWEATER))
+
+
+def test_bake_맨몸_시트를_설정한_모델로_보낸다():
+    fake = FakeOpenAI(_sheet())
+    bare = _sheet(figures=3)
+    _bake(fake, bare)
+    edit = fake.edits[0]
+    assert edit["model"] == "image-model"
+    assert (edit["size"], edit["quality"], edit["n"]) == ("1024x1024", "medium", 1)
+    [(name, file, mime)] = edit["image"]
+    assert (name, mime) == ("character.png", "image/png")
+    assert file.getvalue() == bare
+
+
+def test_bake_프롬프트에_종을_바꾼_굽기_지시가_들어간다():
+    fake = FakeOpenAI(_sheet())
+    _bake(fake, _sheet(), "PETC0002")
+    assert "a green knitted cat sweater" in fake.edits[0]["prompt"]
+
+
+def test_bake_응답_그림을_디코딩해_돌려준다():
+    worn = _sheet(figures=2)
+    assert _bake(FakeOpenAI(worn), _sheet()) == worn
+
+
+def test_bake_외부_오류는_CharacterApiError():
+    with pytest.raises(CharacterApiError):
+        _bake(FakeOpenAI(RuntimeError("api down")), _sheet())
+
+
 def test_get_character_client_키가_없으면_None():
     assert get_character_client(get_settings()) is None
 

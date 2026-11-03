@@ -1,7 +1,7 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-MYP-031 가계부 등록/수정 · 영수증 OCR 인식 (가계부 출처·사용처) — 끝 (2026-11-03). `/ai/receipts`가 가계부 출처 `AIMC0027`(petSn 생략 가능)을 받고, 인식 결과에 사용처 `expndPlcusNm`·카테고리 `expndClsfCd`를 더했다. 실제 영수증 5장(동물병원 3·펫샵·마트)으로 확인. Java·프론트 연결은 남음
+SCR-MYP-011 아이템 상점 모달 (테스트 보강·문서 정리) — 끝 (2026-11-03). 겹침 순서 테스트를 겹치는 화소로 바꿔 `LAYER_ORDER`가 바뀌면 실패하게 했고(얼굴 > 의상, 의상 > 머리 착용 바탕), `OpenAICharacterClient.bake` 호출·디코딩·오류 테스트를 더했다. 캐릭터 설계 문서(`charCrtJobSn`·Java 내부 API·5부위 표)와 `milestone.md` 담당 표(SCR-MYP-011·ADM-070)를 갱신
 
 ## 다음에 할 것
 - 연결 남음: FN-MYP-031-05·03 Java 백엔드 PR (LJS 백엔드, AI 계약 변경과 같은 때 병합): ① `ReceiptService.create`가 `CHAT` 말고는 모두 `HEALTH`로 저장 → `ReceiptSource.EXPENSE` 분기 ② 가계부 출처는 `petAuthorizer.checkCaregiver` 건너뜀·`ReceiptOriginalRequest` `petSn` 선택·`ocrDmndSrcCd`에 `AIMC0027` ③ `global.external.ReceiptOcrResponse`에 `expndPlcusNm`·`expndClsfCd`(없으면 Jackson이 버려 `OCR_RSPNS_JSON`에서 조용히 빠짐) ④ `ReceiptOcrConverter.classify` 가계부 판정: 머리 값에 `expndPlcusNm`, 가계부 출처의 완전 인식은 `hsptlNm` 대신 `expndPlcusNm`, 품목 0개(펫월드 영수증 실측)도 부분 인식이 되지 않게
@@ -15,12 +15,9 @@ SCR-MYP-031 가계부 등록/수정 · 영수증 OCR 인식 (가계부 출처·�
 - 결정 남음: `bake-hints`의 그림 형식·10MB 오류는 `/ai/characters`와 같은 `FILE_TYPE_NOT_ALLOWED`·`FILE_SIZE_EXCEEDED`로 했다(기획은 `INVALID_REQUEST`) (LJS)
 - 병합 순서: 백엔드 PR #105(`d73ca54`, 캐릭터 내부 API 포함) 먼저 → 병합 직후 공용 DB v0.12 적용(사람) → AI `LJS` PR. 순서가 바뀌면 캐릭터 생성 502 (LJS)
 - 옛 흐름으로 만든 캐릭터는 맨몸 시트가 없어 `/preview`가 404 `PIXEL_CHARACTER_NOT_FOUND`다. 다시 만들어야 한다. 무료 재생성(FN-MYP-010-23)은 사진이 Java로 오지 않아 SCR-ADM-042 전에 계약을 정한다 (LJS 백엔드)
-- 문서: `docs/design/pixel-character-engine.md`에 `chrcJobSn`·`FakeCharacterJobRepository` 옛 설명이 남아 있다 (LJS)
 - 하네스 수정 PR 후보(공용): `verify-loop.sh guard`가 읽기 전용 비교(`git diff --no-index`)까지 막아 verify 절차와 어긋난다
 - 굽기·합성 최적화: 굽기 26개 실측 1회 104.2초(동시 10, 아이템당 31.5~37.0초, 재시도 없음). 동시 13으로 올린 값은 미측정. 합성 1.4초는 시험 그림 값. 후보는 전용 스레드 풀(기본 풀은 CPU+4라 코어 9개 미만 서버에서 13이 안 나온다), 429 대기 후 재시도, OpenAI 계정 한도 확인, 이미지 품질 `low` (LJS)
 - 고양이 꼬리 경계선·다리 사이 분홍 점: 원인 미확인(착용 지시 변경의 영향 포함). 정렬 2단계 탐색은 촘촘한 무늬에서 빗나갈 수 있고 그림체 샘플 1장으로만 확인 (LJS)
-- 테스트 보강: 겹침 순서 테스트(`test_render_얼굴은_의상_위에_겹친다`)가 순서를 증명하지 못한다, `OpenAICharacterClient._bake` 저장소 테스트 없음 (LJS)
-- 문서: `docs/design/pixel-character-engine.md` 6번 부위 표가 5부위 결정 전 내용, `docs/convention/milestone.md` 담당 표에 SCR-MYP-011·ADM-070이 없다 (LJS)
 - 굽기 켜기: 팀 비용 결정(26개 기준 캐릭터당 약 $1.64), Java 시트 저장 연결 뒤. 켜기 전 access_token(30분) 만료 대책을 정한다: 만료 뒤 아이템은 비용을 내고도 저장·실패 표시가 안 되어 "안 구운 아이템"으로 남고, 성공 보고 401이면 결과를 잃고 작업은 시간 초과 실패가 된다 (LJS)
 - 백엔드(LJS): 신발을 안 넣기로 해서 공통코드 `MYPC0006`과 시드 신발 4개는 정리 대상이다(공통코드는 DB에서만 고친다) (LJS)
 - DMS 모음: FN-MYP-010-13 겹침 순서(캐릭터 → 의상 → … → 머리장식) vs 합성 순서(머리 착용 바탕 위에 의상) (LJS)

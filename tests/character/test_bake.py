@@ -26,7 +26,10 @@ BODY = "MYPC0004"
 FACE = "MYPC0002"
 
 
-def sheet(*, hat=False, body=False, face=False, shift=(0, 0)) -> bytes:
+def sheet(
+    *, hat=False, body=False, face=False, shift=(0, 0), over_body: tuple | None = None
+) -> bytes:
+    """over_body : 의상 상자와 겹치는 자리에 칠할 색 (겹침 순서 확인용)"""
     image = Image.new("RGBA", (1024, 1024), MAGENTA)
     draw = ImageDraw.Draw(image)
     for x, y in CELLS:
@@ -38,6 +41,8 @@ def sheet(*, hat=False, body=False, face=False, shift=(0, 0)) -> bytes:
             draw.rectangle((x + 40, y + 200, x + 260, y + 280), fill=BLUE)
         if face:
             draw.rectangle((x + 80, y + 90, x + 220, y + 130), fill=GREEN)
+        if over_body:
+            draw.rectangle((x + 100, y + 170, x + 200, y + 240), fill=over_body)
     buffer = io.BytesIO()
     image.save(buffer, "PNG")
     return buffer.getvalue()
@@ -106,10 +111,29 @@ def test_render_얼굴_영역에서_레이어가_덮지_않은_화소는_맨몸�
     assert (worn[box][differs] == BLUE).all()
 
 
+def _painted(worn: dict[str, bytes], color) -> np.ndarray:
+    return (rgba(compose.render(sheet(), LAYOUT, worn)) == color).all(axis=2)
+
+
 def test_render_얼굴은_의상_위에_겹친다():
-    over_body = sheet(face=True)
-    pixels = rgba(compose.render(sheet(), LAYOUT, {FACE: over_body, BODY: sheet(body=True)}))
-    assert count(pixels, GREEN) > 0 and count(pixels, BLUE) > 0
+    body = {BODY: sheet(body=True)}
+    face = {FACE: sheet(over_body=GREEN)}
+    # 따로 입혔을 때 둘 다 칠해지는 자리
+    overlap = _painted(body, BLUE) & _painted(face, GREEN)
+    assert overlap.sum() > 100
+    pixels = rgba(compose.render(sheet(), LAYOUT, body | face))
+    assert (pixels[overlap] == GREEN).all()
+    assert count(pixels, BLUE) > 0
+
+
+def test_render_의상은_머리_착용_바탕_위에_겹친다():
+    head = {bake.REGN_HEAD: sheet(over_body=RED)}
+    body = {BODY: sheet(body=True)}
+    overlap = _painted(head, RED) & _painted(body, BLUE)
+    assert overlap.sum() > 100
+    pixels = rgba(compose.render(sheet(), LAYOUT, head | body))
+    assert (pixels[overlap] == BLUE).all()
+    assert count(pixels, RED) > 0
 
 
 def test_render_머리_착용_컷이_바탕():
