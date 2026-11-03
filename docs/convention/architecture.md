@@ -27,7 +27,7 @@ Java   ──▶ Python    /internal/v1/**  폐기 예정(2026-10-27). 코드·�
 - 채팅으로 만든 일정·케어 항목은 여기서 저장하지 않는다. 미리보기 카드를 돌려주고, React가 Java 일정 등록 API(`schdlSrcCd`='AI 생성')를 부른 뒤 결과(등록됨·취소됨)를 대화에 기록한다.
 - **서버 간 호출**: 양방향 모두 키 없이 부른다(2026-10-26 결정). 내부 경로(`/internal/**`)는 외부(Nginx)에 열지 않는 것으로만 막는다.
 - 개인 데이터(반려동물 기록 등)는 외부 AI API에 보내지 않는다(POL-006, FN-AIM-011-16).
-- **전환 상태**: Python은 DB에 붙지 않는다(2026-10-27). 인증은 Java `/internal/auth/check`, 대화 저장·조회·삭제는 Java `/internal/ai/conversations`(초안, `docs/api/internal.md`)를 부른다. Java에 대화 API가 생기기 전에는 가짜 Java(`scripts/fake_backend.py`)로 확인한다. 탈퇴 회원 대화 파기는 Java가 자기 테이블에서 직접 한다.
+- **전환 상태**: Python은 DB에 붙지 않는다(2026-10-27). 인증은 Java `/internal/auth/check`, 대화 저장·조회·삭제는 Java `/internal/ai/conversations`(초안, `docs/api/internal.md`)를 부른다. 탈퇴 회원 대화 파기는 Java가 자기 테이블에서 직접 한다.
 
 ## 패키지 안
 

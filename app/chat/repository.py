@@ -28,6 +28,8 @@ class ConversationRepository(Protocol):
 
     async def delete_room(self, room_sn: int) -> None: ...
 
+    async def update_title(self, room_sn: int, title: str) -> ConversationSummary: ...
+
     async def add_message(
         self, room_sn: int, role_cd: str, cn: str, cmptn_yn: bool = True
     ) -> ConversationMessage: ...
@@ -63,6 +65,12 @@ class JavaConversationRepository:
 
     async def delete_room(self, room_sn: int) -> None:
         await self._call("DELETE", f"{CONVERSATIONS_PATH}/{room_sn}")
+
+    async def update_title(self, room_sn: int, title: str) -> ConversationSummary:
+        # 추가 요청(SCR-AIM-011) : 첫 답변 요약 제목, 암호화는 Java
+        body = {"cnvrsTtl": title}
+        data = await self._call("PATCH", f"{CONVERSATIONS_PATH}/{room_sn}", json=body)
+        return _parse(ConversationSummary, data)
 
     async def add_message(
         self, room_sn: int, role_cd: str, cn: str, cmptn_yn: bool = True

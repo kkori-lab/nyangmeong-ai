@@ -8,11 +8,13 @@ from fastapi.responses import JSONResponse
 class AppError(Exception):
     """업무 오류. code = 백엔드 ErrorCode 상수 이름"""
 
-    def __init__(self, code: str, http_code: int, message: str) -> None:
+    def __init__(self, code: str, http_code: int, message: str, data: Any = None) -> None:
         super().__init__(message)
         self.code = code
         self.http_code = http_code
         self.message = message
+        # 백엔드 ApiResponse.errorWithData와 동일 : 오류에도 data 동봉 (없으면 필드 제외)
+        self.data = data
 
 
 def success(data: Any = None, http_code: int = 200) -> JSONResponse:
@@ -20,8 +22,8 @@ def success(data: Any = None, http_code: int = 200) -> JSONResponse:
     return _build("success", http_code, "ok", None, None, data)
 
 
-def error(code: str, http_code: int, message: str, path: str) -> JSONResponse:
-    return _build("error", http_code, message, path, code, None)
+def error(code: str, http_code: int, message: str, path: str, data: Any = None) -> JSONResponse:
+    return _build("error", http_code, message, path, code, data)
 
 
 def _build(

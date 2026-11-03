@@ -231,6 +231,17 @@ def check() -> None:
             die(f"{title} 에 실패했습니다. 위 출력을 확인해 주세요.")
         ok(title)
 
+    # 배포 서버는 uv 없이 pip install -r requirements.txt : uv.lock과 같아야 함
+    exported = run("uv", "export", "--no-dev", "--no-hashes", "--no-header", "--frozen", "--quiet")
+    requirements = ROOT / "requirements.txt"
+    current = requirements.read_text(encoding="utf-8") if requirements.exists() else ""
+    if exported.returncode != 0 or exported.stdout != current:
+        die(
+            "requirements.txt가 uv.lock과 다릅니다. 다시 뽑으세요: "
+            "uv export --no-dev --no-hashes --no-header --frozen -o requirements.txt"
+        )
+    ok("requirements.txt")
+
     # 서버의 .env.local 로딩을 /health로 확인 후 종료, 포트는 비어 있는 아무 포트
     port = free_port()
     server = subprocess.Popen(

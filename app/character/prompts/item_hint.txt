@@ -1,0 +1,16 @@
+The image shows one item for a cute pixel-art pet character shop. The shop calls it "{item_nm}" and it is worn {slot}.
+
+Describe only the item itself in ONE short English noun phrase that an artist can use to draw it on the pet.
+- Mention the main colors, pattern, material and shape that make it recognizable.
+- Do not describe the background, a person, a model or the photo style.
+- If the phrase needs the animal, write "dog".
+- At most 150 characters, no period at the end, no quotes.
+
+Examples of the expected style:
+- a red knitted beanie with a pompom
+- round thin black glasses with clear lenses
+- a red collar with one round golden bell at the front of its neck
+- a quilted red puffer vest with horizontal padded seams
+- a small brown crossbody bag resting on its side with the strap crossing the chest
+
+Answer with the phrase only.

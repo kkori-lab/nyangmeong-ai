@@ -50,10 +50,16 @@ from app.core.response import AppError
 
 logger = logging.getLogger(__name__)
 
-MAX_TITLE_LENGTH = 200
+# FN-AIM-011-11 : 생성 제목 30자 이내 (Java 저장 상한 200보다 짧게, 2026-10-30 LJS 결정)
+MAX_TITLE_LENGTH = 30
 DEFAULT_TITLE = "새 대화"
 # FN-AIM-005-02 : 화면설계서 SCR-AIM-005 ② 문구
 FALLBACK_MESSAGE = "질문을 이해하지 못했어요. 다시 입력하거나 아래에서 선택해 주세요."
+# 서비스 범위 밖 질문 안내 (2026-10-30 LJS 추가 요청, 화면설계서 밖 문구)
+OUT_OF_SCOPE_MESSAGE = (
+    "반려동물 케어와 관련된 질문만 도와드릴 수 있어요. "
+    "반려동물이나 서비스 이용에 관해 물어봐 주세요."
+)
 # FN-AIM-002-03 : 화면설계서 SCR-AIM-002 ② 문구, 본문 끝에 붙여 저장
 DISCLAIMER = "\n\n※ 참고 정보이며 의료 진단이 아닙니다. 이상 징후가 있다면 수의사와 상담하세요."
 # FN-AIM-002-07 : 화면설계서 SCR-AIM-002 처리 조건 문구
@@ -66,10 +72,15 @@ Event = tuple[str, BaseModel | dict]
 async def create_conversation(
     repo: ConversationRepository, titles: TitleGenerator, request: ConversationCreateRequest
 ) -> ConversationSummary:
-    # FN-AIM-011-11 : 제목은 첫 메시지로 1회 생성, 200자 제한은 서버에서 적용
-    title = (await titles.generate(request.cnvrs_cn)).strip()[:MAX_TITLE_LENGTH] or DEFAULT_TITLE
+    # FN-AIM-011-11 : 제목은 첫 메시지로 1회 생성, 30자 제한은 서버에서 적용
+    title = _cut_title(await titles.generate(request.cnvrs_cn)) or DEFAULT_TITLE
     # FN-AIM-011-07·14 : 방과 첫 메시지 함께 저장 (Java 단일 트랜잭션)
     return await repo.create_room(request.pet_sn, title, request.cnvrs_cn)
+
+
+def _cut_title(text: str) -> str:
+    # 30자에서 자른 뒤 끝 공백 제거
+    return text.strip()[:MAX_TITLE_LENGTH].rstrip()
 
 
 async def list_conversations(
@@ -94,6 +105,8 @@ class Judged:
     intent: Intent
     # SEARCH일 때 연관 바로가기(FN-AIM-002-04)
     shortcut: Intent | None = None
+    # FALLBACK일 때 서비스 범위 밖 질문 여부 : 안내 문구만 다름
+    out_of_scope: bool = False
 
 
 async def judge(text: str, has_image: bool, classifier: IntentClassifier) -> Judged:
@@ -105,10 +118,18 @@ async def judge(text: str, has_image: bool, classifier: IntentClassifier) -> Jud
         return Judged(Intent(kind=IntentKind.REGISTER))
     # FN-AIM-002-10 : ② 룰 기반 라우팅, AI 분류보다 앞이라 LLM 장애와 무관
     row = rules.match_route(text)
-    if row is not None:
+    if row is None:
+        # ③ AI 분류(①②가 실패한 입력만, FN-AIM-004-02)
+        classified = await classifier.classify(text)
+    elif not rules.is_question(text):
         return Judged(row.to_intent())
-    # ③ AI 분류(①②가 실패한 입력만, FN-AIM-004-02)
-    classified = await classifier.classify(text)
+    else:
+        # 범위 밖 질문 차단(2026-10-30) : 키워드에 걸린 질문꼴은 AI로 서비스 범위 확인
+        try:
+            classified = await classifier.classify(text, hint=row)
+        except ClassifyError:
+            # 룰 라우팅은 LLM 장애와 무관 (FN-AIM-002-10), 원인 로그는 분류기에서 기록
+            return Judged(row.to_intent())
     if classified.kind is ClassifiedKind.SEARCH:
         return Judged(Intent(kind=IntentKind.SEARCH), _shortcut_of(classified))
     if classified.kind is ClassifiedKind.ROUTE and classified.scr_id is not None:
@@ -116,7 +137,8 @@ async def judge(text: str, has_image: bool, classifier: IntentClassifier) -> Jud
         if row is not None:
             return Judged(row.to_intent())
     # ④ FN-AIM-004-12·005-01 : 어디에도 해당하지 않으면 폴백
-    return Judged(Intent(kind=IntentKind.FALLBACK))
+    out_of_scope = classified.kind is ClassifiedKind.OUT_OF_SCOPE
+    return Judged(Intent(kind=IntentKind.FALLBACK), out_of_scope=out_of_scope)
 
 
 def _shortcut_of(classified: Classified) -> Intent | None:
@@ -139,9 +161,13 @@ def route_message(scr_nm: str) -> str:
     return f"{scr_nm}{particle} 이동할게요"
 
 
-async def reply_fallback(repo: ConversationRepository, room_sn: int) -> ConversationMessage:
+async def reply_fallback(
+    repo: ConversationRepository, room_sn: int, out_of_scope: bool = False
+) -> ConversationMessage:
     # FN-AIM-005-02·07 : 실패 사유는 묻지 않고, 부적절 입력도 같은 문구. AI 역할 메시지로 저장
-    return await repo.add_message(room_sn, ROLE_AI, FALLBACK_MESSAGE)
+    # 서비스 범위 밖 질문만 범위 안내 문구 (2026-10-30)
+    message = OUT_OF_SCOPE_MESSAGE if out_of_scope else FALLBACK_MESSAGE
+    return await repo.add_message(room_sn, ROLE_AI, message)
 
 
 @dataclass(frozen=True)
@@ -186,8 +212,11 @@ def build_context(messages: list[ConversationMessage], question_seq: int, turns:
     # Messages API는 사용자 메시지로 시작 필수
     while recent and recent[0].role_cd != ROLE_USER:
         recent = recent[1:]
+    # 저장된 답변의 고지는 떼고 넘김 : 모델이 따라 써 고지가 두 번 붙는 것 방지
     return [
-        {"role": "user" if m.role_cd == ROLE_USER else "assistant", "content": m.cnvrs_cn}
+        {"role": "user", "content": m.cnvrs_cn}
+        if m.role_cd == ROLE_USER
+        else {"role": "assistant", "content": m.cnvrs_cn.removesuffix(DISCLAIMER)}
         for m in recent
     ]
 
@@ -204,10 +233,11 @@ async def answer_turn(
     ai: AiSettings,
     limits: AnswerLimits,
     register: "RegisterDeps | None" = None,
+    titles: TitleGenerator | None = None,
 ) -> AsyncIterator[Event]:
     queue: asyncio.Queue[Event | None] = asyncio.Queue()
     task = asyncio.create_task(
-        _run_turn(turn, repo, classifier, answers, ai, limits, queue.put_nowait, register)
+        _run_turn(turn, repo, classifier, answers, ai, limits, queue.put_nowait, register, titles)
     )
     _running.add(task)
     task.add_done_callback(_running.discard)
@@ -224,6 +254,7 @@ async def _run_turn(
     limits: AnswerLimits,
     emit: Callable[[Event | None], None],
     register: "RegisterDeps | None" = None,
+    titles: TitleGenerator | None = None,
 ) -> None:
     try:
         text = turn.question.cnvrs_cn
@@ -239,9 +270,12 @@ async def _run_turn(
         emit(("intent", judged.intent))
         kind = judged.intent.kind
         if kind is IntentKind.SEARCH:
-            await _search_answer(turn, repo, answers, ai, limits, judged.shortcut, emit)
+            answer = await _search_answer(turn, repo, answers, ai, limits, judged.shortcut, emit)
+            if answer is not None and titles is not None and _is_first_answer(turn):
+                await _retitle(repo, titles, turn, answer)
         elif kind is IntentKind.FALLBACK:
-            emit(("done", AnswerDone(message=await reply_fallback(repo, turn.room_sn))))
+            fallback = await reply_fallback(repo, turn.room_sn, judged.out_of_scope)
+            emit(("done", AnswerDone(message=fallback)))
         elif kind is IntentKind.ROUTE:
             # 이동은 React 담당 : 다시 열어도 답이 남게 이동 안내 저장 (2026-10-29 결정)
             move = route_message(judged.intent.scr_nm or "")
@@ -270,8 +304,8 @@ async def _search_answer(
     limits: AnswerLimits,
     shortcut: Intent | None,
     emit: Callable[[Event | None], None],
-) -> None:
-    # FN-AIM-002-02·07
+) -> str | None:
+    # FN-AIM-002-02·07 : 완료면 고지 전 본문 반환(제목 요약용), 실패·미완료면 None
     context = build_context(turn.messages, turn.question.msg_seq, ai.context_turns)
     stream = answers.stream(context, ai.max_tokens)
     loop = asyncio.get_running_loop()
@@ -285,7 +319,7 @@ async def _search_answer(
             first = None
         if first is None:
             emit(("error", StreamError(code="EXTERNAL_API_ERROR", message=ANSWER_ERROR_MESSAGE)))
-            return
+            return None
         chunks = [first]
         emit(("delta", {"text": first}))
         complete = False
@@ -300,13 +334,34 @@ async def _search_answer(
             pass
     finally:
         await stream.aclose()
-    text = "".join(chunks)
+    body = "".join(chunks)
+    text = body
     if complete:
         # FN-AIM-002-03 : 고지는 본문 끝에 포함해 저장, 미완료 답변 제외
         emit(("delta", {"text": DISCLAIMER}))
         text += DISCLAIMER
     message = await _save(repo, turn.room_sn, text, complete)
     emit(("done", AnswerDone(message=message, shortcut=shortcut)))
+    return body if complete else None
+
+
+def _is_first_answer(turn: Turn) -> bool:
+    # 의도 종류는 메시지에 없음 : 방의 첫 AI 메시지일 때만 (한 방에 1회)
+    return not any(m.role_cd == ROLE_AI for m in turn.messages)
+
+
+async def _retitle(
+    repo: ConversationRepository, titles: TitleGenerator, turn: Turn, answer: str
+) -> None:
+    # 추가 요청(SCR-AIM-011) : 첫 SEARCH 답변 뒤 질문·답변 요약으로 제목 1회 교체
+    # done 뒤 실행 : 실패해도 이미 보낸 답변 유지, 제목은 그대로 (error 이벤트 없음)
+    try:
+        summary = await titles.summarize(turn.question.cnvrs_cn, answer)
+        title = _cut_title(summary)
+        if title:
+            await repo.update_title(turn.room_sn, title)
+    except Exception as error:
+        logger.warning("대화 제목 교체 실패: room=%d (%s)", turn.room_sn, type(error).__name__)
 
 
 async def _save(

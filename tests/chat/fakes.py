@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator
 from datetime import date
 
 from app.chat.clients import Classified, ClassifiedKind
+from app.chat.rules import RouteRow
 
 TITLE_LENGTH = 30
 # 가짜 분류기가 질문으로 보는 표현
@@ -10,16 +11,27 @@ QUESTION = re.compile(r"[?？]|뭐|왜|어떻게|알려|어때|될까|되나|나
 
 
 class FakeTitleGenerator:
-    """LLM 없이 첫 메시지 앞부분을 제목으로 사용"""
+    """LLM 없이 첫 메시지 앞부분을 제목으로 사용. 요약은 답변 앞부분, 받은 질문·답변 기록"""
+
+    def __init__(self) -> None:
+        self.summaries: list[tuple[str, str]] = []
 
     async def generate(self, first_message: str) -> str:
         return first_message.strip()[:TITLE_LENGTH]
 
+    async def summarize(self, question: str, answer: str) -> str:
+        self.summaries.append((question, answer))
+        return f"요약 {answer.strip()}"[:TITLE_LENGTH]
+
 
 class FakeIntentClassifier:
-    """질문 표현이 있으면 검색, 아니면 판단 못 함"""
+    """질문 표현이 있으면 검색, 아니면 판단 못 함. 받은 힌트 기록"""
 
-    async def classify(self, text: str) -> Classified:
+    def __init__(self) -> None:
+        self.hints: list[RouteRow | None] = []
+
+    async def classify(self, text: str, hint: RouteRow | None = None) -> Classified:
+        self.hints.append(hint)
         if QUESTION.search(text):
             return Classified(ClassifiedKind.SEARCH)
         return Classified(ClassifiedKind.UNKNOWN)

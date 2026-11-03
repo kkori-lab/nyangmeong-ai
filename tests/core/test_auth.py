@@ -6,7 +6,7 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
-from app.core.auth import require_member
+from app.core.auth import require_admin, require_member
 from app.core.backend import get_backend_client
 from app.core.config import Settings, get_settings
 from app.core.errors import register_error_handlers
@@ -24,6 +24,10 @@ def _client(
 
     @app.get("/ai/me")
     async def me(mbr_sn: Annotated[int, Depends(require_member)]) -> dict:
+        return {"mbrSn": mbr_sn}
+
+    @app.get("/ai/admin")
+    async def admin(mbr_sn: Annotated[int, Depends(require_admin)]) -> dict:
         return {"mbrSn": mbr_sn}
 
     settings = Settings(_env_file=None, backend_base_url=base_url)
@@ -123,3 +127,42 @@ def test_Java_주소가_비어_있으면_부르지_않고_502() -> None:
     res = _client(handler, base_url="").get("/ai/me")
 
     assert res.status_code == 502
+
+
+# FN-ADM-001-01 : 관리자 확인
+def _authority(code: object) -> Callable[[httpx2.Request], httpx2.Response]:
+    return lambda r: httpx2.Response(200, json={"data": {"mbrSn": 1, "mbrAuthrtCd": code}})
+
+
+def test_require_admin_관리자는_통과() -> None:
+    res = _client(_authority("USRC0005")).get("/ai/admin")
+
+    assert res.status_code == 200
+    assert res.json() == {"mbrSn": 1}
+
+
+@pytest.mark.parametrize("code", ["USRC0001", None, 5])
+def test_require_admin_관리자가_아니면_403_FORBIDDEN(code: object) -> None:
+    res = _client(_authority(code)).get("/ai/admin")
+
+    assert res.status_code == 403
+    assert res.json()["code"] == "FORBIDDEN"
+
+
+def test_require_admin_Java_401은_그대로() -> None:
+    client = _client(
+        lambda r: httpx2.Response(
+            401, content=EXPIRED_BODY, headers={"content-type": "application/json"}
+        )
+    )
+
+    res = client.get("/ai/admin")
+
+    assert res.status_code == 401
+    assert res.content == EXPIRED_BODY
+
+
+def test_require_member는_권한과_관계없이_통과() -> None:
+    res = _client(_authority("USRC0001")).get("/ai/me")
+
+    assert res.status_code == 200

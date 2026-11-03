@@ -38,7 +38,7 @@ def test_생성_Java에_쿠키와_평문으로_저장_요청하고_201(client, j
     }
 
 
-def test_생성_제목은_200자로_자른다(client, java):
+def test_생성_제목은_30자로_자른다(client, java):
     # FN-AIM-011-11
     from app.chat import clients
 
@@ -51,9 +51,26 @@ def test_생성_제목은_200자로_자른다(client, java):
     res = client.post(URL, json={"cnvrsCn": "안녕"}, headers=AJAX)
 
     assert res.status_code == 201
-    assert len(res.json()["data"]["cnvrsTtl"]) == 200
+    assert len(res.json()["data"]["cnvrsTtl"]) == 30
+    assert json.loads(java.requests[0].content)["cnvrsTtl"] == "가" * 30
     assert res.json()["data"]["petSn"] is None  # 전체 태그
     assert json.loads(java.requests[0].content)["petSn"] is None
+
+
+def test_30자에서_자른_제목의_끝_공백은_지운다(client, java):
+    # FN-AIM-011-11
+    from app.chat import clients
+
+    class Spaced:
+        async def generate(self, first_message: str) -> str:
+            return "가" * 29 + " 나다라"
+
+    client.app.dependency_overrides[clients.get_title_generator] = lambda: Spaced()
+    as_member(client, 1)
+    res = client.post(URL, json={"cnvrsCn": "안녕"}, headers=AJAX)
+
+    assert res.status_code == 201
+    assert json.loads(java.requests[0].content)["cnvrsTtl"] == "가" * 29
 
 
 @pytest.mark.parametrize(

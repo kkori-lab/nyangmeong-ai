@@ -1,24 +1,40 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-013 대화창 · 영수증 원본·상태 Java 연결 (SCR-AIM-008·010 공통) — 끝 (검증 통과, 사람 확인 2026-10-30. `app/ocr/repository.py` `FakeReceiptRepository` → `JavaReceiptRepository`: 원본 `POST /internal/ai/receipts`(multipart `file`·`petSn`·`ocrDmndSrcCd`) → `recptSn`, 결과 `POST /internal/ai/receipts/{recptSn}/result` `{ocrRslt, ocr}`. 실제 Java로 인식·0건·취소·남의 반려동물 확인. 가짜 저장소는 `tests/ocr/fakes.py`)
-- 새로 정한 것: 인식·0건 보고가 실패하면 결과 없이 Java 4xx 그대로·502, 시간 초과·API 오류·취소 보고 실패는 로그만 남기고 원래 오류(`docs/api/ocr.md`)
-- 추가-1 끝(검증 통과): 주석 컨벤션 `docs/convention/architecture.md` "## 주석"(백엔드·프론트와 같은 명사형 규칙), `app/`·`tests/`·`scripts/` 주석·docstring 정리(코드 변경 없음)
-
-### 추가 요청
-| 번호 | 바꿀 파일 | 완료 조건 | 요청 |
-| --- | --- | --- | --- |
-| 추가-1 | `docs/convention/architecture.md`(주석 절), `app/`·`tests/`·`scripts/`의 `.py` 주석·docstring | 명령: `sh scripts/check.sh` 통과, `grep -rnE '#.*(한다|이다|있다|된다|않는다)\s*$' app tests scripts --include=*.py` 출력 없음. 화면: 없음(동작 변화 없음, 주석만) | 요청 2026-10-30 "주석은 백엔드랑 프론트엔드 컨벤션 참고해서 수정하고 주석 컨벤션도 만들어둬" |
+SCR-AIM-010 OCR 인식 실패 · 일시 오류 뒤 직접 입력 영수증 연결 — 끝 (2026-11-03). `/ai/receipts`의 504 `OCR_TIMEOUT`·502 `OCR_API_ERROR` 오류 본문에 `data { recptSn }`을 담았다(`AppError.data`, 백엔드 `ApiResponse.errorWithData`와 같은 모양). 상태 보고가 실패해도 남는다. 다른 오류·내부 경로는 `data` 없음. `docs/api/ocr.md` 갱신. 검증 1회차 통과
 
 ## 다음에 할 것
+- 연결 남음: FN-AIM-010-06 프론트 [직접 입력] 영수증 연결 (LJS 프론트, 맨 먼저): frontend-11 세션에 전달함(2026-11-03, SCR-ADM-050 루프 중이라 사람이 그 대화에서 요청해야 반영). `ReceiptUploadModal.jsx` `onError`에서 `setFailedRecptSn(error.data?.recptSn ?? null)`, [직접 입력]이 넘기는 키 `rcptSn`을 받는 쪽 이름과 맞춤, 다시 촬영·닫기 때 초기화. 계약 변경이라 AI PR과 프론트 PR을 함께 낸다
+- 연결 남음: FN-AIM-010-06 직접 입력 저장 뒤 영수증 상태 저장완료 (LJS 백엔드): `CheckupService.create(…, recptSn)`은 상태를 보지 않고 연결만 한다(상태 보고 실패로 분석중이어도 거절 안 함). 저장완료로 바꾸는지 확인([확인 필요] 명세 문구)
+- 인식·0건인데 결과 보고가 실패한 경우(Java 4xx 그대로·502 `EXTERNAL_API_ERROR`)와 프론트 20초 가드가 먼저 끊은 경우는 `recptSn`이 없어 [직접 입력]이 연결 없는 기록이 된다(그대로 두기로 함) (LJS)
+- 병합 대기: FN-MYP-031-05·03 Java 백엔드 PR #124(backend-95, 2026-11-03 올림, 4가지 모두 반영: `AIMC0027` 허용·가계부만 `petSn` 생략(다른 출처는 400 `INVALID_INPUT_VALUE`)·RECPT 출처 `AIMC0027` 저장·`checkCaregiver` 건너뜀, `ReceiptOcrResponse` `expndPlcusNm`·`expndClsfCd`(null 가능, `OCR_RSPNS_JSON`에 남음 확인), 가계부 완전 인식은 `expndPlcusNm`·`ckupYmd`·`recptAmt`로 보고 품목 0개 허용). AI PR #33은 이미 병합돼 #124 병합 전까지 develop에서 가계부 출처 인식은 Java가 거절한다. #124 병합 뒤 실제 가계부 영수증 1건으로 확인 (LJS 백엔드)
+- 연결 남음: FN-MYP-031-03·05 프론트 가계부 (SJM): `src/features/expense/api.js` `recognizeReceipt` 가짜(`POST /receipts/recognize`) → `POST /ai/receipts`(form `ocrRqstSrcCd=AIMC0027`, `petSn` 없음). 응답 `data.ocr`의 `ckupYmd`·`recptAmt`를 `expndYmd`·`expndAmt`로, `expndPlcusNm`·`expndClsfCd`는 그대로. 0건은 값이 모두 null인 200, 504 `OCR_TIMEOUT`·502 `OCR_API_ERROR`는 "영수증을 읽지 못했어요"
+- OCR 출력 모양(`app/ocr/clients.py` `ReceiptOutput`)에 필드를 더하면 Anthropic API가 400 "Schema is too complex"로 거절할 수 있다(2026-11-03 실측: 기본값 있는 필드 2개 추가로 모든 인식 실패, 가짜 LLM 테스트로는 안 잡힘). 필드를 더하면 실제 영수증으로 한 번 돌려 본다 (LJS)
+- 개발 DB 정리: 2026-11-03 검증이 회원 1·반려동물 2의 RECPT 501·502(백엔드 #124 검증으로 505·508, SCR-AIM-010 검증으로 514 추가)와 원본 파일을 남겼다. 필요하면 지운다 (LJS 백엔드)
+- 전체 굽기 재설계 (FN-ADM-070-02, 맨 먼저): 2026-11-03 백엔드(사람) 결정으로 시트 내부 API 4개(sheets·sheet-files·PUT item-sheets·POST item-sheets/failure)는 쿠키 인증만 받는다. 지금 `POST /ai/items/{itemSn}/bake`의 쿠키 없는 저장소(`get_server_character_repository`)는 운영에서 401로 전부 건너뛴다. 토큰 30분 만료·남의 캐릭터 시트를 쿠키 전제에서 푸는 방식을 정해 백엔드에 계약 제안. 후보: 관리자 쿠키로 남의 캐릭터 시트 읽기·쓰기 허용 + 관리자 화면이 페이지 단위로 여러 번 호출(요청 하나가 토큰 수명 안에 끝나는 크기) (LJS)
+- 연결 남음: FN-MYP-011-01·FN-ADM-070-02 실제 Java 굽기 계약: 백엔드 PR #120(develop 대상, 2026-11-03 병합 전)에 `bake-items` `{itemSn, regnCd, bakeHint}`(판매 중·지시 있음, 시드 30개), `GET /internal/ai/items/{itemSn}/bake-targets?page=`(0부터, 100개, 관리자 쿠키만, 403 `ADMIN_ONLY`·404 `ITEM_NOT_FOUND`), 관리자 등록·수정 `bakeHint`(300자, 신발은 400, 바뀌면 그 아이템 시트 삭제). 공용 DB v0.12 (3) 적용됨. 병합 순서: 백엔드 #120 먼저 → AI `LJS` PR. AI 쪽 `bake-targets` 연결은 위 "전체 굽기 재설계"와 함께. 곰돌이 후드티 지시는 hood down으로 고치자고 backend-95에 답함
+- 연결 남음: FN-ADM-070-02 관리자 프론트 아이템 등록 화면에 [굽기 지시 만들기](`POST /ai/items/bake-hints`)·[시험해 보기](`POST /ai/items/trial-preview`)·등록 성공 뒤 `POST /ai/items/{itemSn}/bake` 호출 (관리자 프론트)
+- 로컬 시험 데이터: 관리자 mbrSn 2의 반려동물 petSn 1001 "시험복실"·캐릭터 pixelCharSn 601 (시험 굽기용, 2026-11-03)
+- 결정 남음: `bake-hints`의 그림 형식·10MB 오류는 `/ai/characters`와 같은 `FILE_TYPE_NOT_ALLOWED`·`FILE_SIZE_EXCEEDED`로 했다(기획은 `INVALID_REQUEST`) (LJS)
+- 병합 순서: 백엔드 PR #105(`d73ca54`, 캐릭터 내부 API 포함) 먼저 → 병합 직후 공용 DB v0.12 적용(사람) → AI `LJS` PR. 순서가 바뀌면 캐릭터 생성 502 (LJS)
+- 옛 흐름으로 만든 캐릭터는 맨몸 시트가 없어 `/preview`가 404 `PIXEL_CHARACTER_NOT_FOUND`다. 다시 만들어야 한다. 무료 재생성(FN-MYP-010-23)은 사진이 Java로 오지 않아 SCR-ADM-042 전에 계약을 정한다 (LJS 백엔드)
+- 하네스 수정 PR 후보(공용): `verify-loop.sh guard`가 읽기 전용 비교(`git diff --no-index`)까지 막아 verify 절차와 어긋난다
+- 굽기·합성 최적화: 굽기 26개 실측 1회 104.2초(동시 10, 아이템당 31.5~37.0초, 재시도 없음). 동시 13으로 올린 값은 미측정. 합성 1.4초는 시험 그림 값. 후보는 전용 스레드 풀(기본 풀은 CPU+4라 코어 9개 미만 서버에서 13이 안 나온다), 429 대기 후 재시도, OpenAI 계정 한도 확인, 이미지 품질 `low` (LJS)
+- 고양이 꼬리 경계선·다리 사이 분홍 점: 원인 미확인(착용 지시 변경의 영향 포함). 정렬 2단계 탐색은 촘촘한 무늬에서 빗나갈 수 있고 그림체 샘플 1장으로만 확인 (LJS)
+- 굽기 켜기: 팀 비용 결정(26개 기준 캐릭터당 약 $1.64), Java 시트 저장 연결 뒤. 켜기 전 access_token(30분) 만료 대책을 정한다: 만료 뒤 아이템은 비용을 내고도 저장·실패 표시가 안 되어 "안 구운 아이템"으로 남고, 성공 보고 401이면 결과를 잃고 작업은 시간 초과 실패가 된다 (LJS)
+- 백엔드(LJS): 신발을 안 넣기로 해서 공통코드 `MYPC0006`과 시드 신발 4개는 정리 대상이다(공통코드는 DB에서만 고친다) (LJS)
+- DMS 모음: FN-MYP-010-13 겹침 순서(캐릭터 → 의상 → … → 머리장식) vs 합성 순서(머리 착용 바탕 위에 의상) (LJS)
+- DMS 모음: FN-MYP-010-13 "고정 좌표로 겹쳐 표시" vs 서버 합성, FN-MYP-010-17 "기준 좌표 고정" vs 상단 보정(눈 y가 캐릭터마다 다를 수 있음), 얼굴 영역 값 변경 (LJS)
+- 눈 찾기 위험: `dog_fluffy` 512 재검출이 눈이 아닌 쌍을 잡았다. 실제 배치 경로에서는 샘플 10건 모두 맞았으나, 틀리면 규격을 통과한 채 조용히 어긋난다. 검은 털은 하이라이트 기준이라 눈 높이가 몇 px 다를 수 있고 측정하지 않았다 (LJS)
+- 약한 테스트: EXIF 제거·회전 테스트 입력에 EXIF가 없다. 고양이 분기는 가짜 저장소가 짝수 `petSn`일 때만 `PETC0002`를 준다(실제 값은 Java 연결 뒤 확인) (LJS)
+- 얼굴 영역 `(128, 64, 256, 256)` → `(96, 32, 320, 320)` 변경 (LJS 결정 2026-11-02): 백엔드 `CharacterSpec.FACE`·`cropFace`의 256 축소 여부·AI `schemas.py`를 같이 바꾼다(`AGENTS.md` 4번, 백엔드 PR과 함께). AI는 눈 y=207 계산이 `FACE_Y`에 묶여 있어 상수를 분리한다 (LJS)
+- 프론트(LJS) 알리기: SCR-AIM-011 첫 SEARCH 답변은 `done` 뒤 제목 요약(Haiku 한 번)이 끝나야 SSE 스트림이 닫힌다. 입력창 다시 열기는 스트림 종료가 아닌 `done` 기준으로. 바뀐 제목은 대화 목록을 다시 읽어 반영
+- 프론트(LJS) 알리기: 범위 밖 질문도 `intent.kind` FALLBACK 그대로(칩·연속 실패 카운트 같음), `done.message.cnvrsCn`만 범위 안내 문구. 프론트가 폴백 문구를 하드코딩하면 `done.message`를 쓰게 맞춘다
+- backend-90에 알리기: requirements.txt 커밋됨(`bf28ade`, LJS). 배포는 develop → master 병합 뒤. 서버 gunicorn은 워커 1개(`_in_progress` 프로세스 메모리)
 - frontend-83 세션에 알리기: 영수증 원본·상태가 실제 Java 영수증 내부 API로 저장된다(SCR-AIM-008·013, 대화창은 `ocrRqstSrcCd=AIMC0031`)
-- 로컬 Java DB 정리(선택): 검증으로 생긴 RECPT 515~527과 원본 파일
 - JAJ에 요청(2026-10-30 LJS 결정): 검사결과지 PDF 분석은 React → Python `POST /ai/checkups/lab-results`로 고정한다. 백엔드 `docs/api/health.md`의 Java `POST /pets/{petSn}/checkup-attachments/{ckupRcdAtchSn}/analyses`와 InspectionAnalysisResponse(`anlysRslt`)는 지운다. 항목 이름은 Python이 InspectionAnalysisItem(INSP_NVL)에 맞췄다(`registered`는 React가 검진상세 목록으로 판정). HLTG12에 SDMA 코드가 없어 지금은 직접입력명 `SDMA`로 보낸다. 명세대로 드롭다운에 넣으려면 JAJ가 SDMA 코드를 추가하고 `data/lab_items.yaml`에 `cd`를 넣는다
 - 프론트(LJS) 대기: 검진상세 첨부 자료 [PDF 분석] → `POST /ai/checkups/lab-results`(파일 다시 올림) → 성공 시 SCR-HLT-007에 채움, `excludedArtclNms`는 저장 대상 밖으로 안내, `registered`(이미 등록됨)는 검진상세 혈액검사 목록으로 판정, 실패·422·504는 SCR-HLT-005에서 사유 안내, 다시 분석 중복 요청은 버튼 잠금
 - 검사결과지 인식률: 합성 결과지 1건으로만 확인(2026-10-30). 실제 병원 결과지·스캔본으로 더 확인(원본은 git 제외)
-- 연결 남음: FN-MYP-010-08·17·18 생성기 붙이기 — 다른 곳에서 만드는 생성기(사진 분석 포함)를 `app/character/clients.py` `get_character_client`에 붙인다. 입출력이 다르면 그 파일에 맞춤 코드만. 분석 방식(한 번에 / 분석 뒤 생성)·반려동물 사진 판정은 그때 정한다. 붙인 뒤 얼굴 영역 위치·샘플 10건 이상 검증(FN-MYP-010-18), 규격 미확보 시 대체(FN-MYP-010-19) 판단 (LJS)
-- 연결 남음: FN-MYP-010-09 Java 캐릭터 작업 생성·결과 보고 내부 API(LJS 백엔드, 캐릭터 흐름 재설계). 연결되면 `app/character/repository.py` `FakeCharacterJobRepository` 교체, 작업 번호 이름(`chrcJobSn`)·실패 사유를 Java에 맞춘다. 초안은 `docs/api/internal.md` "Python → Java" 미정 행
-- 사람 확인 때 주의: `.env.local`의 `BACKEND_BASE_URL`이 실제 Java면 가짜 쿠키(`member-<번호>`)는 401이다. 가짜 Java로 볼 때는 `BACKEND_BASE_URL`을 8081 포트로 바꿔 띄운다
 - 프론트(LJS) 대기: 대화창 영수증 연결(SCR-AIM-013 — 이미지 첨부 시 `/messages` 대신 `POST /ai/receipts`(`ocrRqstSrcCd=AIMC0031`) → 끝나면 `receipt-result`). 프론트 핸드오프에 적혀 있고 프론트 `/start` 때 진행. 건강 일지 SCR-AIM-008 연결은 프론트 PR #112로 끝남
 - 백엔드에 요청(LJS 백엔드): Java `/api/receipts`(업로드)·`/{recptSn}/analyze`·`FakeOcrClient` 흐름 정리. 분석은 React → Python `/ai/receipts`라 Java 분석 경로는 `/internal/v1/ocr` 삭제와 함께 정리. Postman이 8080으로 가면 가짜 결과(초코·아포퀠)가 온다
 - 중복 분석 차단(`_in_progress`)은 프로세스 메모리라 워커 1개 전제. 여러 워커로 띄우면 Java 영수증 상태로 옮긴다
@@ -26,15 +42,11 @@ SCR-AIM-013 대화창 · 영수증 원본·상태 Java 연결 (SCR-AIM-008·010 
 - 각자 `.env.local`: `GOOGLE_APPLICATION_CREDENTIALS` → `GOOGLE_VISION_API_KEY`(API 키), `OCR_TIMEOUT_SEC` 15. 디스코드 `.env.local` 갱신
 - 연결 남음(JAJ): Java register-context의 `careArtclNms`가 빈 배열이라 같은 이름 케어 항목 안내(FN-AIM-012-08)가 실제로는 뜨지 않는다. JAJ 케어 항목 service가 생기면 Python은 고칠 것 없음
 - JAJ 대기: React→Java 일정·케어 항목 등록 API(출처 HLTC0067, SCR-HLT-003 토탈 케어리스트 대기). 카드 `cycleDays`는 `CARE_ARTCL.CYCLE_DRCT_INPT_DAY_CNT`에 대응(요청 필드 이름은 JAJ API가 정함)
+- DMS AI매니저 기능명세서 표지(v0.12)의 "대상 화면 … (화면설계서 v0.11 기준)"·"기준 문서 … AI매니저 화면설계서 v0.11(2026-10-26)"을 v0.12로 맞춘다. 다음 DMS 모음 때 함께(LJS)
 - DMS AI매니저 기능명세서 버전 11(v1.0 표기, 버전 12로 대체)은 MCP에 삭제 도구가 없어 남아 있을 수 있다. 남아 있으면 DMS 화면에서 지운다(LJS)
-- DMS 명세 갱신 모음(LJS): 하나씩 올리지 않고 모아서 한 번에 버전업한다. 코드에는 이미 반영돼 있다
-  - 화면설계서 SCR-AIM-012 ⑥: 같은 이름 안내 문구 "미결"을 FN-AIM-012-08 확정 문구로 바꾼다
-  - 화면설계서 SCR-AIM-012 ⑤: 케어 항목 등록 결과 요약 예시 추가("✔ 등록됨 — 뭉치 발톱 깎기 · 2주마다 · 다음 예정일 10-10(토)")
 - 프론트(LJS)가 맞출 것: ROUTE 뒤 `done.message`(저장된 이동 안내)와 화면 안내 겹침 정리, 분류 장애 `error`는 연속 실패로 세지 않고 [다시 시도]. 프론트 세션에 알림(2026-10-29)
-- 백엔드에 요청(LJS 백엔드): 대화 제목 수정 내부 API. 마일스톤 "첫 답변 요약 제목"이 기다림
 - 백엔드에 요청(LJS 백엔드): AI 설정값 조회 내부 API(SYS_STNG_AI_TKN_UPLMT_CNT·SYS_STNG_AI_CNVRS_TURN_CNT, 연결되면 가짜 `get_ai_settings` 교체), AI 역할 메시지 `cnvrsCn` 1,000자 상한 확대(상한 없이 저장 요청 중, 넘으면 저장 실패). `docs/api/internal.md` "미정" 행은 "설정값 조회"만 남긴다(최근 6턴은 GET 대화, 미완료 완료 처리는 불필요)
 - 프론트(LJS)와 맞출 것: 메시지 API SSE 이벤트(`intent`·`delta`·`done`·`error`, `chat.md` MessageEvent), 화면 ID → 프론트 경로 변환, 칩 재노출·연속 실패 카운트·FAQ 버튼(FN-AIM-005-03~06)은 프론트 몫
-- 백엔드에 요청(LJS 백엔드, 캐릭터 흐름 재설계): Python이 부를 캐릭터 작업 생성·결과·상태 보고 내부 API. 계약은 이 저장소 `docs/api/internal.md`의 `/internal/v1/**` 삭제와 같은 때 병합
 - 계약은 백엔드 PR과 함께 낸다(`AGENTS.md` 4번): 백엔드 LJS의 `ai` 도메인(대화 내부 API, 정본 백엔드 `docs/api/ai.md`, 10-27 PR 전)·서버 간 키 제거. 이 저장소 `docs/api/internal.md`와 같은 때 병합
 - 각자 `.env.local` 정리: `BACKEND_INTERNAL_KEY`·`INTERNAL_API_KEY`·`APP_PROFILE`·`*_DB_*`·`CONVERSATION_ENC_KEY` 삭제, `BACKEND_BASE_URL` 필수(없으면 `/ai/**` 전부 502). 운영 Nginx가 `/internal`을 막는지 확인
 - 하네스 수정 PR 후보(공용): `verify-collect.sh:18` `cut -c8-` 멀티바이트 문제, `start-check.sh` 수정분, macOS BSD `sed`(`milestone-status.sh`·`impl-check.sh`·`api-row.sh`. `sed -i`가 실패해도 두 스크립트 모두 종료 코드 0이고 `impl-check.sh`는 "바꿈:"까지 출력한다, 2026-10-28 실측), `verify-collect.sh:37-38` `case` 문법, `impl-check.sh:18`이 "질문" 글자가 든 줄(제목 "검색 질문/응답" 등)을 모두 질문으로 읽음

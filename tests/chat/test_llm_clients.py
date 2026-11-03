@@ -152,6 +152,20 @@ def test_분류가_UNKNOWN이면_판단_못_함():
     assert classify(classified("UNKNOWN")) == Classified(ClassifiedKind.UNKNOWN)
 
 
+def test_분류가_OUT_OF_SCOPE면_서비스_범위_밖():
+    assert classify(classified("OUT_OF_SCOPE")) == Classified(ClassifiedKind.OUT_OF_SCOPE)
+
+
+def test_키워드_힌트는_시스템_프롬프트_뒤에_붙인다():
+    row = next(r for r in rules.routing_table() if r.scr_id == "SCR-MYP-030")
+    fake = classified("OUT_OF_SCOPE")
+    asyncio.run(AnthropicIntentClassifier(fake.client(), MODEL).classify("가계부 방법", row))
+
+    system = fake.requests[0]["system"]
+    assert system.startswith(classify_system())
+    assert f"{row.no}번 화면({row.name})" in system
+
+
 def test_분류가_ROUTE면_매핑표_번호를_화면_ID와_파라미터로_바꾼다():
     row = next(r for r in rules.routing_table() if r.routable and r.param is not None)
     result = classify(classified("ROUTE", row.no))

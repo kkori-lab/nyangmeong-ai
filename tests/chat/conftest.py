@@ -61,6 +61,8 @@ class FakeJava:
         ]
         # register-context 실패 흉내 : 응답 상태 코드, 0이면 연결 실패
         self.context_status: int | None = None
+        # 제목 수정(PATCH) 실패 흉내 : 응답 상태 코드
+        self.title_status: int | None = None
 
     def _tick(self) -> str:
         self._clock += timedelta(minutes=1)
@@ -127,6 +129,11 @@ class FakeJava:
             if request.method == "DELETE":
                 del self.rooms[room_sn]
                 return _ok(None)
+            if request.method == "PATCH":
+                if self.title_status is not None:
+                    return httpx2.Response(self.title_status, json={"status": "error"})
+                room["cnvrsTtl"] = json.loads(request.content)["cnvrsTtl"]
+                return _ok(self._summary(room_sn))
         return httpx2.Response(404)
 
     def _summary(self, room_sn: int) -> dict:

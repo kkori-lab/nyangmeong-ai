@@ -59,7 +59,15 @@ def test_응답이_ReceiptOcrResponse_모양이다(client: TestClient) -> None:
     assert response.status_code == 200
     assert body["status"] == "success"
     data = body["data"]
-    assert set(data) == {"hsptlNm", "ckupYmd", "recptAmt", "btmDscntAmt", "sections"}
+    assert set(data) == {
+        "hsptlNm",
+        "expndPlcusNm",
+        "expndClsfCd",
+        "ckupYmd",
+        "recptAmt",
+        "btmDscntAmt",
+        "sections",
+    }
     assert data["ckupYmd"] == "2026-10-20"
     # 읽지 못한 값 = null 유지
     assert data["btmDscntAmt"] is None
@@ -138,3 +146,16 @@ def test_OCR_클라이언트가_연결되기_전에는_502_EXTERNAL_API_ERROR(ap
 
     assert response.status_code == 502
     assert response.json()["code"] == "EXTERNAL_API_ERROR"
+
+
+@pytest.mark.parametrize(("behavior", "http_code"), [("slow", 504), ("error", 502)])
+def test_내부_경로의_일시_오류에는_data가_없다(
+    app, client: TestClient, behavior, http_code
+) -> None:
+    # RECPT를 만들지 않으므로 recptSn 없음
+    app.dependency_overrides[get_ocr_client] = lambda: _Fake(behavior)
+
+    response = _post(client)
+
+    assert response.status_code == http_code
+    assert "data" not in response.json()

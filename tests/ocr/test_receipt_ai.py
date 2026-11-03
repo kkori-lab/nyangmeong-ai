@@ -59,7 +59,9 @@ class FakeOcr:
 class FailingRepository(FakeReceiptRepository):
     """원본 저장에서 Java 오류"""
 
-    async def save_original(self, image: bytes, file_name: str, pet_sn: int, src_cd: str) -> int:
+    async def save_original(
+        self, image: bytes, file_name: str, pet_sn: int | None, src_cd: str
+    ) -> int:
         raise AppError("EXTERNAL_API_ERROR", 502, "외부 서비스 호출에 실패했습니다.")
 
 
@@ -108,7 +110,15 @@ def test_분석_결과는_recptSn과_ocr로_감싼다(
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["recptSn"] == 1
-    assert set(data["ocr"]) == {"hsptlNm", "ckupYmd", "recptAmt", "btmDscntAmt", "sections"}
+    assert set(data["ocr"]) == {
+        "hsptlNm",
+        "expndPlcusNm",
+        "expndClsfCd",
+        "ckupYmd",
+        "recptAmt",
+        "btmDscntAmt",
+        "sections",
+    }
     assert data["ocr"]["hsptlNm"] == "냥멍동물병원"
 
 
@@ -376,8 +386,8 @@ def test_AI_대화창_출처로_분석하면_Java에_그_출처로_저장한다(
     assert repo.receipts[1].src_cd == "AIMC0031"
 
 
-@pytest.mark.parametrize("src_cd", ["AIMC0027", "AIMC0028"])
-def test_가계부나_다른_그룹_코드는_400이고_Java_OCR을_부르지_않는다(
+@pytest.mark.parametrize("src_cd", ["AIMC0028"])
+def test_다른_그룹_코드는_400이고_Java_OCR을_부르지_않는다(
     client: TestClient, repo: FakeReceiptRepository, ocr: FakeOcr, src_cd: str
 ) -> None:
     response = post(client, data={"petSn": "3", "ocrRqstSrcCd": src_cd})
@@ -386,3 +396,127 @@ def test_가계부나_다른_그룹_코드는_400이고_Java_OCR을_부르지_�
     assert response.json()["code"] == "INVALID_REQUEST"
     assert repo.receipts == {}
     assert ocr.calls == []
+
+
+# FN-MYP-031-05 : 요청 출처 '가계부'(AIMC0027), 반려동물은 확인 모달에서 고름
+
+
+def test_가계부_출처는_petSn_없이_분석하고_반려동물_없이_Java에_저장한다(
+    client: TestClient, repo: FakeReceiptRepository
+) -> None:
+    response = post(client, data={"ocrRqstSrcCd": "AIMC0027"})
+
+    assert response.status_code == 200
+    assert response.json()["data"]["recptSn"] == 1
+    saved = repo.receipts[1]
+    assert (saved.pet_sn, saved.src_cd) == (None, "AIMC0027")
+    assert saved.status is ReceiptStatus.RECOGNIZED
+
+
+def test_가계부_출처에_petSn을_보내면_그_값을_Java에_넘긴다(
+    client: TestClient, repo: FakeReceiptRepository
+) -> None:
+    response = post(client, data={"petSn": "3", "ocrRqstSrcCd": "AIMC0027"})
+
+    assert response.status_code == 200
+    assert (repo.receipts[1].pet_sn, repo.receipts[1].src_cd) == (3, "AIMC0027")
+
+
+@pytest.mark.parametrize("src_cd", ["AIMC0026", "AIMC0031"])
+def test_건강_일지_대화창_출처는_petSn이_없으면_400이고_Java_OCR을_부르지_않는다(
+    client: TestClient, repo: FakeReceiptRepository, ocr: FakeOcr, src_cd: str
+) -> None:
+    response = post(client, data={"ocrRqstSrcCd": src_cd})
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "INVALID_REQUEST"
+    assert repo.receipts == {}
+    assert ocr.calls == []
+
+
+def test_사용처만_읽힌_결과는_추출_0건이_아니다(app, repo: FakeReceiptRepository) -> None:
+    place_only = ReceiptOcrResponse(expnd_plcus_nm="멍멍펫샵")
+
+    class PlaceOnlyOcr(FakeOcr):
+        async def recognize(self, image: bytes) -> ReceiptOcrResponse:
+            return place_only
+
+    app.dependency_overrides[get_ocr_client] = PlaceOnlyOcr
+    response = post(TestClient(app), data={"ocrRqstSrcCd": "AIMC0027"})
+
+    assert response.status_code == 200
+    assert response.json()["data"]["ocr"]["expndPlcusNm"] == "멍멍펫샵"
+    assert repo.receipts[1].status is ReceiptStatus.RECOGNIZED
+
+
+# FN-AIM-010-06 : 실패 뒤 [직접 입력] 연결용 recptSn
+
+
+class ReportFailingRepository(FakeReceiptRepository):
+    """원본 저장은 되고 상태 보고에서 Java 연결 실패"""
+
+    async def report_result(self, recpt_sn, status, result) -> None:
+        raise AppError("EXTERNAL_API_ERROR", 502, "외부 서비스 호출에 실패했습니다.")
+
+
+@pytest.mark.parametrize(
+    ("behavior", "delay", "http_code", "code"),
+    [("ok", 1.0, 504, "OCR_TIMEOUT"), ("error", 0.0, 502, "OCR_API_ERROR")],
+)
+def test_일시_오류_응답에_원본_저장의_recptSn을_담는다(
+    app, repo: FakeReceiptRepository, behavior, delay, http_code, code
+) -> None:
+    repo._next = 41
+    app.dependency_overrides[get_ocr_client] = lambda: FakeOcr(behavior, delay)
+
+    response = post(TestClient(app))
+
+    body = response.json()
+    assert (response.status_code, body["code"]) == (http_code, code)
+    assert body["data"] == {"recptSn": 41}
+    assert 41 in repo.receipts
+
+
+@pytest.mark.parametrize(
+    ("behavior", "delay", "http_code", "code"),
+    [("ok", 1.0, 504, "OCR_TIMEOUT"), ("error", 0.0, 502, "OCR_API_ERROR")],
+)
+def test_실패_보고가_안_돼도_일시_오류에_recptSn이_남는다(
+    app, behavior, delay, http_code, code
+) -> None:
+    app.dependency_overrides[get_receipt_repository] = lambda: ReportFailingRepository()
+    app.dependency_overrides[get_ocr_client] = lambda: FakeOcr(behavior, delay)
+
+    response = post(TestClient(app))
+
+    body = response.json()
+    assert (response.status_code, body["code"]) == (http_code, code)
+    assert body["data"] == {"recptSn": 1}
+
+
+def test_형식_오류와_키_없음_오류에는_data가_없다(app) -> None:
+    client = TestClient(app)
+    bad_type = post(client, content=b"not an image")
+    del app.dependency_overrides[get_ocr_client]
+    no_key = post(client)
+
+    assert (bad_type.status_code, bad_type.json()["code"]) == (400, "FILE_TYPE_NOT_ALLOWED")
+    assert (no_key.status_code, no_key.json()["code"]) == (502, "EXTERNAL_API_ERROR")
+    assert "data" not in bad_type.json()
+    assert "data" not in no_key.json()
+
+
+def test_중복_분석_409에는_data가_없다() -> None:
+    repo = FakeReceiptRepository()
+    ocr = FakeOcr(delay=0.1)
+
+    async def run():
+        return await asyncio.gather(
+            _analyze(ocr, repo), _analyze(ocr, repo), return_exceptions=True
+        )
+
+    _, second = asyncio.run(run())
+
+    assert isinstance(second, AppError)
+    assert second.code == "OCR_IN_PROGRESS"
+    assert second.data is None
