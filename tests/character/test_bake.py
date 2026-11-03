@@ -1,5 +1,6 @@
 import asyncio
 import io
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -11,7 +12,7 @@ from app.character.clients import CharacterApiError, GeneratedCharacter
 from app.character.repository import CharacterJob
 from app.character.rules import matches_spec
 from app.character.schemas import FACE_W, FACE_X, FACE_Y
-from tests.character.fakes import FakeCharacterJobRepository, SavedJob
+from tests.character.fakes import FakeCharacterJobRepository, SavedJob, fake_item, seed_rows
 
 MAGENTA = (255, 0, 255, 255)
 FUR = (200, 150, 100, 255)
@@ -124,15 +125,15 @@ def test_render_머리와_의상을_같이_입는다():
 
 
 # 굽기 지시
-def test_load_items_다섯_부위_26개_신발_없음():
-    items = engine.load_items()
-    assert len(items) == 26
-    regions = sorted({item.regn_cd for item in items.values()})
+def test_굽기_지시_시드는_다섯_부위_26개_신발_없음():
+    rows = seed_rows()
+    assert len(rows) == 26
+    regions = sorted({row["regn_cd"] for row in rows})
     assert regions == ["MYPC0001", "MYPC0002", "MYPC0003", "MYPC0004", "MYPC0005"]
 
 
 def test_build_wear_prompt_종을_치환한다():
-    item = engine.load_items()["green-sweater"]
+    item = fake_item("green-sweater")
     prompt = engine.build_wear_prompt("cat", item)
     assert "green knitted cat sweater" in prompt
     assert "{" not in prompt
@@ -140,33 +141,38 @@ def test_build_wear_prompt_종을_치환한다():
 
 def test_가짜_저장소_아이템은_모두_목록에_있다():
     targets = asyncio.run(FakeCharacterJobRepository().list_bake_items())
-    assert set(targets.values()) == set(engine.load_items())
+    assert len(targets) == 26
+    assert {item.bake_hint for item in targets.values()} == {
+        row["bake_hint"] for row in seed_rows()
+    }
+    assert all(sn == item.item_sn for sn, item in targets.items())
 
 
 # 굽기 큐
 class BakeClient:
     """아이템별로 정해 둔 결과를 내는 가짜 생성기"""
 
-    def __init__(self, fail: frozenset[str] = frozenset(), flaky: frozenset[str] = frozenset()):
+    def __init__(self, fail: frozenset[int] = frozenset(), flaky: frozenset[int] = frozenset()):
         self.fail = fail
         self.flaky = flaky
-        self.calls: list[str] = []
+        self.calls: list[int] = []
 
     async def generate(self, request) -> GeneratedCharacter:
         return GeneratedCharacter(compose.render(sheet(), LAYOUT, {}), sheet(), LAYOUT)
 
     async def bake(self, bare: bytes, pet_se_cd, item: engine.BakeItem) -> bytes:
-        self.calls.append(item.item_id)
-        if item.item_id in self.fail:
+        self.calls.append(item.item_sn)
+        if item.item_sn in self.fail:
             raise CharacterApiError
-        if item.item_id in self.flaky and self.calls.count(item.item_id) == 1:
+        if item.item_sn in self.flaky and self.calls.count(item.item_sn) == 1:
             return sheet()
         return sheet(body=True)
 
 
 class Repo(FakeCharacterJobRepository):
-    async def list_bake_items(self) -> dict[int, str]:
-        return {1: "green-sweater", 2: "hoodie", 3: "bow-tie"}
+    async def list_bake_items(self) -> dict[int, engine.BakeItem]:
+        names = {1: "green-sweater", 2: "hoodie", 3: "bow-tie"}
+        return {sn: replace(fake_item(name), item_sn=sn) for sn, name in names.items()}
 
 
 def run(client: BakeClient, repo: Repo, enabled: bool) -> None:
@@ -186,29 +192,29 @@ def test_굽기가_꺼져_있으면_이미지_API를_부르지_않는다():
 def test_굽기가_켜져_있으면_전_아이템을_한_번씩_굽는다():
     client, repo = BakeClient(), Repo()
     run(client, repo, True)
-    assert sorted(client.calls) == ["bow-tie", "green-sweater", "hoodie"]
+    assert sorted(client.calls) == [1, 2, 3]
     assert set(repo.jobs[1].item_sheets) == {1, 2, 3}
 
 
 def test_굽기_실패는_한_번_다시_해_보고_실패로_보고한다():
-    client, repo = BakeClient(fail=frozenset({"hoodie"})), Repo()
+    client, repo = BakeClient(fail=frozenset({2})), Repo()
     run(client, repo, True)
-    assert client.calls.count("hoodie") == 2
+    assert client.calls.count(2) == 2
     assert repo.jobs[1].failed_items == {2}
     assert set(repo.jobs[1].item_sheets) == {1, 3}
 
 
 def test_빈_레이어는_다시_굽는다():
-    client, repo = BakeClient(flaky=frozenset({"hoodie"})), Repo()
+    client, repo = BakeClient(flaky=frozenset({2})), Repo()
     run(client, repo, True)
-    assert client.calls.count("hoodie") == 2
+    assert client.calls.count(2) == 2
     assert 2 in repo.jobs[1].item_sheets
 
 
 def test_put_first_앞으로_올리고_굽는_중이면_넣지_않는다():
     queue = service.BakeQueue()
     client, repo = BakeClient(), Repo()
-    item = engine.load_items()["hoodie"]
+    item = fake_item("hoodie")
     first = service.BakeTask(client, repo, 1, 1, item, b"", "PETC0001")
     second = service.BakeTask(client, repo, 1, 2, item, b"", "PETC0001")
     queue.add(first)
@@ -312,7 +318,7 @@ def test_굽기_입력은_어두운_털이면_밝힌_시트():
 
     repo = Repo()
     repo.jobs[1] = SavedJob(CharacterJob(1, "PETC0001"), 3)
-    item = engine.load_items()["bow-tie"]
+    item = fake_item("bow-tie")
     task = service.BakeTask(Client(), repo, 1, 3, item, dark_sheet(), "PETC0001")
     asyncio.run(service._bake_one(task))
     assert received == [bake.bake_source(dark_sheet(), item.regn_cd)]
@@ -329,14 +335,14 @@ def test_굽기_입력은_어두운_털이면_밝힌_시트():
     ],
 )
 def test_build_wear_prompt_부위별_착용_지시(item_id: str, phrase: str):
-    assert phrase in engine.build_wear_prompt("cat", engine.load_items()[item_id])
+    assert phrase in engine.build_wear_prompt("cat", fake_item(item_id))
 
 
 # 시간 기록 : 추가-5
 def test_굽기_시간과_시도_횟수를_남긴다(caplog: pytest.LogCaptureFixture):
     caplog.set_level("INFO", "app.character.service")
-    run(BakeClient(flaky=frozenset({"hoodie"})), Repo(), True)
-    assert "굽기 시간: hoodie" in caplog.text
+    run(BakeClient(flaky=frozenset({2})), Repo(), True)
+    assert "굽기 시간: pixelCharSn=1, itemSn=2" in caplog.text
     assert "2회 시도" in caplog.text
     assert "전체 굽기 시간" in caplog.text
 

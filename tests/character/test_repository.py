@@ -10,6 +10,7 @@ from PIL import Image
 
 from app.character.canvas import Layout
 from app.character.clients import get_character_client
+from app.character.engine import BakeItem
 from app.character.repository import (
     CharacterFailure,
     JavaCharacterJobRepository,
@@ -105,13 +106,13 @@ def test_report_failure는_쿠키와_함께_사유를_보낸다() -> None:
     assert json.loads(request.content) == {"failRsn": "CHARACTER_SPEC_MISMATCH"}
 
 
-def test_list_bake_items는_번호와_엔진_키를_돌려준다() -> None:
+def test_list_bake_items는_번호와_부위_굽기_지시를_돌려준다() -> None:
     requests: list[httpx2.Request] = []
-    data = [{"itemSn": 5, "engineItemKey": "round-glasses"}]
+    data = [{"itemSn": 5, "regnCd": "MYPC0002", "bakeHint": "round thin black glasses"}]
 
     targets = asyncio.run(make_repo(lambda _: ok(data), requests).list_bake_items())
 
-    assert targets == {5: "round-glasses"}
+    assert targets == {5: BakeItem(5, "MYPC0002", "round thin black glasses")}
     assert (requests[0].method, str(requests[0].url)) == ("GET", f"{BASE}/bake-items")
     assert requests[0].headers["cookie"] == COOKIE
 

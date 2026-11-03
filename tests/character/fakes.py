@@ -1,13 +1,18 @@
+import json
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from app.character.canvas import Layout
+from app.character.engine import BakeItem
 from app.character.repository import CharacterFailure, CharacterJob, CharacterSheets
 from app.core.backend import BackendError
 
 logger = logging.getLogger(__name__)
 
+# Java ITEM 굽기 지시 시드 원본 (docs/design/item-bake-hints.json)
+SEED = Path(__file__).resolve().parents[2] / "docs" / "design" / "item-bake-hints.json"
 _NOT_FOUND = b'{"code":"PIXEL_CHARACTER_NOT_FOUND"}'
 _FAKE_ITEM_SNS = {
     5: "round-glasses",
@@ -37,6 +42,25 @@ _FAKE_ITEM_SNS = {
     113: "purple-denim-jacket",
     114: "teal-puffer-vest",
 }
+
+
+def seed_rows() -> list[dict]:
+    return json.loads(SEED.read_text(encoding="utf-8"))
+
+
+def fake_items() -> dict[int, BakeItem]:
+    """가짜 Java bake-items 응답 : 시드 26개에 가짜 ITEM_SN"""
+    rows = {row["id"]: row for row in seed_rows()}
+    return {
+        sn: BakeItem(sn, rows[key]["regn_cd"], rows[key]["bake_hint"])
+        for sn, key in _FAKE_ITEM_SNS.items()
+    }
+
+
+def fake_item(key: str) -> BakeItem:
+    """시드 id로 가짜 아이템 찾기"""
+    sn = next(sn for sn, name in _FAKE_ITEM_SNS.items() if name == key)
+    return fake_items()[sn]
 
 
 @dataclass
@@ -82,8 +106,18 @@ class FakeCharacterJobRepository:
         self.jobs[char_crt_job_sn].failure = reason
         logger.info("가짜 Java 캐릭터 실패 보고: charCrtJobSn=%d, %s", char_crt_job_sn, reason)
 
-    async def list_bake_items(self) -> dict[int, str]:
-        return dict(_FAKE_ITEM_SNS)
+    async def list_bake_items(self) -> dict[int, BakeItem]:
+        return fake_items()
+
+    async def list_bake_targets(self, item_sn: int) -> list[int]:
+        # 맨몸 시트가 있고 그 아이템을 굽지도 실패하지도 않은 캐릭터
+        return [
+            sn
+            for sn, saved in self.jobs.items()
+            if saved.layout is not None
+            and item_sn not in saved.item_sheets
+            and item_sn not in saved.failed_items
+        ]
 
     async def save_item_sheet(self, pixel_char_sn: int, item_sn: int, sheet: bytes) -> None:
         self.jobs[pixel_char_sn].item_sheets[item_sn] = sheet

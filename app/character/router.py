@@ -5,20 +5,32 @@ from fastapi.responses import JSONResponse
 
 from app.character import service
 from app.character.clients import CharacterClient, get_character_client
-from app.character.repository import CharacterJobRepository, get_character_job_repository
-from app.character.schemas import CharacterCreateResponse, CharacterPreviewRequest
+from app.character.repository import (
+    CharacterJobRepository,
+    get_character_job_repository,
+    get_server_character_repository,
+)
+from app.character.schemas import (
+    ITEM_NM_MAX,
+    CharacterCreateResponse,
+    CharacterPreviewRequest,
+    ItemBakeHintResponse,
+    ItemBakeResponse,
+    ItemTrialRequest,
+)
 from app.character.service import BakeQueue, get_bake_queue
 from app.core import response
-from app.core.auth import require_member, require_requested_with
+from app.core.auth import require_admin, require_member, require_requested_with
 from app.core.config import Settings, get_settings
 from app.core.image import MAX_IMAGE_BYTES
 
-router = APIRouter(prefix="/ai/characters", dependencies=[Depends(require_requested_with)])
+# 캐릭터(/ai/characters)와 관리자 아이템(/ai/items) : 굽기 코드를 같이 써서 한 라우터
+router = APIRouter(prefix="/ai", dependencies=[Depends(require_requested_with)])
 
 
 # 인증 먼저 : 쿠키 없는 요청은 생성기와 무관하게 401
 # 생성기 없으면 업로드 검증 뒤, Java 작업 생성 전에 502
-@router.post("", dependencies=[Depends(require_member)])
+@router.post("/characters", dependencies=[Depends(require_member)])
 async def create_character(
     background_tasks: BackgroundTasks,
     photo: UploadFile,
@@ -44,7 +56,7 @@ async def create_character(
     return response.success(CharacterCreateResponse(char_crt_job_sn=job.char_crt_job_sn), 202)
 
 
-@router.post("/{pixel_char_sn}/preview", dependencies=[Depends(require_member)])
+@router.post("/characters/{pixel_char_sn}/preview", dependencies=[Depends(require_member)])
 async def preview_character(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -63,3 +75,44 @@ async def preview_character(
     background_tasks.add_task(queue.drain)
     message = "아이템을 준비하고 있습니다. 잠시 후 다시 시도해 주세요."
     return response.error("ITEM_BAKING", 409, message, request.url.path)
+
+
+@router.post("/items/bake-hints", dependencies=[Depends(require_admin)])
+async def create_bake_hint(
+    image: UploadFile,
+    regn_cd: Annotated[str, Form(alias="regnCd")],
+    item_nm: Annotated[str, Form(alias="itemNm", min_length=1, max_length=ITEM_NM_MAX)],
+    client: Annotated[CharacterClient | None, Depends(get_character_client)],
+) -> JSONResponse:
+    # 10MB + 1바이트까지만 읽기 : 초과 판정용
+    raw = await image.read(MAX_IMAGE_BYTES + 1)
+    hint = await service.describe_item(client, raw, image.filename or "", regn_cd, item_nm)
+    return response.success(ItemBakeHintResponse(bake_hint=hint))
+
+
+@router.post("/items/trial-preview", dependencies=[Depends(require_admin)])
+async def trial_preview(
+    body: ItemTrialRequest,
+    client: Annotated[CharacterClient | None, Depends(get_character_client)],
+    repo: Annotated[CharacterJobRepository, Depends(get_character_job_repository)],
+) -> Response:
+    image = await service.trial_preview(
+        client, repo, body.pixel_char_sn, body.regn_cd, body.bake_hint
+    )
+    return Response(image, media_type="image/png")
+
+
+@router.post("/items/{item_sn}/bake", dependencies=[Depends(require_admin)])
+async def bake_item(
+    background_tasks: BackgroundTasks,
+    item_sn: int,
+    client: Annotated[CharacterClient | None, Depends(get_character_client)],
+    repo: Annotated[CharacterJobRepository, Depends(get_character_job_repository)],
+    server_repo: Annotated[CharacterJobRepository, Depends(get_server_character_repository)],
+    queue: Annotated[BakeQueue, Depends(get_bake_queue)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> JSONResponse:
+    enabled = settings.character_bake_enabled
+    count = await service.enqueue_item_bake(client, repo, server_repo, queue, item_sn, enabled)
+    background_tasks.add_task(queue.drain)
+    return response.success(ItemBakeResponse(item_sn=item_sn, target_cnt=count), 202)

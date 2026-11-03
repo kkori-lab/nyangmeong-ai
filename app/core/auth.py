@@ -10,6 +10,8 @@ from app.core.response import AppError
 AUTH_CHECK_PATH = "/internal/auth/check"
 REQUESTED_WITH = "XMLHttpRequest"
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+# FN-ADM-001-01 : 관리자 권한 코드
+ADMIN_AUTHORITY = "USRC0005"
 
 
 def require_requested_with(request: Request) -> None:
@@ -26,6 +28,25 @@ async def require_member(
     client: Annotated[httpx2.AsyncClient, Depends(get_backend_client)],
 ) -> int:
     """브라우저 Cookie로 Java /internal/auth/check 호출 -> 회원 번호 (캐시 없음)"""
+    mbr_sn, _ = await _check(request, settings, client)
+    return mbr_sn
+
+
+async def require_admin(
+    request: Request,
+    settings: Annotated[Settings, Depends(get_settings)],
+    client: Annotated[httpx2.AsyncClient, Depends(get_backend_client)],
+) -> int:
+    """관리자만 통과 -> 회원 번호 (권한 판정 값은 Java)"""
+    mbr_sn, authority = await _check(request, settings, client)
+    if authority != ADMIN_AUTHORITY:
+        raise AppError("FORBIDDEN", 403, "접근 권한이 없습니다.")
+    return mbr_sn
+
+
+async def _check(
+    request: Request, settings: Settings, client: httpx2.AsyncClient
+) -> tuple[int, str | None]:
     base_url = settings.backend_base_url.rstrip("/")
     if not base_url:
         raise external_error()
@@ -41,6 +62,8 @@ async def require_member(
     if res.status_code != 200:
         raise external_error()
     try:
-        return int(res.json()["data"]["mbrSn"])
-    except (ValueError, KeyError, TypeError):
+        data = res.json()["data"]
+        authority = data.get("mbrAuthrtCd")
+        return int(data["mbrSn"]), authority if isinstance(authority, str) else None
+    except (ValueError, KeyError, TypeError, AttributeError):
         raise external_error() from None
