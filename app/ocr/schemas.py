@@ -31,6 +31,10 @@ class Section(_Camel):
 
 class ReceiptOcrResponse(_Camel):
     hsptl_nm: str | None = None
+    # FN-MYP-031-03 : 사용처(영수증의 상호), 카테고리 추정(MYPG05). 모든 출처에서 채움
+    expnd_plcus_nm: str | None = None
+    expnd_clsf_cd: str | None = None
+    # 건강 일지는 진료일, 가계부는 결제일
     ckup_ymd: date | None = None
     recpt_amt: int | None = None
     btm_dscnt_amt: int | None = None

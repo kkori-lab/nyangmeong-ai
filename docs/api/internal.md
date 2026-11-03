@@ -47,8 +47,10 @@ Java가 만드는 API다(백엔드 저장소 기준). 키 헤더는 없다. 인�
 쓰는 API: POST /internal/v1/ocr/receipt
 | 필드 | 타입 | 필수 | 검증·설명 | 근거 |
 | --- | --- | --- | --- | --- |
-| hsptlNm | String | N | 병원명 | AIM-009-02 |
-| ckupYmd | LocalDate | N | 검진일 `YYYY-MM-DD`. 연도가 없으면 null(연도 보정은 Java) | AIM-009-02 |
+| hsptlNm | String | N | 병원명. 병원이 아닌 영수증은 null | AIM-009-02 |
+| expndPlcusNm | String | N | 사용처. 영수증에 찍힌 가게 이름(상호), 앞 80자. 모든 출처에서 채운다(2026-11-03 추가, 백엔드 PR과 함께) | MYP-031-03, EXPND.EXPND_PLCUS_NM |
+| expndClsfCd | String | N | 상호·품목에서 추정한 지출 카테고리(MYPG05 7종). 불확실하면 null. 모든 출처에서 채운다(2026-11-03 추가, 백엔드 PR과 함께) | MYP-031-03, EXPND.EXPND_CLSF_CD |
+| ckupYmd | LocalDate | N | 검진일(건강 일지)·결제일(가계부) `YYYY-MM-DD`. 연도가 없으면 null(연도 보정은 Java) | AIM-009-02, MYP-031-04 |
 | recptAmt | Long | N | 최종 결제 금액(할인 후) | AIM-009-02 |
 | btmDscntAmt | Long | N | 영수증 하단에만 찍힌 할인 합계. 배분은 Java | AIM-009-20 |
 | sections | List<Section> | Y | 반려동물 구역. 구역 없는 영수증은 `sectionNm` null인 구역 1개 | AIM-009-16 |

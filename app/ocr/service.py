@@ -9,8 +9,9 @@ from app.ocr.clients import OcrApiError, OcrClient
 from app.ocr.repository import ReceiptRepository, ReceiptStatus
 from app.ocr.schemas import ReceiptAnalyzeResponse, ReceiptOcrResponse
 
-# 요청 출처(AIMG07) : 건강 일지, AI 대화창(SCR-AIM-013), 가계부(AIMC0027) 제외
-SOURCE_CODES = frozenset({"AIMC0026", "AIMC0031"})
+# 요청 출처(AIMG07) : 건강 일지, 가계부(SCR-MYP-031), AI 대화창(SCR-AIM-013)
+EXPENSE_SOURCE_CODE = "AIMC0027"
+SOURCE_CODES = frozenset({"AIMC0026", EXPENSE_SOURCE_CODE, "AIMC0031"})
 # 연결 끊김(취소) 확인 간격(초)
 DISCONNECT_POLL_SEC = 0.5
 
@@ -35,8 +36,9 @@ async def recognize_receipt(
         raise _api_error() from None
 
 
-def validate_source(src_cd: str) -> None:
-    if src_cd not in SOURCE_CODES:
+def validate_source(src_cd: str, pet_sn: int | None) -> None:
+    # FN-MYP-031-05 : 가계부는 반려동물을 확인 모달에서 고르므로 petSn 생략 가능
+    if src_cd not in SOURCE_CODES or (pet_sn is None and src_cd != EXPENSE_SOURCE_CODE):
         raise AppError("INVALID_REQUEST", 400, "요청 값이 올바르지 않습니다.")
 
 
@@ -46,12 +48,12 @@ async def analyze_receipt(
     mbr_sn: int,
     image: bytes,
     file_name: str,
-    pet_sn: int,
+    pet_sn: int | None,
     src_cd: str,
     timeout_sec: float,
     is_disconnected: Callable[[], Awaitable[bool]],
 ) -> ReceiptAnalyzeResponse:
-    validate_source(src_cd)
+    validate_source(src_cd, pet_sn)
     validate_upload(image, file_name)
     # FN-AIM-008-06·013-04 : 같은 회원의 중복 요청 차단
     if mbr_sn in _in_progress:
@@ -113,7 +115,14 @@ async def _wait_disconnect(is_disconnected: Callable[[], Awaitable[bool]]) -> No
 
 
 def _is_empty(result: ReceiptOcrResponse) -> bool:
-    top = (result.hsptl_nm, result.ckup_ymd, result.recpt_amt, result.btm_dscnt_amt)
+    top = (
+        result.hsptl_nm,
+        result.expnd_plcus_nm,
+        result.expnd_clsf_cd,
+        result.ckup_ymd,
+        result.recpt_amt,
+        result.btm_dscnt_amt,
+    )
     sections = (
         (s.section_nm, s.sbttl_amt, s.dscnt_amt, s.items or None, s.drugs or None)
         for s in result.sections

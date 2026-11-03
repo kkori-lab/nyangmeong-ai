@@ -59,7 +59,15 @@ def test_응답이_ReceiptOcrResponse_모양이다(client: TestClient) -> None:
     assert response.status_code == 200
     assert body["status"] == "success"
     data = body["data"]
-    assert set(data) == {"hsptlNm", "ckupYmd", "recptAmt", "btmDscntAmt", "sections"}
+    assert set(data) == {
+        "hsptlNm",
+        "expndPlcusNm",
+        "expndClsfCd",
+        "ckupYmd",
+        "recptAmt",
+        "btmDscntAmt",
+        "sections",
+    }
     assert data["ckupYmd"] == "2026-10-20"
     # 읽지 못한 값 = null 유지
     assert data["btmDscntAmt"] is None

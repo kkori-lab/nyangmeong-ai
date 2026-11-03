@@ -31,11 +31,12 @@ async def analyze_receipt(
     request: Request,
     mbr_sn: Annotated[int, Depends(require_member)],
     file: UploadFile,
-    pet_sn: Annotated[int, Form(alias="petSn")],
     src_cd: Annotated[str, Form(alias="ocrRqstSrcCd")],
     client: Annotated[OcrClient, Depends(get_ocr_client)],
     repo: Annotated[ReceiptRepository, Depends(get_receipt_repository)],
     settings: Annotated[Settings, Depends(get_settings)],
+    # FN-MYP-031-05 : 가계부 출처만 생략 가능 (서비스에서 검사)
+    pet_sn: Annotated[int | None, Form(alias="petSn")] = None,
 ) -> JSONResponse:
     # 10MB + 1바이트까지만 읽기 : 초과 판정용
     image = await file.read(MAX_IMAGE_BYTES + 1)

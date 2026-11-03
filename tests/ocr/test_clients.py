@@ -121,6 +121,58 @@ def test_Vision_글자를_LLM이_ReceiptOcrResponse로_정리한다() -> None:
     assert llm.requests[0]["messages"][0]["content"] == RECEIPT_TEXT
 
 
+PETSHOP_TEXT = "멍멍펫샵 강남점\n2026-10-21\n프리미엄 사료 2kg 32,000\n합계 32,000"
+PETSHOP = {
+    "hsptl_nm": None,
+    "plcus_nm": "멍멍펫샵 강남점",
+    "category": "사료",
+    "ckup_ymd": "2026-10-21",
+    "recpt_amt": 32000,
+    "btm_dscnt_amt": None,
+    "sections": [{"sectionNm": None, "items": [{"itemNm": "프리미엄 사료 2kg", "itemAmt": 32000}]}],
+}
+
+
+# FN-MYP-031-03 : 사용처·카테고리 추정
+
+
+def test_펫샵_영수증은_사용처와_카테고리_코드를_채운다() -> None:
+    result = recognize(FakeVision(vision_ok(PETSHOP_TEXT)), llm_replying(json.dumps(PETSHOP)))
+
+    assert result.hsptl_nm is None
+    assert result.expnd_plcus_nm == "멍멍펫샵 강남점"
+    assert result.expnd_clsf_cd == "MYPC0013"
+    assert result.ckup_ymd == date(2026, 10, 21)
+    assert result.recpt_amt == 32000
+
+
+def test_병원_영수증은_병원명과_사용처를_함께_채운다() -> None:
+    structured = {**STRUCTURED, "plcus_nm": "냥멍동물병원", "category": "병원"}
+    result = recognize(FakeVision(vision_ok(RECEIPT_TEXT)), llm_replying(json.dumps(structured)))
+
+    assert (result.hsptl_nm, result.expnd_plcus_nm) == ("냥멍동물병원", "냥멍동물병원")
+    assert result.expnd_clsf_cd == "MYPC0012"
+    assert result.sections[0].drugs[0].mdcn_nm == "소염제"
+
+
+def test_80자를_넘는_사용처는_앞_80자로_자른다() -> None:
+    llm = llm_replying(json.dumps({**PETSHOP, "plcus_nm": "가" * 81}))
+    result = recognize(FakeVision(vision_ok(PETSHOP_TEXT)), llm)
+
+    assert result.expnd_plcus_nm == "가" * 80
+
+
+@pytest.mark.parametrize("category", ["장난감", "", None])
+def test_7종_밖이거나_없는_카테고리는_null(category) -> None:
+    llm = llm_replying(json.dumps({**PETSHOP, "category": category}))
+    assert recognize(FakeVision(vision_ok(PETSHOP_TEXT)), llm).expnd_clsf_cd is None
+
+
+def test_사용처가_공백이면_null() -> None:
+    llm = llm_replying(json.dumps({**PETSHOP, "plcus_nm": "  "}))
+    assert recognize(FakeVision(vision_ok(PETSHOP_TEXT)), llm).expnd_plcus_nm is None
+
+
 def test_날짜를_읽지_못하면_null() -> None:
     llm = llm_replying(json.dumps({**STRUCTURED, "ckup_ymd": "10-20"}))
     assert recognize(FakeVision(vision_ok(RECEIPT_TEXT)), llm).ckup_ymd is None

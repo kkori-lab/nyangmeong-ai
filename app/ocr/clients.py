@@ -22,6 +22,18 @@ VISION_URL = "https://vision.googleapis.com/v1/images:annotate"
 # 품목이 많은 영수증도 담기게. thinking 토큰도 이 안에서 쓴다
 LLM_MAX_TOKENS = 8192
 LLM_EFFORT = "low"
+# FN-MYP-031-03 : 사용처 최대 길이 (EXPND.EXPND_PLCUS_NM varchar(80))
+PLACE_MAX_LENGTH = 80
+# 지출 카테고리(MYPG05) : LLM이 고른 이름 -> 코드, 목록 밖은 null
+EXPENSE_CATEGORY_CODES = {
+    "병원": "MYPC0012",
+    "사료": "MYPC0013",
+    "간식": "MYPC0014",
+    "용품": "MYPC0015",
+    "미용": "MYPC0016",
+    "돌봄": "MYPC0017",
+    "기타": "MYPC0018",
+}
 
 
 class OcrApiError(Exception):
@@ -34,17 +46,26 @@ class OcrClient(Protocol):
 
 class ReceiptOutput(BaseModel):
     # 구조화 출력 모양 : 못 읽은 값은 null, 날짜는 YYYY-MM-DD 문자열
-    hsptl_nm: str | None = None
-    ckup_ymd: str | None = None
-    recpt_amt: int | None = None
-    btm_dscnt_amt: int | None = None
-    sections: list[Section] = []
+    # 기본값 있는 필드(선택 항목)가 많으면 API가 400 "Schema is too complex"로 거절한다
+    # (2026-11-03 실측). 기존 최상위 필드는 기본값 없이 두어 선택 항목 수를 줄인다
+    hsptl_nm: str | None
+    plcus_nm: str | None = None
+    category: str | None = None
+    ckup_ymd: str | None
+    recpt_amt: int | None
+    btm_dscnt_amt: int | None
+    sections: list[Section]
 
 
 STRUCTURE_SYSTEM = (
-    "동물병원 영수증·약봉투를 OCR로 읽은 글자를 받아 항목으로 정리한다. "
+    "반려동물 관련 영수증(동물병원·펫샵·마트 등)·약봉투를 OCR로 읽은 글자를 받아 "
+    "항목으로 정리한다. "
     "글자에 없는 값은 지어내지 않고 null로 둔다. 금액은 원 단위 정수(쉼표·'원' 제거).\n"
-    "hsptl_nm: 병원명. ckup_ymd: 진료일 YYYY-MM-DD, 연도가 없으면 null. "
+    "hsptl_nm: 동물병원 영수증이면 병원명, 병원이 아니면 null. "
+    "plcus_nm: 영수증에 찍힌 가게 이름(상호), 병원이면 병원명과 같다. "
+    "category: 상호·품목으로 본 지출 종류, 병원·사료·간식·용품·미용·돌봄·기타 중 하나. "
+    "확실하지 않으면 null.\n"
+    "ckup_ymd: 진료일 또는 결제일 YYYY-MM-DD, 연도가 없으면 null. "
     "recpt_amt: 최종 결제 금액(할인 후). btm_dscnt_amt: 영수증 하단에만 찍힌 할인 합계.\n"
     "같은 할인을 btm_dscnt_amt와 dscntAmt에 겹쳐 넣지 않는다. 하단 합계 부분의 할인은 "
     "btm_dscnt_amt에만, 반려동물 구역 안에 찍힌 할인만 dscntAmt에 둔다.\n"
@@ -160,11 +181,20 @@ class GoogleVisionOcrClient:
         )
         return ReceiptOcrResponse(
             hsptl_nm=output.hsptl_nm,
+            expnd_plcus_nm=_place(output.plcus_nm),
+            expnd_clsf_cd=EXPENSE_CATEGORY_CODES.get(output.category or ""),
             ckup_ymd=_parse_date(output.ckup_ymd),
             recpt_amt=output.recpt_amt,
             btm_dscnt_amt=output.btm_dscnt_amt,
             sections=output.sections,
         )
+
+
+def _place(value: str | None) -> str | None:
+    # FN-MYP-031-03 : 80자를 넘으면 앞 80자
+    if value is None or not value.strip():
+        return None
+    return value.strip()[:PLACE_MAX_LENGTH]
 
 
 def _elapsed(started: float) -> float:
