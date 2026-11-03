@@ -20,7 +20,17 @@ PROMPTS = Path(__file__).resolve().parent / "prompts"
 STYLE_REF = PROMPTS / "style_ref.png"
 _PROMPT_FILES = {"dog": "chibi_poses.txt", "cat": "chibi_poses_cat.txt"}
 _WEAR_PROMPT = PROMPTS / "chibi_wear.txt"
-_ITEMS = PROMPTS / "items.json"
+_ITEM_HINT_PROMPT = PROMPTS / "item_hint.txt"
+# FN-ADM-070-02 : 굽는 부위 (신발 MYPC0006 제외)
+_ITEM_SLOT_TEXT = {
+    "MYPC0001": "on the head",
+    "MYPC0002": "on the face",
+    "MYPC0003": "around the neck",
+    "MYPC0004": "on the torso",
+    "MYPC0005": "as a bag",
+}
+BAKE_REGIONS = frozenset(_ITEM_SLOT_TEXT)
+BAKE_HINT_MAX = 150
 # 부위별 착용 지시 : 엔진 CHIBI_WEAR_SLOT. 머리 착용 컷은 합성 바탕이라 귀까지 지시로 가림
 _WEAR_SLOT = {
     "MYPC0001": "ONE {hint} on its head in all four figures, pulled down over the ears so "
@@ -108,7 +118,9 @@ class Cut:
 
 @dataclass(frozen=True)
 class BakeItem:
-    item_id: str
+    """FN-MYP-011-01 : Java ITEM의 굽기 대상 (지시 문장은 관리자 등록값)"""
+
+    item_sn: int
     regn_cd: str
     bake_hint: str
 
@@ -126,6 +138,19 @@ def normalize_photo(raw: bytes) -> bytes:
     image.thumbnail((PHOTO_LONG_EDGE, PHOTO_LONG_EDGE), Image.LANCZOS)
     buffer = io.BytesIO()
     image.save(buffer, "PNG", optimize=True)
+    return buffer.getvalue()
+
+
+def normalize_item_image(raw: bytes) -> bytes:
+    """FN-ADM-070-02 : 투명 배경은 흰 바탕, 크기 제한 PNG"""
+    image = Image.open(io.BytesIO(raw))
+    image.load()
+    image = ImageOps.exif_transpose(image).convert("RGBA")
+    flat = Image.new("RGB", image.size, (255, 255, 255))
+    flat.paste(image, mask=image.getchannel("A"))
+    flat.thumbnail((PHOTO_LONG_EDGE, PHOTO_LONG_EDGE), Image.LANCZOS)
+    buffer = io.BytesIO()
+    flat.save(buffer, "PNG", optimize=True)
     return buffer.getvalue()
 
 
@@ -306,14 +331,25 @@ def stand_front_cut(sheet_png: bytes) -> Cut:
     return Cut(_crop(rgb, blob), int(xs.min()), int(ys.min()))
 
 
-def load_items() -> dict[str, BakeItem]:
-    """FN-MYP-011-01 : 굽기 대상 아이템 (키는 ITEM과 잇는 엔진 아이템 id)"""
-    rows = json.loads(_ITEMS.read_text(encoding="utf-8"))
-    return {row["id"]: BakeItem(row["id"], row["regn_cd"], row["bake_hint"]) for row in rows}
-
-
 def build_wear_prompt(species: str, item: BakeItem) -> str:
     # 지시 문장의 dog : 강아지 기준으로 쓴 아이템의 종 치환
     hint = item.bake_hint.replace("dog", species)
     wear = _WEAR_SLOT.get(item.regn_cd, "{hint}").format(hint=hint)
     return _WEAR_PROMPT.read_text(encoding="utf-8").format(species=species, wear=wear)
+
+
+def item_hint_question(regn_cd: str, item_nm: str) -> str:
+    return _ITEM_HINT_PROMPT.read_text(encoding="utf-8").format(
+        item_nm=item_nm, slot=_ITEM_SLOT_TEXT[regn_cd]
+    )
+
+
+def parse_bake_hint(answer: str) -> str | None:
+    """비전 답변 첫 줄 -> 굽기 지시 (비거나 너무 길면 None)"""
+    lines = [line.strip() for line in answer.strip().splitlines() if line.strip()]
+    if not lines:
+        return None
+    hint = lines[0].lstrip("-* ").strip().strip("\"'`").rstrip(".").strip()
+    if not hint or len(hint) > BAKE_HINT_MAX:
+        return None
+    return hint

@@ -31,7 +31,7 @@ _WITH_RESULT = frozenset({ReceiptStatus.RECOGNIZED, ReceiptStatus.UNRECOGNIZED})
 
 class ReceiptRepository(Protocol):
     async def save_original(
-        self, image: bytes, file_name: str, pet_sn: int, src_cd: str
+        self, image: bytes, file_name: str, pet_sn: int | None, src_cd: str
     ) -> int: ...
 
     async def report_result(
@@ -54,9 +54,16 @@ class JavaReceiptRepository:
         if cookie:
             self._headers["Cookie"] = cookie
 
-    async def save_original(self, image: bytes, file_name: str, pet_sn: int, src_cd: str) -> int:
+    async def save_original(
+        self, image: bytes, file_name: str, pet_sn: int | None, src_cd: str
+    ) -> int:
         # FN-AIM-008-09·010-06·013-08 : Java가 원본 파일과 RECPT(분석중) 생성
         content_type = f"image/{detect_image_type(image)}"
+        # Python 요청의 ocrRqstSrcCd -> Java 이름 ocrDmndSrcCd
+        form = {"ocrDmndSrcCd": src_cd}
+        # FN-MYP-031-05 : 가계부 출처는 반려동물 없이 저장
+        if pet_sn is not None:
+            form["petSn"] = str(pet_sn)
         data = await call_backend(
             self._client,
             self._settings,
@@ -64,8 +71,7 @@ class JavaReceiptRepository:
             RECEIPTS_PATH,
             headers=self._headers,
             files={"file": (file_name, image, content_type)},
-            # Python 요청의 ocrRqstSrcCd -> Java 이름 ocrDmndSrcCd
-            data={"petSn": str(pet_sn), "ocrDmndSrcCd": src_cd},
+            data=form,
         )
         try:
             return _OriginalResponse.model_validate(data).recpt_sn

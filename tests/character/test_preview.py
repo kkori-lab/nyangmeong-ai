@@ -29,11 +29,11 @@ def fake_auth_check(request: httpx2.Request) -> httpx2.Response:
 
 class BakeClient:
     def __init__(self) -> None:
-        self.calls: list[str] = []
+        self.calls: list[int] = []
         self.error = False
 
     async def bake(self, bare: bytes, pet_se_cd, item: engine.BakeItem) -> bytes:
-        self.calls.append(item.item_id)
+        self.calls.append(item.item_sn)
         if self.error:
             raise CharacterApiError
         return sheet(body=True)
@@ -109,7 +109,7 @@ def test_preview_굽기가_켜져_있으면_409_뒤_구워_둔다(baking, genera
     res = post(baking, [SWEATER])
     assert res.status_code == 409
     assert res.json()["code"] == "ITEM_BAKING"
-    assert generator.calls == ["green-sweater"]
+    assert generator.calls == [SWEATER]
     assert post(baking, [SWEATER]).status_code == 200
 
 

@@ -9,7 +9,7 @@ class SavedReceipt:
     recpt_sn: int
     image: bytes
     file_name: str
-    pet_sn: int
+    pet_sn: int | None
     src_cd: str
     status: ReceiptStatus | None = None
     result: ReceiptOcrResponse | None = None
@@ -22,7 +22,9 @@ class FakeReceiptRepository:
         self.receipts: dict[int, SavedReceipt] = {}
         self._next = 1
 
-    async def save_original(self, image: bytes, file_name: str, pet_sn: int, src_cd: str) -> int:
+    async def save_original(
+        self, image: bytes, file_name: str, pet_sn: int | None, src_cd: str
+    ) -> int:
         recpt_sn = self._next
         self._next += 1
         self.receipts[recpt_sn] = SavedReceipt(recpt_sn, image, file_name, pet_sn, src_cd)

@@ -69,6 +69,17 @@ def test_원본은_multipart로_Java에_저장하고_recptSn을_받는다() -> N
     assert b"ocrRqstSrcCd" not in body
 
 
+def test_petSn이_없으면_Java에_petSn을_보내지_않는다() -> None:
+    # FN-MYP-031-05 : 가계부 출처는 반려동물 없이 원본 저장
+    stub = JavaStub()
+
+    asyncio.run(_repo(stub).save_original(PNG, "r.png", None, "AIMC0027"))
+
+    body = stub.requests[0].read()
+    assert b'name="petSn"' not in body
+    assert b'name="ocrDmndSrcCd"\r\n\r\nAIMC0027\r\n' in body
+
+
 def test_쿠키가_없으면_Cookie_헤더를_보내지_않는다() -> None:
     stub = JavaStub()
 

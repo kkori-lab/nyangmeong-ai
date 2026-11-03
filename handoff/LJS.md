@@ -1,25 +1,28 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-MYP-011 아이템 상점 모달 (캐릭터 작업·시트 Java 연결, SCR-MYP-010 공통) — 끝 (검증 `확인 못 함 있음`=연결만 남음, 로컬 Java 연동 확인, 사람 확인 2026-11-02)
-- `FakeCharacterJobRepository`를 `JavaCharacterJobRepository`로 교체(`/internal/ai/characters/**` 8개, 모두 쿠키). 작업 번호 이름 `charCrtJobSn`. 가짜는 `tests/character/fakes.py`
-- 로컬 확인: 생성 202 → Java 완료, 맨몸 시트·배치값 저장, `/preview` 512 PNG, 재시작 뒤 같은 md5, 다른 회원 403 `PET_ACCESS_DENIED`
-
-### 추가 요청
-- 추가-1 굽기 동시 호출 13 / 추가-2 내부 API 8개 모두 쿠키 전송(backend-67 제안에 사람이 "쿠키로 진행")
+SCR-MYP-031 가계부 등록/수정 · 영수증 OCR 인식 (가계부 출처·사용처) — 끝 (2026-11-03). `/ai/receipts`가 가계부 출처 `AIMC0027`(petSn 생략 가능)을 받고, 인식 결과에 사용처 `expndPlcusNm`·카테고리 `expndClsfCd`를 더했다. 실제 영수증 5장(동물병원 3·펫샵·마트)으로 확인. Java·프론트 연결은 남음
 
 ## 다음에 할 것
+- 연결 남음: FN-MYP-031-05·03 Java 백엔드 PR (LJS 백엔드, AI 계약 변경과 같은 때 병합): ① `ReceiptService.create`가 `CHAT` 말고는 모두 `HEALTH`로 저장 → `ReceiptSource.EXPENSE` 분기 ② 가계부 출처는 `petAuthorizer.checkCaregiver` 건너뜀·`ReceiptOriginalRequest` `petSn` 선택·`ocrDmndSrcCd`에 `AIMC0027` ③ `global.external.ReceiptOcrResponse`에 `expndPlcusNm`·`expndClsfCd`(없으면 Jackson이 버려 `OCR_RSPNS_JSON`에서 조용히 빠짐) ④ `ReceiptOcrConverter.classify` 가계부 판정: 머리 값에 `expndPlcusNm`, 가계부 출처의 완전 인식은 `hsptlNm` 대신 `expndPlcusNm`, 품목 0개(펫월드 영수증 실측)도 부분 인식이 되지 않게
+- 연결 남음: FN-MYP-031-03·05 프론트 가계부 (SJM): `src/features/expense/api.js` `recognizeReceipt` 가짜(`POST /receipts/recognize`) → `POST /ai/receipts`(form `ocrRqstSrcCd=AIMC0027`, `petSn` 없음). 응답 `data.ocr`의 `ckupYmd`·`recptAmt`를 `expndYmd`·`expndAmt`로, `expndPlcusNm`·`expndClsfCd`는 그대로. 0건은 값이 모두 null인 200, 504 `OCR_TIMEOUT`·502 `OCR_API_ERROR`는 "영수증을 읽지 못했어요"
+- OCR 출력 모양(`app/ocr/clients.py` `ReceiptOutput`)에 필드를 더하면 Anthropic API가 400 "Schema is too complex"로 거절할 수 있다(2026-11-03 실측: 기본값 있는 필드 2개 추가로 모든 인식 실패, 가짜 LLM 테스트로는 안 잡힘). 필드를 더하면 실제 영수증으로 한 번 돌려 본다 (LJS)
+- 개발 DB 정리: 2026-11-03 검증이 회원 1·반려동물 2의 RECPT 501·502와 원본 파일을 남겼다. 필요하면 지운다 (LJS 백엔드)
+- 전체 굽기 재설계 (FN-ADM-070-02, 맨 먼저): 2026-11-03 백엔드(사람) 결정으로 시트 내부 API 4개(sheets·sheet-files·PUT item-sheets·POST item-sheets/failure)는 쿠키 인증만 받는다. 지금 `POST /ai/items/{itemSn}/bake`의 쿠키 없는 저장소(`get_server_character_repository`)는 운영에서 401로 전부 건너뛴다. 토큰 30분 만료·남의 캐릭터 시트를 쿠키 전제에서 푸는 방식을 정해 백엔드에 계약 제안. 후보: 관리자 쿠키로 남의 캐릭터 시트 읽기·쓰기 허용 + 관리자 화면이 페이지 단위로 여러 번 호출(요청 하나가 토큰 수명 안에 끝나는 크기) (LJS)
+- 연결 남음: FN-MYP-011-01·FN-ADM-070-02 실제 Java 굽기 계약: 백엔드 PR #120(develop 대상, 2026-11-03 병합 전)에 `bake-items` `{itemSn, regnCd, bakeHint}`(판매 중·지시 있음, 시드 30개), `GET /internal/ai/items/{itemSn}/bake-targets?page=`(0부터, 100개, 관리자 쿠키만, 403 `ADMIN_ONLY`·404 `ITEM_NOT_FOUND`), 관리자 등록·수정 `bakeHint`(300자, 신발은 400, 바뀌면 그 아이템 시트 삭제). 공용 DB v0.12 (3) 적용됨. 병합 순서: 백엔드 #120 먼저 → AI `LJS` PR. AI 쪽 `bake-targets` 연결은 위 "전체 굽기 재설계"와 함께. 곰돌이 후드티 지시는 hood down으로 고치자고 backend-95에 답함
+- 연결 남음: FN-ADM-070-02 관리자 프론트 아이템 등록 화면에 [굽기 지시 만들기](`POST /ai/items/bake-hints`)·[시험해 보기](`POST /ai/items/trial-preview`)·등록 성공 뒤 `POST /ai/items/{itemSn}/bake` 호출 (관리자 프론트)
+- 로컬 시험 데이터: 관리자 mbrSn 2의 반려동물 petSn 1001 "시험복실"·캐릭터 pixelCharSn 601 (시험 굽기용, 2026-11-03)
+- 결정 남음: `bake-hints`의 그림 형식·10MB 오류는 `/ai/characters`와 같은 `FILE_TYPE_NOT_ALLOWED`·`FILE_SIZE_EXCEEDED`로 했다(기획은 `INVALID_REQUEST`) (LJS)
 - 병합 순서: 백엔드 PR #105(`d73ca54`, 캐릭터 내부 API 포함) 먼저 → 병합 직후 공용 DB v0.12 적용(사람) → AI `LJS` PR. 순서가 바뀌면 캐릭터 생성 502 (LJS)
 - 옛 흐름으로 만든 캐릭터는 맨몸 시트가 없어 `/preview`가 404 `PIXEL_CHARACTER_NOT_FOUND`다. 다시 만들어야 한다. 무료 재생성(FN-MYP-010-23)은 사진이 Java로 오지 않아 SCR-ADM-042 전에 계약을 정한다 (LJS 백엔드)
-- 아이템을 입힌 미리보기와 굽기는 실제 Java로 확인하지 않았다(굽기 꺼짐). Java 시드는 엔진 키가 14개뿐이라 나머지 12개는 400 `INVALID_REQUEST` (LJS)
 - 문서: `docs/design/pixel-character-engine.md`에 `chrcJobSn`·`FakeCharacterJobRepository` 옛 설명이 남아 있다 (LJS)
 - 하네스 수정 PR 후보(공용): `verify-loop.sh guard`가 읽기 전용 비교(`git diff --no-index`)까지 막아 verify 절차와 어긋난다
 - 굽기·합성 최적화: 굽기 26개 실측 1회 104.2초(동시 10, 아이템당 31.5~37.0초, 재시도 없음). 동시 13으로 올린 값은 미측정. 합성 1.4초는 시험 그림 값. 후보는 전용 스레드 풀(기본 풀은 CPU+4라 코어 9개 미만 서버에서 13이 안 나온다), 429 대기 후 재시도, OpenAI 계정 한도 확인, 이미지 품질 `low` (LJS)
 - 고양이 꼬리 경계선·다리 사이 분홍 점: 원인 미확인(착용 지시 변경의 영향 포함). 정렬 2단계 탐색은 촘촘한 무늬에서 빗나갈 수 있고 그림체 샘플 1장으로만 확인 (LJS)
 - 테스트 보강: 겹침 순서 테스트(`test_render_얼굴은_의상_위에_겹친다`)가 순서를 증명하지 못한다, `OpenAICharacterClient._bake` 저장소 테스트 없음 (LJS)
-- 문서: `docs/design/pixel-character-engine.md` 6번 부위 표가 5부위 결정 전 내용, `docs/convention/milestone.md` 담당 표가 "SCR-MYP-010만" (LJS)
+- 문서: `docs/design/pixel-character-engine.md` 6번 부위 표가 5부위 결정 전 내용, `docs/convention/milestone.md` 담당 표에 SCR-MYP-011·ADM-070이 없다 (LJS)
 - 굽기 켜기: 팀 비용 결정(26개 기준 캐릭터당 약 $1.64), Java 시트 저장 연결 뒤. 켜기 전 access_token(30분) 만료 대책을 정한다: 만료 뒤 아이템은 비용을 내고도 저장·실패 표시가 안 되어 "안 구운 아이템"으로 남고, 성공 보고 401이면 결과를 잃고 작업은 시간 초과 실패가 된다 (LJS)
-- 백엔드(LJS): `ITEM`에 엔진 아이템 키 컬럼 추가, 시드 아이템을 엔진 14개에 맞출지 결정. 신발을 안 넣기로 해서 공통코드 `MYPC0006`과 시드 신발 4개는 정리 대상이다(공통코드는 DB에서만 고친다) (LJS)
+- 백엔드(LJS): 신발을 안 넣기로 해서 공통코드 `MYPC0006`과 시드 신발 4개는 정리 대상이다(공통코드는 DB에서만 고친다) (LJS)
 - DMS 모음: FN-MYP-010-13 겹침 순서(캐릭터 → 의상 → … → 머리장식) vs 합성 순서(머리 착용 바탕 위에 의상) (LJS)
 - DMS 모음: FN-MYP-010-13 "고정 좌표로 겹쳐 표시" vs 서버 합성, FN-MYP-010-17 "기준 좌표 고정" vs 상단 보정(눈 y가 캐릭터마다 다를 수 있음), 얼굴 영역 값 변경 (LJS)
 - 눈 찾기 위험: `dog_fluffy` 512 재검출이 눈이 아닌 쌍을 잡았다. 실제 배치 경로에서는 샘플 10건 모두 맞았으나, 틀리면 규격을 통과한 채 조용히 어긋난다. 검은 털은 하이라이트 기준이라 눈 높이가 몇 px 다를 수 있고 측정하지 않았다 (LJS)
@@ -49,3 +52,4 @@ SCR-MYP-011 아이템 상점 모달 (캐릭터 작업·시트 Java 연결, SCR-M
 - 하네스 수정 PR 후보(공용): `verify-collect.sh:18` `cut -c8-` 멀티바이트 문제, `start-check.sh` 수정분, macOS BSD `sed`(`milestone-status.sh`·`impl-check.sh`·`api-row.sh`. `sed -i`가 실패해도 두 스크립트 모두 종료 코드 0이고 `impl-check.sh`는 "바꿈:"까지 출력한다, 2026-10-28 실측), `verify-collect.sh:37-38` `case` 문법, `impl-check.sh:18`이 "질문" 글자가 든 줄(제목 "검색 질문/응답" 등)을 모두 질문으로 읽음
 - `docs/api/internal.md` OCR mock은 고정 응답 1개(Java `FakeOcrClient` 시나리오 미구현). 필요해지면 구현
 - 이 PC는 애플리케이션 제어 정책이 `.venv\Scripts\*.exe`(uvicorn 등)를 막는다. `uv run python -m uvicorn ...`으로 띄운다
+- AI 없는 아이템 얹기 시험(2026-11-03 사람 결정: AI 굽기 연결 뒤 마지막에): 얼굴·목 아이템을 도트 변환(`pixelize`) + 눈·목 기준점으로 얹어(`place_face`·`place_neck`, `app/character/overlay.py`) 샘플 2~3마리 × 안경 2·목걸이 2를 `scripts/overlay-trial.py` 모음 그림으로 사람이 판정. 앱·API 변경 없음, 샘플은 git 제외 (LJS)

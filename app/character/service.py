@@ -3,7 +3,7 @@ import logging
 import time
 from collections import deque
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from app.character import bake, compose, engine
 from app.character.clients import CharacterApiError, CharacterClient, CharacterRequest
@@ -33,8 +33,9 @@ class BakeTask:
     pixel_char_sn: int
     item_sn: int
     item: engine.BakeItem
-    sheet: bytes
-    pet_se_cd: PetSeCd
+    # 전체 굽기 : 없으면 꺼낼 때 Java에서 받음 (캐릭터 수만큼 메모리에 올리지 않음)
+    sheet: bytes | None
+    pet_se_cd: PetSeCd | None
 
     @property
     def key(self) -> tuple[int, int]:
@@ -152,23 +153,29 @@ async def _tasks(
     sheet: bytes,
     pet_se_cd: PetSeCd,
 ) -> list[BakeTask]:
-    items = engine.load_items()
     targets = await repo.list_bake_items()
     return [
-        BakeTask(client, repo, pixel_char_sn, item_sn, items[item_id], sheet, pet_se_cd)
-        for item_sn, item_id in targets.items()
-        if item_id in items
+        BakeTask(client, repo, pixel_char_sn, item_sn, item, sheet, pet_se_cd)
+        for item_sn, item in targets.items()
     ]
 
 
 async def _bake_one(task: BakeTask) -> None:
     # 저장 실패는 다시 굽지 않음 : 이미 낸 비용
+    if task.sheet is None or task.pet_se_cd is None:
+        try:
+            found = await task.repo.find_sheets(task.pixel_char_sn, [])
+        except Exception:
+            logger.exception("굽기용 맨몸 시트 조회 실패: %d", task.pixel_char_sn)
+            return
+        task = replace(task, sheet=found.sheet, pet_se_cd=found.pet_se_cd)
     started = time.perf_counter()
     worn, attempts = await _draw(task)
     seconds = time.perf_counter() - started
     logger.info(
-        "굽기 시간: %s, %.1f초, %d회 시도, %s",
-        task.item.item_id,
+        "굽기 시간: pixelCharSn=%d, itemSn=%d, %.1f초, %d회 시도, %s",
+        task.pixel_char_sn,
+        task.item_sn,
         seconds,
         attempts,
         "실패" if worn is None else "성공",
@@ -183,16 +190,25 @@ async def _bake_one(task: BakeTask) -> None:
 
 
 async def _draw(task: BakeTask) -> tuple[bytes | None, int]:
+    sheet, pet_se_cd = task.sheet, task.pet_se_cd
+    if sheet is None or pet_se_cd is None:
+        return None, 0
     for attempt in range(1, BAKE_ATTEMPTS + 1):
         try:
-            source = await asyncio.to_thread(bake.bake_source, task.sheet, task.item.regn_cd)
-            worn = await task.client.bake(source, task.pet_se_cd, task.item)
-            await asyncio.to_thread(bake.validate, task.sheet, worn, task.item.regn_cd)
-            return worn, attempt
+            return await _bake_once(task.client, sheet, pet_se_cd, task.item), attempt
         except Exception as exc:
             # 큐 일꾼 유지 : 한 아이템 실패가 나머지 굽기를 막지 않게
-            logger.warning("굽기 시도 실패: %s, %s", task.item.item_id, type(exc).__name__)
+            logger.warning("굽기 시도 실패: itemSn=%d, %s", task.item_sn, type(exc).__name__)
     return None, BAKE_ATTEMPTS
+
+
+async def _bake_once(
+    client: CharacterClient, sheet: bytes, pet_se_cd: PetSeCd, item: engine.BakeItem
+) -> bytes:
+    source = await asyncio.to_thread(bake.bake_source, sheet, item.regn_cd)
+    worn = await client.bake(source, pet_se_cd, item)
+    await asyncio.to_thread(bake.validate, sheet, worn, item.regn_cd)
+    return worn
 
 
 async def preview(
@@ -205,8 +221,7 @@ async def preview(
 ) -> bytes | None:
     """FN-MYP-011-01·FN-MYP-010-13 : 합성 PNG, 아직 안 구운 아이템이 있으면 None"""
     targets = await repo.list_bake_items()
-    items = engine.load_items()
-    chosen = _chosen_items(item_sns, targets, items)
+    chosen = _chosen_items(item_sns, targets)
     found = await repo.find_sheets(pixel_char_sn, item_sns)
     if found.failed:
         logger.warning("굽기 실패 아이템 미리보기: pixelCharSn=%d", pixel_char_sn)
@@ -228,12 +243,12 @@ async def preview(
 
 
 def _chosen_items(
-    item_sns: Sequence[int], targets: dict[int, str], items: dict[str, engine.BakeItem]
+    item_sns: Sequence[int], targets: dict[int, engine.BakeItem]
 ) -> dict[int, engine.BakeItem]:
     invalid = AppError("INVALID_REQUEST", 400, "입혀 볼 수 없는 아이템입니다.")
     chosen: dict[int, engine.BakeItem] = {}
     for item_sn in item_sns:
-        item = items.get(targets.get(item_sn, ""))
+        item = targets.get(item_sn)
         if item is None:
             raise invalid
         chosen[item_sn] = item
@@ -244,13 +259,85 @@ def _chosen_items(
     return chosen
 
 
-async def _render(found: CharacterSheets, chosen: dict[int, engine.BakeItem]) -> bytes:
-    worn = {chosen[sn].regn_cd: found.sheets[sn] for sn in chosen}
+async def _render(
+    found: CharacterSheets,
+    chosen: dict[int, engine.BakeItem],
+    sheets: dict[int, bytes] | None = None,
+) -> bytes:
+    sheets = found.sheets if sheets is None else sheets
+    worn = {chosen[sn].regn_cd: sheets[sn] for sn in chosen}
     try:
         return await asyncio.to_thread(compose.render, found.sheet, found.layout, worn)
     except Exception as exc:
         logger.error("캐릭터 합성 실패: %s", type(exc).__name__)
         raise _preview_error() from exc
+
+
+async def describe_item(
+    client: CharacterClient | None, image: bytes, file_name: str, regn_cd: str, item_nm: str
+) -> str:
+    """FN-ADM-070-02 : 관리자 아이템 그림 -> 굽기 지시 초안 (저장 안 함)"""
+    _check_region(regn_cd)
+    validate_upload(image, file_name)
+    if client is None:
+        logger.error("굽기 지시 초안 불가: 생성기가 아직 연결되지 않았습니다")
+        raise external_error()
+    try:
+        return await client.describe_item(image, regn_cd, item_nm)
+    except CharacterApiError:
+        raise external_error() from None
+
+
+async def trial_preview(
+    client: CharacterClient | None,
+    repo: CharacterJobRepository,
+    pixel_char_sn: int,
+    regn_cd: str,
+    bake_hint: str,
+) -> bytes:
+    """FN-ADM-070-02 : 굽기 지시 1회 시험 굽기·합성 (저장 안 함, 굽기 설정과 무관)"""
+    _check_region(regn_cd)
+    if client is None:
+        logger.error("시험 굽기 불가: 생성기가 아직 연결되지 않았습니다")
+        raise external_error()
+    found = await repo.find_sheets(pixel_char_sn, [])
+    item = engine.BakeItem(0, regn_cd, bake_hint)
+    try:
+        worn = await _bake_once(client, found.sheet, found.pet_se_cd, item)
+    except Exception as exc:
+        logger.error("시험 굽기 실패: %s", type(exc).__name__)
+        raise _preview_error() from exc
+    return await _render(found, {item.item_sn: item}, {item.item_sn: worn})
+
+
+async def enqueue_item_bake(
+    client: CharacterClient | None,
+    repo: CharacterJobRepository,
+    server_repo: CharacterJobRepository,
+    queue: BakeQueue,
+    item_sn: int,
+    bake_enabled: bool,
+) -> int:
+    """FN-ADM-070-02 : 새 아이템을 안 구운 기존 캐릭터 전부 큐 뒤에 넣기 -> 대상 수"""
+    if not bake_enabled:
+        raise AppError("BAKE_DISABLED", 409, "아이템 굽기가 꺼져 있습니다.")
+    if client is None:
+        logger.error("전체 굽기 불가: 생성기가 아직 연결되지 않았습니다")
+        raise external_error()
+    item = (await repo.list_bake_items()).get(item_sn)
+    if item is None:
+        raise AppError("INVALID_REQUEST", 400, "구울 수 없는 아이템입니다.")
+    targets = await repo.list_bake_targets(item_sn)
+    for pixel_char_sn in targets:
+        # 회원 미리보기(put_first)가 앞서도록 뒤에 추가
+        queue.add(BakeTask(client, server_repo, pixel_char_sn, item_sn, item, None, None))
+    logger.info("전체 굽기 대상: itemSn=%d, %d개", item_sn, len(targets))
+    return len(targets)
+
+
+def _check_region(regn_cd: str) -> None:
+    if regn_cd not in engine.BAKE_REGIONS:
+        raise AppError("INVALID_REQUEST", 400, "구울 수 없는 부위입니다.")
 
 
 def _preview_error() -> AppError:

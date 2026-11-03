@@ -27,11 +27,12 @@ Java가 만드는 API다(백엔드 저장소 기준). 키 헤더는 없다. 인�
 | POST | `/internal/ai/characters/jobs` | 생성 작업을 만들고 반려동물 등록 정보를 돌려준다. 주양육자 여부·이미 캐릭터 있음·생성 중 판정은 Java(쿠키로 회원 판정, 4xx는 Python이 React에 그대로 전달). 요청 `{petSn: Long}`, 응답 `data {charCrtJobSn: Long, petSeCd, vrtyNm, colrNm, chrcCn}` | MYP-010-08·09 | 백엔드 | - | - |
 | POST | `/internal/ai/characters/jobs/{charCrtJobSn}/success` | 생성 성공 보고. 응답 뒤 호출이라 요청에서 복사해 둔 쿠키를 보낸다. 작업을 만든 회원 본인만, 아니면 403. 생성 중인 작업만 받고, 이미 완료면 같은 `pixelCharSn`, 실패로 끝난 작업이면 409 `ALREADY_PROCESSED`. multipart `image`(512×512 PNG)·`sheet`(맨몸 2×2 시트 1024 PNG), 폼 `scale`·`originX`·`originY`. 응답 `data {pixelCharSn: Long}`. 자동 저장·알림·실패 시 기본 캐릭터 표시는 Java. 보고가 실패해 멈춘 작업은 Java가 타임아웃으로 정리한다 | MYP-010-09·17·18, MYP-011-01 | 백엔드 | - | - |
 | POST | `/internal/ai/characters/jobs/{charCrtJobSn}/failure` | 생성 실패 보고. 쿠키로 작업을 만든 회원 본인만, 아니면 403. 끝난 작업이면 그대로 200. 요청 `{failRsn}`: `CHARACTER_API_ERROR`(생성기 오류)·`CHARACTER_SPEC_MISMATCH`(규격 밖) | MYP-010-09 | 백엔드 | - | - |
-| GET | `/internal/ai/characters/bake-items` | 굽기 대상(판매 중이고 엔진 키가 있는 아이템). 쿠키로 로그인만 확인한다. 응답 `data [{itemSn: Long, engineItemKey: String}]`. `ITEM`에 엔진 키 컬럼이 필요하다 | MYP-011-01, MYP-010-13 | 백엔드 | - | - |
-| PUT | `/internal/ai/characters/{pixelCharSn}/item-sheets/{itemSn}` | 캐릭터 × 아이템 착용 시트 저장. 쿠키로 주양육자만. multipart `sheet`(1024 PNG) | MYP-011-01, MYP-010-13 | 백엔드 | - | - |
-| POST | `/internal/ai/characters/{pixelCharSn}/item-sheets/{itemSn}/failure` | 캐릭터 × 아이템 굽기 실패 표시. 쿠키로 주양육자만. 본문 없음 | MYP-011-01, MYP-010-13 | 백엔드 | - | - |
-| GET | `/internal/ai/characters/{pixelCharSn}/sheets?itemSns=` | 합성용 시트 정보. 안 산 아이템도 조회한다. 응답 `data {petSeCd, sheetFileSn: Long, scale, originX, originY, items: [{itemSn, atchFileSn: Long?, bakeFailed: Boolean}]}`. 안 구운 아이템은 `atchFileSn` null. 주양육자·소유 판정은 Java(쿠키, 4xx는 Python이 React에 그대로 전달). 없으면 404 `PIXEL_CHARACTER_NOT_FOUND` | MYP-011-01·06, MYP-010-13 | 백엔드 | - | - |
-| GET | `/internal/ai/characters/{pixelCharSn}/sheet-files/{atchFileSn}` | 시트 파일 내려받기, 응답 `image/png`(ApiResponse 아님). 쿠키로 소유 판정. 그 캐릭터의 시트가 아니면 404 | MYP-011-01, MYP-010-13 | 백엔드 | - | - |
+| GET | `/internal/ai/characters/bake-items` | 굽기 대상(판매 중이고 굽기 지시가 있는 아이템). 쿠키로 로그인만 확인한다. 응답 `data [{itemSn: Long, regnCd: String, bakeHint: String}]`. `ITEM`에 굽기 지시 컬럼이 필요하다(시드 원본 `docs/design/item-bake-hints.json` 26개, 관리자 등록 때 `/ai/items/bake-hints` 초안) | MYP-011-01, MYP-010-13, ADM-070-02 | 백엔드 | - | - |
+| GET | `/internal/ai/items/{itemSn}/bake-targets?page=` | 그 아이템을 아직 안 구운 캐릭터(맨몸 시트가 있고 착용 시트·굽기 실패 표시가 없음). 쿠키로 관리자만. `page`는 0부터, 응답 `data {pixelCharSns: [Long], last: Boolean}` | ADM-070-02 | 백엔드 | - | - |
+| PUT | `/internal/ai/characters/{pixelCharSn}/item-sheets/{itemSn}` | 캐릭터 × 아이템 착용 시트 저장. 쿠키로 주양육자만. multipart `sheet`(1024 PNG). 전체 굽기(`/ai/items/{itemSn}/bake`)는 수십 분 걸려 쿠키(access_token 30분)가 만료되므로 쿠키 없이 부른다 — Java가 쿠키 없는 내부 호출을 받을지 백엔드와 결정 필요 | MYP-011-01, MYP-010-13 | 백엔드 | - | - |
+| POST | `/internal/ai/characters/{pixelCharSn}/item-sheets/{itemSn}/failure` | 캐릭터 × 아이템 굽기 실패 표시. 쿠키로 주양육자만. 본문 없음. 전체 굽기(`/ai/items/{itemSn}/bake`)는 수십 분 걸려 쿠키(access_token 30분)가 만료되므로 쿠키 없이 부른다 — Java가 쿠키 없는 내부 호출을 받을지 백엔드와 결정 필요 | MYP-011-01, MYP-010-13 | 백엔드 | - | - |
+| GET | `/internal/ai/characters/{pixelCharSn}/sheets?itemSns=` | 합성용 시트 정보. 안 산 아이템도 조회한다. 응답 `data {petSeCd, sheetFileSn: Long, scale, originX, originY, items: [{itemSn, atchFileSn: Long?, bakeFailed: Boolean}]}`. 안 구운 아이템은 `atchFileSn` null. 주양육자·소유 판정은 Java(쿠키, 4xx는 Python이 React에 그대로 전달). 없으면 404 `PIXEL_CHARACTER_NOT_FOUND`. 전체 굽기(`/ai/items/{itemSn}/bake`)는 수십 분 걸려 쿠키(access_token 30분)가 만료되므로 쿠키 없이 부른다 — Java가 쿠키 없는 내부 호출을 받을지 백엔드와 결정 필요 | MYP-011-01·06, MYP-010-13 | 백엔드 | - | - |
+| GET | `/internal/ai/characters/{pixelCharSn}/sheet-files/{atchFileSn}` | 시트 파일 내려받기, 응답 `image/png`(ApiResponse 아님). 쿠키로 소유 판정. 그 캐릭터의 시트가 아니면 404. 전체 굽기(`/ai/items/{itemSn}/bake`)는 수십 분 걸려 쿠키(access_token 30분)가 만료되므로 쿠키 없이 부른다 — Java가 쿠키 없는 내부 호출을 받을지 백엔드와 결정 필요 | MYP-011-01, MYP-010-13 | 백엔드 | - | - |
 | (미정) | 미완료 메시지 완료 처리·최근 6턴·AI 설정값 조회 | 백엔드 `docs/api/ai.md`에 PATCH 설계만 있음. SCR-AIM-002에서 필요해지면 요청 | AIM-002 | 백엔드 | 미정 | 미정 |
 
 ## DTO
@@ -46,8 +47,10 @@ Java가 만드는 API다(백엔드 저장소 기준). 키 헤더는 없다. 인�
 쓰는 API: POST /internal/v1/ocr/receipt
 | 필드 | 타입 | 필수 | 검증·설명 | 근거 |
 | --- | --- | --- | --- | --- |
-| hsptlNm | String | N | 병원명 | AIM-009-02 |
-| ckupYmd | LocalDate | N | 검진일 `YYYY-MM-DD`. 연도가 없으면 null(연도 보정은 Java) | AIM-009-02 |
+| hsptlNm | String | N | 병원명. 병원이 아닌 영수증은 null | AIM-009-02 |
+| expndPlcusNm | String | N | 사용처. 영수증에 찍힌 가게 이름(상호), 앞 80자. 모든 출처에서 채운다(2026-11-03 추가, 백엔드 PR과 함께) | MYP-031-03, EXPND.EXPND_PLCUS_NM |
+| expndClsfCd | String | N | 상호·품목에서 추정한 지출 카테고리(MYPG05 7종). 불확실하면 null. 모든 출처에서 채운다(2026-11-03 추가, 백엔드 PR과 함께) | MYP-031-03, EXPND.EXPND_CLSF_CD |
+| ckupYmd | LocalDate | N | 검진일(건강 일지)·결제일(가계부) `YYYY-MM-DD`. 연도가 없으면 null(연도 보정은 Java) | AIM-009-02, MYP-031-04 |
 | recptAmt | Long | N | 최종 결제 금액(할인 후) | AIM-009-02 |
 | btmDscntAmt | Long | N | 영수증 하단에만 찍힌 할인 합계. 배분은 Java | AIM-009-20 |
 | sections | List<Section> | Y | 반려동물 구역. 구역 없는 영수증은 `sectionNm` null인 구역 1개 | AIM-009-16 |

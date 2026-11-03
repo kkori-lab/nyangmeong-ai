@@ -47,6 +47,8 @@ class CharacterClient(Protocol):
 
     async def bake(self, sheet: bytes, pet_se_cd: PetSeCd, item: engine.BakeItem) -> bytes: ...
 
+    async def describe_item(self, image: bytes, regn_cd: str, item_nm: str) -> str: ...
+
 
 @dataclass(frozen=True)
 class Rendered:
@@ -90,8 +92,37 @@ class OpenAICharacterClient:
             )
             return base64.b64decode(response.data[0].b64_json)
         except Exception as exc:
-            logger.error("아이템 굽기 실패: %s, %s", item.item_id, type(exc).__name__)
+            logger.error("아이템 굽기 실패: itemSn=%d, %s", item.item_sn, type(exc).__name__)
             raise CharacterApiError from exc
+
+    async def describe_item(self, image: bytes, regn_cd: str, item_nm: str) -> str:
+        return await asyncio.to_thread(self._describe_item, image, regn_cd, item_nm)
+
+    def _describe_item(self, image: bytes, regn_cd: str, item_nm: str) -> str:
+        """FN-ADM-070-02 : 아이템 그림 -> 굽기 지시 한 문장"""
+        try:
+            png = engine.normalize_item_image(image)
+            uri = "data:image/png;base64," + base64.b64encode(png).decode()
+            response = self._client.chat.completions.create(
+                model=self._vision_model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": engine.item_hint_question(regn_cd, item_nm)},
+                            {"type": "image_url", "image_url": {"url": uri}},
+                        ],
+                    }
+                ],
+            )
+            hint = engine.parse_bake_hint(response.choices[0].message.content or "")
+        except Exception as exc:
+            logger.error("굽기 지시 초안 실패: %s", type(exc).__name__)
+            raise CharacterApiError from exc
+        if hint is None:
+            logger.error("굽기 지시 초안 실패: 빈 답 또는 길이 초과")
+            raise CharacterApiError
+        return hint
 
     def render(self, request: CharacterRequest) -> Rendered:
         """동기 SDK·이미지 처리 전체 (샘플 검증 스크립트도 사용)"""
