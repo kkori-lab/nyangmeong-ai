@@ -447,3 +447,76 @@ def test_사용처만_읽힌_결과는_추출_0건이_아니다(app, repo: FakeR
     assert response.status_code == 200
     assert response.json()["data"]["ocr"]["expndPlcusNm"] == "멍멍펫샵"
     assert repo.receipts[1].status is ReceiptStatus.RECOGNIZED
+
+
+# FN-AIM-010-06 : 실패 뒤 [직접 입력] 연결용 recptSn
+
+
+class ReportFailingRepository(FakeReceiptRepository):
+    """원본 저장은 되고 상태 보고에서 Java 연결 실패"""
+
+    async def report_result(self, recpt_sn, status, result) -> None:
+        raise AppError("EXTERNAL_API_ERROR", 502, "외부 서비스 호출에 실패했습니다.")
+
+
+@pytest.mark.parametrize(
+    ("behavior", "delay", "http_code", "code"),
+    [("ok", 1.0, 504, "OCR_TIMEOUT"), ("error", 0.0, 502, "OCR_API_ERROR")],
+)
+def test_일시_오류_응답에_원본_저장의_recptSn을_담는다(
+    app, repo: FakeReceiptRepository, behavior, delay, http_code, code
+) -> None:
+    repo._next = 41
+    app.dependency_overrides[get_ocr_client] = lambda: FakeOcr(behavior, delay)
+
+    response = post(TestClient(app))
+
+    body = response.json()
+    assert (response.status_code, body["code"]) == (http_code, code)
+    assert body["data"] == {"recptSn": 41}
+    assert 41 in repo.receipts
+
+
+@pytest.mark.parametrize(
+    ("behavior", "delay", "http_code", "code"),
+    [("ok", 1.0, 504, "OCR_TIMEOUT"), ("error", 0.0, 502, "OCR_API_ERROR")],
+)
+def test_실패_보고가_안_돼도_일시_오류에_recptSn이_남는다(
+    app, behavior, delay, http_code, code
+) -> None:
+    app.dependency_overrides[get_receipt_repository] = lambda: ReportFailingRepository()
+    app.dependency_overrides[get_ocr_client] = lambda: FakeOcr(behavior, delay)
+
+    response = post(TestClient(app))
+
+    body = response.json()
+    assert (response.status_code, body["code"]) == (http_code, code)
+    assert body["data"] == {"recptSn": 1}
+
+
+def test_형식_오류와_키_없음_오류에는_data가_없다(app) -> None:
+    client = TestClient(app)
+    bad_type = post(client, content=b"not an image")
+    del app.dependency_overrides[get_ocr_client]
+    no_key = post(client)
+
+    assert (bad_type.status_code, bad_type.json()["code"]) == (400, "FILE_TYPE_NOT_ALLOWED")
+    assert (no_key.status_code, no_key.json()["code"]) == (502, "EXTERNAL_API_ERROR")
+    assert "data" not in bad_type.json()
+    assert "data" not in no_key.json()
+
+
+def test_중복_분석_409에는_data가_없다() -> None:
+    repo = FakeReceiptRepository()
+    ocr = FakeOcr(delay=0.1)
+
+    async def run():
+        return await asyncio.gather(
+            _analyze(ocr, repo), _analyze(ocr, repo), return_exceptions=True
+        )
+
+    _, second = asyncio.run(run())
+
+    assert isinstance(second, AppError)
+    assert second.code == "OCR_IN_PROGRESS"
+    assert second.data is None

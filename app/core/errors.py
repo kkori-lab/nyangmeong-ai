@@ -11,7 +11,7 @@ from app.core.backend import BackendError
 def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(response.AppError)
     async def _app_error(request: Request, exc: response.AppError) -> JSONResponse:
-        return response.error(exc.code, exc.http_code, exc.message, request.url.path)
+        return response.error(exc.code, exc.http_code, exc.message, request.url.path, exc.data)
 
     @app.exception_handler(BackendError)
     async def _backend_error(request: Request, exc: BackendError) -> Response:
