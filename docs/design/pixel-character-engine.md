@@ -19,13 +19,13 @@ Python ↔ Java ↔ React 계약 초안이다. **코드 없음, 팀 확인 전.*
 
 ## 1. 흐름 (2026-10-27 결정 위에 올린다)
 
-이미 있는 `/ai/characters`(`docs/api/character.md`) 흐름 — 업로드 검증 → Java 작업 생성 → 202·`chrcJobSn` →
+이미 있는 `/ai/characters`(`docs/api/character.md`) 흐름 — 업로드 검증 → Java 작업 생성 → 202·`charCrtJobSn` →
 백그라운드 `CharacterClient.generate` → 512×512 검증(`rules.matches_spec`) → Java 보고 — 을
 생성·굽기·합성 세 단계로 늘린다. Python은 저장하지 않는다. 그림은 전부 Java가 보관하고 필요할 때 Python에 준다.
-Java 작업 내부 API는 아직 없어 `FakeCharacterJobRepository`로 돈다(`internal.md` "Python → Java" 미정 행).
+작업 생성·결과 보고·시트 저장과 조회는 Java 캐릭터 내부 API(`internal.md` "Python → Java" `/internal/ai/characters/**` 행)로 연결했다.
 
 ```
-① 생성  React ─POST /ai/characters─▶ Python ─작업 생성─▶ Java               (202·chrcJobSn, 지금 있음)
+① 생성  React ─POST /ai/characters─▶ Python ─작업 생성─▶ Java               (202·charCrtJobSn)
          Python 백그라운드: generate = 엔진 맨몸 시트 생성 → 512 정규화
          Python ─512 결과 보고(지금 있음) + 맨몸 시트·배치값 저장(새로 필요)─▶ Java   (알림은 Java)
 ② 굽기  ①이 끝나면 Python이 이어서 전 아이템을 굽는다(요청 우선 큐, 3번)
@@ -41,7 +41,7 @@ Java 작업 내부 API는 아직 없어 `FakeCharacterJobRepository`로 돈다(`
 
 | 메서드 | 경로 | 하는 일 | 응답 |
 | --- | --- | --- | --- |
-| POST | `/ai/characters` (있음) | 사진·petSn 받아 생성 작업 시작. 바뀌는 것은 생성기 구현과 성공 보고 내용뿐 | 202, `chrcJobSn` |
+| POST | `/ai/characters` (있음) | 사진·petSn 받아 생성 작업 시작. 바뀌는 것은 생성기 구현과 성공 보고 내용뿐 | 202, `charCrtJobSn` |
 | POST | `/ai/characters/{pixelCharSn}/preview` (새로) | 아이템(`itemSns`, 상점에서는 안 산 아이템도 입혀 보므로 보유 번호가 아님)대로 합성한 512 PNG | `image/png`. 아직 안 구운 아이템이 있으면 그 아이템을 큐 맨 앞으로 올리고 409 `ITEM_BAKING` |
 
 ### Python → Java (새로 필요, 백엔드 몫)
@@ -68,7 +68,7 @@ Java가 새로 보관해야 하는 것:
 | 512 배치값 | 캐릭터당 1 | 없음 |
 
 후보: (가) `CHAR_PHOTO` 역할 코드 추가 + 굽기 상태 테이블 신설 / (나) `CHAR_ITEM_SHEET(PIXEL_CHAR_SN, ITEM_SN, ATCH_FILE_SN, 상태)` 신설.
-`ITEM`에는 엔진 아이템 키(굽기 지시를 찾는 키) 컬럼이 필요하다 — 6번.
+굽기 지시는 `ITEM`의 굽기 지시 컬럼에 둔다 — 6번.
 
 Python 큐는 메모리에 있으므로 재시작하면 사라진다. 끊긴 굽기는 Java의 굽기 상태로 다시 찾아 재요청한다
 (생성 작업의 타임아웃 정리를 Java가 하는 것과 같은 방식).
@@ -105,13 +105,18 @@ AI가 그린 머리 착용 그림을 바탕으로 쓰고 몸 아이템 레이어
 
 ## 6. 아이템 · 부위 매핑
 
-| 냥멍 부위(MYPG01) | 엔진 슬롯 | 지금 엔진 아이템 |
-| --- | --- | --- |
-| 머리 MYPC0001 | head | 7 |
-| 의상 MYPC0004 | body | 7 |
-| 얼굴·목·가방·신발 | 없음 | 0 — 지원 범위 결정 필요 |
+5부위만 지원한다(2026-11-02). 신발은 넣지 않는다. 시드 아이템 26개(`docs/design/item-bake-hints.json`).
 
-굽기 지시(아이템별 프롬프트 문장)는 엔진 카탈로그(`items.json`의 `bake_hint`)에 있다. `ITEM`과 잇는 키가 필요하다.
+| 냥멍 부위(MYPG01) | 합성 | 시드 아이템 |
+| --- | --- | --- |
+| 머리 MYPC0001 | 머리 착용 그림을 바탕으로 쓴다(5번) | 7 |
+| 의상 MYPC0004 | 레이어(첫째) | 7 |
+| 가방 MYPC0005 | 레이어(둘째) | 4 |
+| 목 MYPC0003 | 레이어(셋째) | 4 |
+| 얼굴 MYPC0002 | 레이어(맨 위) | 4 |
+
+굽기 지시(아이템별 프롬프트 문장)는 Java `ITEM`의 굽기 지시 컬럼에 있고, Python은 `bake-items`(`itemSn`·`regnCd`·`bakeHint`)로 받는다.
+관리자 아이템 등록 때 `/ai/items/bake-hints`가 그림으로 초안을 만든다(SCR-ADM-070).
 
 ## 7. 열린 질문
 

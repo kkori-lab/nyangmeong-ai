@@ -93,12 +93,13 @@ async def _recognize(
         raise AppError("OCR_CANCELED", 400, "영수증 분석을 취소했습니다.")
     try:
         return ocr.result()
+    # FN-AIM-010-06 : 실패 뒤 [직접 입력]이 이 영수증에 연결되도록 recptSn 동봉
     except TimeoutError:
         await _report_failure(repo, recpt_sn, ReceiptStatus.TIMEOUT)
-        raise _timeout_error() from None
+        raise _timeout_error(recpt_sn) from None
     except OcrApiError:
         await _report_failure(repo, recpt_sn, ReceiptStatus.API_ERROR)
-        raise _api_error() from None
+        raise _api_error(recpt_sn) from None
 
 
 async def _report_failure(repo: ReceiptRepository, recpt_sn: int, status: ReceiptStatus) -> None:
@@ -130,9 +131,16 @@ def _is_empty(result: ReceiptOcrResponse) -> bool:
     return all(v is None for v in top) and all(v is None for s in sections for v in s)
 
 
-def _timeout_error() -> AppError:
-    return AppError("OCR_TIMEOUT", 504, "영수증 분석 시간이 초과되었습니다.")
+def _timeout_error(recpt_sn: int | None = None) -> AppError:
+    return AppError("OCR_TIMEOUT", 504, "영수증 분석 시간이 초과되었습니다.", _recpt_data(recpt_sn))
 
 
-def _api_error() -> AppError:
-    return AppError("OCR_API_ERROR", 502, "영수증 분석 중 오류가 발생했습니다.")
+def _api_error(recpt_sn: int | None = None) -> AppError:
+    return AppError(
+        "OCR_API_ERROR", 502, "영수증 분석 중 오류가 발생했습니다.", _recpt_data(recpt_sn)
+    )
+
+
+def _recpt_data(recpt_sn: int | None) -> dict[str, int] | None:
+    # /internal/v1/ocr/receipt는 RECPT를 만들지 않아 data 없음
+    return None if recpt_sn is None else {"recptSn": recpt_sn}
