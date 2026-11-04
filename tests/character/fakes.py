@@ -1,6 +1,6 @@
 import json
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -73,6 +73,8 @@ class SavedJob:
     failure: CharacterFailure | None = None
     item_sheets: dict[int, bytes] = field(default_factory=dict)
     failed_items: set[int] = field(default_factory=set)
+    equipped_item_sns: list[int] | None = None
+    equipped_image: bytes | None = None
 
 
 class FakeCharacterJobRepository:
@@ -84,6 +86,8 @@ class FakeCharacterJobRepository:
     def __init__(self) -> None:
         self.jobs: dict[int, SavedJob] = {}
         self._next = 1
+        # 대표 이미지 저장 때 Java 4xx 흉내 (예: 409 EQUIPPED_ITEMS_CHANGED)
+        self.equip_error: BackendError | None = None
 
     async def create_job(self, pet_sn: int) -> CharacterJob:
         job = CharacterJob(self._next, "PETC0002" if pet_sn % 2 == 0 else "PETC0001")
@@ -139,3 +143,12 @@ class FakeCharacterJobRepository:
             {sn: sheet for sn, sheet in saved.item_sheets.items() if sn in wanted},
             frozenset(saved.failed_items & wanted),
         )
+
+    async def save_equipped_image(
+        self, pixel_char_sn: int, item_sns: Sequence[int], image: bytes
+    ) -> None:
+        if self.equip_error is not None:
+            raise self.equip_error
+        saved = self.jobs[pixel_char_sn]
+        saved.equipped_item_sns, saved.equipped_image = list(item_sns), image
+        logger.info("가짜 Java 대표 이미지 저장: %d, %d바이트", pixel_char_sn, len(image))

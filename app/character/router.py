@@ -77,6 +77,29 @@ async def preview_character(
     return response.error("ITEM_BAKING", 409, message, request.url.path)
 
 
+# 착용 확정은 Java PUT /pixel-characters/{pixelCharSn}/equipped-items가 먼저, React가 성공 뒤 호출
+@router.post("/characters/{pixel_char_sn}/equipped-image", dependencies=[Depends(require_member)])
+async def save_equipped_image(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    pixel_char_sn: int,
+    body: CharacterPreviewRequest,
+    client: Annotated[CharacterClient | None, Depends(get_character_client)],
+    repo: Annotated[CharacterJobRepository, Depends(get_character_job_repository)],
+    queue: Annotated[BakeQueue, Depends(get_bake_queue)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> JSONResponse:
+    enabled = settings.character_bake_enabled
+    saved = await service.save_equipped_image(
+        client, repo, queue, pixel_char_sn, body.item_sns, enabled
+    )
+    if saved:
+        return response.success(None)
+    background_tasks.add_task(queue.drain)
+    message = "아이템을 준비하고 있습니다. 잠시 후 다시 시도해 주세요."
+    return response.error("ITEM_BAKING", 409, message, request.url.path)
+
+
 @router.post("/items/bake-hints", dependencies=[Depends(require_admin)])
 async def create_bake_hint(
     image: UploadFile,

@@ -242,6 +242,22 @@ async def preview(
     return await _render(found, chosen)
 
 
+async def save_equipped_image(
+    client: CharacterClient | None,
+    repo: CharacterJobRepository,
+    queue: BakeQueue,
+    pixel_char_sn: int,
+    item_sns: Sequence[int],
+    bake_enabled: bool,
+) -> bool:
+    """FN-MYP-010-16·13 : [장착] 확정 뒤 착용 모습을 Java에 저장, 안 구운 아이템이 있으면 False"""
+    image = await preview(client, repo, queue, pixel_char_sn, item_sns, bake_enabled)
+    if image is None:
+        return False
+    await repo.save_equipped_image(pixel_char_sn, item_sns, image)
+    return True
+
+
 def _chosen_items(
     item_sns: Sequence[int], targets: dict[int, engine.BakeItem]
 ) -> dict[int, engine.BakeItem]:

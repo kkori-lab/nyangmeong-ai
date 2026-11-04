@@ -184,6 +184,15 @@
 - 연결 남음: FN-MAN-006 Java `GET /internal/ai/pets/{petSn}/health-report-input`·`PUT /internal/ai/pets/{petSn}/health-report`와 저장 테이블 (리포트 내부 API, LJS 백엔드)
 - 연결 남음: FN-MAN-006 메인 위젯의 `/ai/pets/{petSn}/health-report` 호출 (샘플 교체, 프론트)
 
+## SCR-MYP-011 아이템 상점 모달 (착용 합성 이미지 저장, SCR-MYP-010 공통) — 끝
+- 기능: FN-MYP-010-16 [장착] 확정 뒤 착용 모습 PNG 저장, FN-MYP-010-13 합성 (위 `끝` 절에서 센 기능. 대조에 다시 세지 않는다)
+- 요청: 2026-11-04 LJS 결정 A (꾸미기 밖 화면도 착용 모습을 보여 준다)
+- 기다리는 것: Java `PUT /internal/ai/characters/{pixelCharSn}/equipped-image`(지금 착용 목록과 같을 때만 저장)·`PUT /pixel-characters/{pixelCharSn}/equipped-items` 때 대표 이미지 삭제·`GET /pets/{petSn}/character-image`가 저장본을 주는 것 (LJS 백엔드), 꾸미기 [장착]이 Java 성공 뒤 Python을 부르도록 (프론트), 화면 확인용 시트가 있는 캐릭터 (백엔드 PR #105 병합·공용 DB v0.12 적용 뒤 생성, 로컬 Java에 지금 없음, LJS 백엔드)
+- 완료 조건: `/start` 기획의 완료 조건을 따른다. 계약 변경은 백엔드 PR과 함께 낸다.
+- 결정 (2026-11-04 LJS): Java 먼저(확정 뒤 React가 Python 호출). 검증 판정 확인 못 함 있음(연결 남음뿐)
+- 연결 남음: FN-MYP-010-16 Java `PUT /internal/ai/characters/{pixelCharSn}/equipped-image`·`PUT equipped-items` 때 대표 이미지 삭제·`character-image` 저장본 (대표 이미지 내부 API, LJS 백엔드), [장착] 뒤 `equipped-image` 호출 (프론트)
+- 연결 남음: FN-MYP-010-13·16 화면 확인 (시트가 있는 캐릭터, 백엔드 PR #105 병합·공용 DB v0.12 뒤, LJS 백엔드)
+
 ## 제외
 - FN-AIM-001-01~04,06, FN-AIM-002-01,05~06, FN-AIM-004-03~07, FN-AIM-005-03~06, FN-AIM-011-01~02,04~06,17~18,20, FN-AIM-012-09,15 (27건): 프론트 몫 (LJS 프론트: 대화창 화면)
 - FN-AIM-012-12~14,17 (4건): Java 몫 (JAJ: 일정·케어 항목 저장, 알림 연계)
