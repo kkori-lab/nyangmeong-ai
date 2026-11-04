@@ -14,11 +14,10 @@ from app.character.repository import (
     CharacterJob,
     JavaCharacterJobRepository,
     get_character_job_repository,
-    get_server_character_repository,
 )
 from app.character.rules import matches_spec
 from app.character.service import BakeQueue, BakeTask, get_bake_queue
-from app.core.backend import get_backend_client
+from app.core.backend import BackendError, get_backend_client
 from app.core.config import Settings, get_settings
 from app.core.response import AppError
 from app.main import create_app
@@ -98,7 +97,6 @@ def make_client(monkeypatch, repo, generator, enabled: bool = True) -> TestClien
     queue = BakeQueue()
     app.dependency_overrides[get_backend_client] = lambda: backend
     app.dependency_overrides[get_character_job_repository] = lambda: repo
-    app.dependency_overrides[get_server_character_repository] = lambda: repo
     app.dependency_overrides[get_character_client] = lambda: generator
     app.dependency_overrides[get_bake_queue] = lambda: queue
     return TestClient(app)
@@ -239,12 +237,22 @@ def post_bake(client: TestClient, item_sn: int = SWEATER, headers=ADMIN):
     return client.post(f"/ai/items/{item_sn}/bake", headers=headers)
 
 
-def test_bake_안_구운_캐릭터를_모두_굽고_202(monkeypatch, repo) -> None:
+def test_bake_안_구운_캐릭터를_굽고_다_끝나면_200과_lastYn(monkeypatch, repo) -> None:
     generator = BakeClient()
     res = post_bake(make_client(monkeypatch, repo, generator))
-    assert res.status_code == 202
-    assert res.json()["data"] == {"itemSn": SWEATER, "targetCnt": 3}
+    assert res.status_code == 200
+    assert res.json()["data"] == {"itemSn": SWEATER, "bakedCnt": 3, "failedCnt": 0, "lastYn": True}
     assert [item.item_sn for item in generator.calls] == [SWEATER] * 3
+    assert all(SWEATER in saved.item_sheets for saved in repo.jobs.values())
+
+
+def test_bake_대상이_묶음보다_많으면_나눠_굽고_마지막에_lastYn(monkeypatch, repo) -> None:
+    repo.jobs = {sn: character(sn) for sn in range(1, 31)}
+    generator = BakeClient()
+    client = make_client(monkeypatch, repo, generator)
+    results = [post_bake(client).json()["data"] for _ in range(3)]
+    assert [(r["bakedCnt"], r["lastYn"]) for r in results] == [(13, False), (13, False), (4, True)]
+    assert len(generator.calls) == 30
     assert all(SWEATER in saved.item_sheets for saved in repo.jobs.values())
 
 
@@ -254,17 +262,18 @@ def test_bake_이미_구운_캐릭터와_맨몸_시트_없는_캐릭터는_빼�
     repo.jobs[4] = SavedJob(CharacterJob(4, "PETC0001"), 3)
     generator = BakeClient()
     res = post_bake(make_client(monkeypatch, repo, generator))
-    assert res.json()["data"]["targetCnt"] == 1
+    assert res.json()["data"]["bakedCnt"] == 1
     assert len(generator.calls) == 1
     assert SWEATER in repo.jobs[3].item_sheets
 
 
-def test_bake_다시_불러도_구운_캐릭터는_다시_굽지_않는다(monkeypatch, repo) -> None:
+def test_bake_대상이_없으면_0과_lastYn(monkeypatch, repo) -> None:
     generator = BakeClient()
     client = make_client(monkeypatch, repo, generator)
     post_bake(client)
     res = post_bake(client)
-    assert res.json()["data"]["targetCnt"] == 0
+    assert res.status_code == 200
+    assert res.json()["data"] == {"itemSn": SWEATER, "bakedCnt": 0, "failedCnt": 0, "lastYn": True}
     assert len(generator.calls) == 3
 
 
@@ -290,30 +299,77 @@ def test_bake_생성기가_없으면_502(monkeypatch, repo) -> None:
     assert res.json()["code"] == "EXTERNAL_API_ERROR"
 
 
-def test_bake_굽기_실패는_실패로_보고한다(monkeypatch, repo) -> None:
+def test_bake_굽기_실패는_실패로_보고하고_센다(monkeypatch, repo) -> None:
     generator = BakeClient()
     generator.error = True
-    post_bake(make_client(monkeypatch, repo, generator))
+    res = post_bake(make_client(monkeypatch, repo, generator))
+    assert res.json()["data"] == {"itemSn": SWEATER, "bakedCnt": 0, "failedCnt": 3, "lastYn": True}
     assert all(SWEATER in saved.failed_items for saved in repo.jobs.values())
 
 
-def test_bake_대상은_큐_뒤에_들어가고_회원_미리보기가_먼저_굽힌다(repo) -> None:
-    generator, queue = BakeClient(), BakeQueue()
-    asyncio.run(service.enqueue_item_bake(generator, repo, repo, queue, SWEATER, True))
-    preview = BakeTask(generator, repo, 3, SWEATER, fake_item("green-sweater"), sheet(), "PETC0001")
-    queue.put_first(preview)
-    assert [task.pixel_char_sn for task in queue._tasks] == [3, 1, 2]
-    assert queue._tasks[0].sheet is not None
-    assert all(task.sheet is None for task in list(queue._tasks)[1:])
+def _sheets_fail_for(repo, broken: set[int]) -> None:
+    original = repo.find_sheets
+
+    async def find_sheets(pixel_char_sn, item_sns):
+        if pixel_char_sn in broken:
+            raise BackendError(403, b'{"code":"PET_PRIMARY_ONLY"}', "application/json", [])
+        return await original(pixel_char_sn, item_sns)
+
+    repo.find_sheets = find_sheets
 
 
-def test_bake_맨몸_시트를_못_받으면_굽지_않고_넘어간다(repo) -> None:
-    generator, queue = BakeClient(), BakeQueue()
-    asyncio.run(service.enqueue_item_bake(generator, repo, repo, queue, SWEATER, True))
-    del repo.jobs[2]
-    asyncio.run(queue.drain())
+def test_bake_맨몸_시트를_못_받으면_굽지_않고_남겨_둔다(monkeypatch, repo) -> None:
+    _sheets_fail_for(repo, {2})
+    generator = BakeClient()
+    res = post_bake(make_client(monkeypatch, repo, generator))
+    assert res.json()["data"] == {"itemSn": SWEATER, "bakedCnt": 2, "failedCnt": 0, "lastYn": False}
     assert len(generator.calls) == 2
-    assert SWEATER in repo.jobs[1].item_sheets and SWEATER in repo.jobs[3].item_sheets
+    assert SWEATER not in repo.jobs[2].item_sheets and SWEATER not in repo.jobs[2].failed_items
+
+
+def test_bake_묶음을_하나도_처리하지_못하면_502(monkeypatch, repo) -> None:
+    _sheets_fail_for(repo, {1, 2, 3})
+    generator = BakeClient()
+    res = post_bake(make_client(monkeypatch, repo, generator))
+    assert res.status_code == 502
+    assert res.json()["code"] == "EXTERNAL_API_ERROR"
+    assert generator.calls == []
+
+
+def test_bake_대상_목록의_Java_4xx는_그대로(monkeypatch, repo) -> None:
+    async def list_bake_targets(item_sn):
+        raise BackendError(404, b'{"code":"ITEM_NOT_FOUND"}', "application/json", [])
+
+    repo.list_bake_targets = list_bake_targets
+    generator = BakeClient()
+    res = post_bake(make_client(monkeypatch, repo, generator))
+    assert res.status_code == 404
+    assert res.json()["code"] == "ITEM_NOT_FOUND"
+    assert generator.calls == []
+
+
+def test_bake_회원_미리보기가_먼저_굽고_같은_키는_다시_굽지_않는다(monkeypatch, repo) -> None:
+    generator, queue = BakeClient(), BakeQueue()
+    order: list[int] = []
+    original = service._bake_one
+
+    async def recording(task):
+        order.append(task.pixel_char_sn)
+        return await original(task)
+
+    monkeypatch.setattr(service, "_bake_one", recording)
+    preview = BakeTask(generator, repo, 3, SWEATER, fake_item("green-sweater"), sheet(), "PETC0001")
+
+    async def scenario():
+        batch = asyncio.create_task(service.bake_item_batch(generator, repo, queue, SWEATER, True))
+        await asyncio.sleep(0)
+        queue.put_first(preview)
+        return await batch
+
+    result = asyncio.run(scenario())
+    assert order == [3, 1, 2]
+    assert len(generator.calls) == 3
+    assert (result.baked_cnt, result.failed_cnt, result.last) == (3, 0, True)
 
 
 # 관리자만
@@ -378,42 +434,75 @@ def test_Java가_준_굽기_지시가_착용_지시에_들어간다() -> None:
 SETTINGS = Settings(backend_base_url="http://backend.test")
 
 
-def recording(pages: list[dict], requests: list[httpx2.Request]) -> httpx2.AsyncClient:
+def recording(page: dict, requests: list[httpx2.Request]) -> httpx2.AsyncClient:
     def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        page = int(request.url.params["page"])
-        return httpx2.Response(200, json={"data": pages[page]})
+        return httpx2.Response(200, json={"data": page})
 
     return httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
 
 
-def test_list_bake_targets는_마지막_페이지까지_모은다() -> None:
+def test_list_bake_targets는_첫_페이지만_읽는다() -> None:
     requests: list[httpx2.Request] = []
-    pages = [{"pixelCharSns": [1, 2], "last": False}, {"pixelCharSns": [3], "last": True}]
-    repo = JavaCharacterJobRepository(recording(pages, requests), SETTINGS, "access_token=admin")
-    assert asyncio.run(repo.list_bake_targets(SWEATER)) == [1, 2, 3]
+    page = {"pixelCharSns": [1, 2], "last": False}
+    repo = JavaCharacterJobRepository(recording(page, requests), SETTINGS, "access_token=admin")
+    found = asyncio.run(repo.list_bake_targets(SWEATER))
+    assert (found.pixel_char_sns, found.last) == ([1, 2], False)
     assert [str(r.url) for r in requests] == [
         f"http://backend.test/internal/ai/items/{SWEATER}/bake-targets?page=0",
-        f"http://backend.test/internal/ai/items/{SWEATER}/bake-targets?page=1",
     ]
     assert requests[0].headers["cookie"] == "access_token=admin"
 
 
 def test_list_bake_targets_응답_모양이_다르면_502() -> None:
-    repo = JavaCharacterJobRepository(recording([{"items": []}], []), SETTINGS, None)
+    repo = JavaCharacterJobRepository(recording({"items": []}, []), SETTINGS, None)
     with pytest.raises(AppError) as caught:
         asyncio.run(repo.list_bake_targets(SWEATER))
     assert caught.value.http_code == 502
 
 
-def test_전체_굽기용_저장소는_쿠키를_보내지_않는다() -> None:
-    requests: list[httpx2.Request] = []
+def test_bake_Java_호출에_요청의_관리자_쿠키가_실린다(monkeypatch) -> None:
+    """대상 목록·시트 조회·시트 파일·시트 저장 모두 관리자 쿠키 (쿠키 없는 호출 없음)"""
+    seen: list[httpx2.Request] = []
+    bare = sheet()
 
     def handler(request: httpx2.Request) -> httpx2.Response:
-        requests.append(request)
+        path = request.url.path
+        if path == "/internal/auth/check":
+            return fake_auth_check(request)
+        seen.append(request)
+        if path.endswith("/bake-items"):
+            items = [{"itemSn": SWEATER, "regnCd": "MYPC0004", "bakeHint": HINT}]
+            return httpx2.Response(200, json={"data": items})
+        if path.endswith("/bake-targets"):
+            return httpx2.Response(200, json={"data": {"pixelCharSns": [5], "last": True}})
+        if path.endswith("/sheets"):
+            data = {
+                "petSeCd": "PETC0001",
+                "sheetFileSn": 50,
+                "scale": LAYOUT.scale,
+                "originX": LAYOUT.origin_x,
+                "originY": LAYOUT.origin_y,
+                "items": [],
+            }
+            return httpx2.Response(200, json={"data": data})
+        if "/sheet-files/" in path:
+            return httpx2.Response(200, content=bare, headers={"content-type": "image/png"})
         return httpx2.Response(200, json={"data": None})
 
-    client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
-    repo = get_server_character_repository(client, SETTINGS)
-    asyncio.run(repo.report_bake_failure(1, SWEATER))
-    assert "cookie" not in requests[0].headers
+    monkeypatch.setenv("BACKEND_BASE_URL", "http://backend.test")
+    monkeypatch.setenv("CHARACTER_BAKE_ENABLED", "true")
+    get_settings.cache_clear()
+    app = create_app()
+    backend = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+    app.dependency_overrides[get_backend_client] = lambda: backend
+    app.dependency_overrides[get_character_client] = lambda: BakeClient()
+    app.dependency_overrides[get_bake_queue] = lambda: BakeQueue()
+
+    res = post_bake(TestClient(app))
+
+    assert res.json()["data"] == {"itemSn": SWEATER, "bakedCnt": 1, "failedCnt": 0, "lastYn": True}
+    paths = [(r.method, r.url.path) for r in seen]
+    assert ("PUT", f"/internal/ai/characters/5/item-sheets/{SWEATER}") in paths
+    assert any(path.endswith("/5/sheets") for _, path in paths)
+    assert all(r.headers.get("cookie") == "access_token=admin" for r in seen)

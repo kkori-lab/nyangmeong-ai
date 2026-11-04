@@ -8,7 +8,7 @@ PetSeCd = Literal["PETC0001", "PETC0002"]
 
 # FN-MYP-010-17 : 백엔드 CharacterSpec 과 같은 규격
 CANVAS_SIZE = 512
-FACE_X, FACE_Y, FACE_W, FACE_H = 128, 64, 256, 256
+FACE_X, FACE_Y, FACE_W, FACE_H = 96, 32, 320, 320
 
 
 class CharacterCreateResponse(BaseModel):
@@ -47,4 +47,8 @@ class ItemBakeResponse(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     item_sn: int
-    target_cnt: int
+    # 이번 묶음에서 시트 저장·실패 표시한 캐릭터 수
+    baked_cnt: int
+    failed_cnt: int
+    # 남은 대상 없음 : 관리자 프론트가 반복을 멈춤
+    last_yn: bool

@@ -11,12 +11,14 @@ import numpy as np
 from PIL import Image
 from scipy import ndimage
 
-from app.character.schemas import CANVAS_SIZE, FACE_W, FACE_X, FACE_Y
+from app.character.schemas import CANVAS_SIZE
 
-# FN-MYP-010-17 : 캐릭터 높이 통일 뒤 눈 위치 고정 -> 크기·얼굴 영역 일정
+# FN-MYP-010-17 : 캐릭터 높이 통일 뒤 눈 위치 고정 -> 크기·얼굴 자리 일정
 CHARACTER_HEIGHT = 341
-EYE_X = FACE_X + FACE_W / 2
-EYE_Y = FACE_Y + FACE_W * 0.56
+# 얼굴 영역과 떼어 숫자로 고정 : 지금까지 만든 캐릭터와 같은 눈 높이
+# (옛 얼굴 영역 (128, 64, 256, 256)의 가운데·56% 지점, 새 영역 (96, 32, 320, 320)에서 약 55%)
+EYE_X = 256.0
+EYE_Y = 207.36
 # 눈이 그림 위쪽에 있는 캐릭터 보정 : 입이 얼굴 영역 아래로 잘림 방지
 TOP_MAX = 100
 
