@@ -1,11 +1,11 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-MAN-001 메인페이지 · AI 건강분석 리포트 위젯 (분석 서버, 추가 요청) — 끝 (2026-11-04). 새 패키지 `app/healthreport/`: `GET /ai/pets/{petSn}/health-report`(분석 입력 SHA-256 `inputHash`가 저장본과 같으면 저장본, 다르면 LLM으로 다시 생성·저장. 기준일이 해시에 들어가 자정 갱신도 같은 규칙, 자동 재생성 하루 5회 넘으면 `staleYn`, 14일 기록 없으면 `dataLackYn`), `POST .../refresh`(1일 1회, 넘으면 409 `HEALTH_REPORT_REFRESH_LIMIT`). 계약 `docs/api/healthreport.md`·`internal.md` 두 행(초안). Java는 가짜로 테스트. 검증 1회차 통과
+SCR-MAN-001 메인페이지 · AI 건강분석 리포트 위젯 (분석 서버, 추가 요청) — 끝 (2026-11-04). 새 패키지 `app/healthreport/`: `GET /ai/pets/{petSn}/health-report`(분석 입력 SHA-256 `inputHash`가 저장본과 같으면 저장본, 다르면 LLM으로 다시 생성·저장. 기준일이 해시에 들어가 자정 갱신도 같은 규칙, 자동 재생성 하루 5회 넘으면 `staleYn`, 14일 기록 없으면 `dataLackYn`), `POST .../refresh`(1일 1회, 넘으면 409 `HEALTH_REPORT_REFRESH_LIMIT`). 계약 `docs/api/healthreport.md`·`internal.md` 두 행(초안). Java는 가짜로 테스트. 검증 1회차 통과. 추가-1(2026-11-04, 검증 통과·사람 확인): 실제 LLM 확인에서 이상 신호가 있는 아이에게 "산책을 다시 늘려 보세요"가 나와 `GENERATE_SYSTEM`을 고쳤다 — 이상 신호(혈액검사 범위 밖·체중 5% 이상 변화·식사·음수 감소 지속·묽은 변 지속)면 첫 팁은 수의사 상담, 활동·식단 변경 권유 금지. 같은 상수에 "모든 지표가 각 3건 미만이면 '기록이 더 필요해요'·기록 권유만"도 넣었다(요청 밖, /end 확인 때 남김)
 
 ## 다음에 할 것
 - 연결 남음: FN-MAN-006 Java 리포트 내부 API 2개 (LJS 백엔드): `GET /internal/ai/pets/{petSn}/health-report-input?baseYmd=`(분석 입력 + 최근 저장본 + `rfrshPsblYn`·`autoRgnrPsblYn`), `PUT /internal/ai/pets/{petSn}/health-report`(`inputHash`·`rfrshYn` 저장, 새로고침 1회·자동 재생성 5회 셈). 새 테이블이라 ERD 변경. 계약 초안은 `docs/api/internal.md`, 백엔드 PR과 함께 확정. 백엔드 `docs/api/issues.md` 4번(위젯 정의 없음)을 이 계약으로 닫는다
-- 연결 남음: FN-MAN-006 메인 위젯 연결 (프론트): `AiReportCard.jsx`가 샘플 대신 `GET /ai/pets/{petSn}/health-report`를 부른다. `rptTtl`을 "{petNm}는 지금 ___"에, `tips`·`notice` 표시, `staleYn`이면 "최근 기록이 아직 반영되지 않았어요", `dataLackYn`이면 기록 유도, `rfrshPsblYn`으로 새로고침 버튼(`POST .../refresh`, 409 `HEALTH_REPORT_REFRESH_LIMIT`)
+- 연결 남음: FN-MAN-006 메인 위젯 연결 (프론트): `AiReportCard.jsx`가 샘플 대신 `GET /ai/pets/{petSn}/health-report`를 부른다. `rptTtl`을 "{petNm}는 지금 ___"에, `tips`·`notice` 표시, `staleYn`이면 "최근 기록이 아직 반영되지 않았어요", `dataLackYn`이면 기록 유도, `rfrshPsblYn`으로 새로고침 버튼(`POST .../refresh`, 409 `HEALTH_REPORT_REFRESH_LIMIT`). 이름 받침에 따라 은/는("복실은"), 새로 만들 때 3~6초 걸려 로딩 표시(실제 LLM 측정)
 - 각자 `.env.local`에 `HEALTH_REPORT_TIMEOUT_SEC=20` 추가(없어도 기본값 20) — 디스코드 `.env.local` 갱신
 - 연결 남음: FN-AIM-010-06 프론트 [직접 입력] 영수증 연결 (LJS 프론트, 맨 먼저): frontend-11 세션에 전달함(2026-11-03, SCR-ADM-050 루프 중이라 사람이 그 대화에서 요청해야 반영). `ReceiptUploadModal.jsx` `onError`에서 `setFailedRecptSn(error.data?.recptSn ?? null)`, [직접 입력]이 넘기는 키 `rcptSn`을 받는 쪽 이름과 맞춤, 다시 촬영·닫기 때 초기화. 계약 변경이라 AI PR과 프론트 PR을 함께 낸다
 - 연결 남음: FN-AIM-010-06 직접 입력 저장 뒤 영수증 상태 저장완료 (LJS 백엔드): `CheckupService.create(…, recptSn)`은 상태를 보지 않고 연결만 한다(상태 보고 실패로 분석중이어도 거절 안 함). 저장완료로 바꾸는지 확인([확인 필요] 명세 문구)
