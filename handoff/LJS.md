@@ -1,11 +1,13 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-MYP-011 아이템 상점 모달 (착용 합성 이미지 저장, SCR-MYP-010 공통) — 끝 (2026-11-04). 흐름은 Java 먼저(LJS 결정): 꾸미기 [장착] → React가 Java `PUT /pixel-characters/{pixelCharSn}/equipped-items`(확정, 대표 이미지 삭제) → 성공 뒤 Python `POST /ai/characters/{pixelCharSn}/equipped-image` `{itemSns}`가 `/preview`와 같은 합성 → Java `PUT /internal/ai/characters/{pixelCharSn}/equipped-image`(지금 착용 목록과 같을 때만 저장, 다르면 409 `EQUIPPED_ITEMS_CHANGED`). 오류는 `/preview`와 같고 저장 안 함. 계약 `docs/api/character.md`·`internal.md`(초안). Java는 가짜로 테스트. 검증 판정 확인 못 함 있음(연결 남음뿐)
+SCR-MYP-011 아이템 상점 모달 (백엔드 #149 연결: 대표 이미지 계약 확정·얼굴 영역·관리자 쿠키 전체 굽기, SCR-MYP-010·ADM-070 공통) — 끝 (2026-11-04). `POST /ai/items/{itemSn}/bake`는 한 묶음(최대 13개)을 관리자 쿠키로 굽고 200 `{itemSn, bakedCnt, failedCnt, lastYn}`, 쿠키 없는 저장소 삭제. 얼굴 영역 `(96, 32, 320, 320)`, 눈 기준점 `(256, 207.36)` 숫자 고정. `internal.md` 30~36행 백엔드 #149 기준 확정. 검증 1회차 확인 못 함 있음(연결 남음뿐), 사람 확인 완료
 
 ## 다음에 할 것
-- 연결 남음: FN-MYP-010-16 Java 대표 이미지 (LJS 백엔드): `PUT /internal/ai/characters/{pixelCharSn}/equipped-image`(multipart `image` + 폼 `itemSns` 여러 번, 지금 착용 목록과 다르면 409 `EQUIPPED_ITEMS_CHANGED`), `PUT /pixel-characters/{pixelCharSn}/equipped-items` 때 대표 이미지 삭제, `GET /pets/{petSn}/character-image`가 저장본(없으면 맨몸)을 준다. 계약 초안은 `docs/api/internal.md`, 백엔드 PR과 함께 확정. 프론트는 꾸미기 [장착]이 Java 성공 뒤 `POST /ai/characters/{pixelCharSn}/equipped-image`를 같은 `itemSns`로 부른다(기다리지 않아도 됨)
-- 연결 남음: FN-MYP-010-13·16 화면 확인 (LJS 백엔드): 로컬 Java에 시트가 있는 캐릭터가 없어(2026-11-04 회원 1~30 × 캐릭터 1~40 모두 404·403) `/preview` PNG 회귀와 `equipped-image` 저장을 실제로 못 봤다. 백엔드 PR #105 병합·공용 DB v0.12 적용 뒤 캐릭터를 만들어 확인
+- 병합 순서: 백엔드 PR #149(LJS, 대표 이미지 저장·관리자 쿠키 시트 허용·`CharacterSpec.FACE` `(96, 32, 320, 320)`) 먼저 → AI `LJS` PR. 각자 로컬 DB에 `PIXEL_CHAR.WEAR_IMG_FILE_SN` ALTER(v0.13 (1)) (LJS 백엔드)
+- 연결 남음: FN-ADM-070-02 관리자 프론트 아이템 등록 화면 (관리자 프론트): [굽기 지시 만들기](`POST /ai/items/bake-hints`)·[시험해 보기](`POST /ai/items/trial-preview`), 등록 성공 뒤 `POST /ai/items/{itemSn}/bake`를 `lastYn` true까지 반복(한 번 30~40초, 매 호출 전 토큰 갱신, 502면 멈춤)
+- 연결 남음: FN-MYP-010-16 프론트 꾸미기 [장착] (SJM): Java `PUT equipped-items`(`hldItemSns`) 성공 뒤 `POST /ai/characters/{pixelCharSn}/equipped-image` `{itemSns}`(아이템 번호)
+- 로컬 시험 데이터: 관리자 mbrSn 2(601 주양육자)의 petSn 1001 "시험복실"·pixelCharSn 601. 2026-11-04 문의 207을 복원(CHRC0009) 처리, 아이템 31(hldItemSn 1313)·1(1312) 구매
 - 연결 남음: FN-MAN-006 Java 리포트 내부 API 2개 (LJS 백엔드): `GET /internal/ai/pets/{petSn}/health-report-input?baseYmd=`(분석 입력 + 최근 저장본 + `rfrshPsblYn`·`autoRgnrPsblYn`), `PUT /internal/ai/pets/{petSn}/health-report`(`inputHash`·`rfrshYn` 저장, 새로고침 1회·자동 재생성 5회 셈). 새 테이블이라 ERD 변경. 계약 초안은 `docs/api/internal.md`, 백엔드 PR과 함께 확정. 백엔드 `docs/api/issues.md` 4번(위젯 정의 없음)을 이 계약으로 닫는다
 - 연결 남음: FN-MAN-006 메인 위젯 연결 (프론트): `AiReportCard.jsx`가 샘플 대신 `GET /ai/pets/{petSn}/health-report`를 부른다. `rptTtl`을 "{petNm}는 지금 ___"에, `tips`·`notice` 표시, `staleYn`이면 "최근 기록이 아직 반영되지 않았어요", `dataLackYn`이면 기록 유도, `rfrshPsblYn`으로 새로고침 버튼(`POST .../refresh`, 409 `HEALTH_REPORT_REFRESH_LIMIT`). 이름 받침에 따라 은/는("복실은"), 새로 만들 때 3~6초 걸려 로딩 표시(실제 LLM 측정)
 - 각자 `.env.local`에 `HEALTH_REPORT_TIMEOUT_SEC=20` 추가(없어도 기본값 20) — 디스코드 `.env.local` 갱신
@@ -16,23 +18,17 @@ SCR-MYP-011 아이템 상점 모달 (착용 합성 이미지 저장, SCR-MYP-010
 - 연결 남음: FN-MYP-031-03·05 프론트 가계부 (SJM): `src/features/expense/api.js` `recognizeReceipt` 가짜(`POST /receipts/recognize`) → `POST /ai/receipts`(form `ocrRqstSrcCd=AIMC0027`, `petSn` 없음). 응답 `data.ocr`의 `ckupYmd`·`recptAmt`를 `expndYmd`·`expndAmt`로, `expndPlcusNm`·`expndClsfCd`는 그대로. 0건은 값이 모두 null인 200, 504 `OCR_TIMEOUT`·502 `OCR_API_ERROR`는 "영수증을 읽지 못했어요"
 - OCR 출력 모양(`app/ocr/clients.py` `ReceiptOutput`)에 필드를 더하면 Anthropic API가 400 "Schema is too complex"로 거절할 수 있다(2026-11-03 실측: 기본값 있는 필드 2개 추가로 모든 인식 실패, 가짜 LLM 테스트로는 안 잡힘). 필드를 더하면 실제 영수증으로 한 번 돌려 본다 (LJS)
 - 개발 DB 정리: 2026-11-03 검증이 회원 1·반려동물 2의 RECPT 501·502(백엔드 #124 검증으로 505·508, SCR-AIM-010 검증으로 514 추가)와 원본 파일을 남겼다. 필요하면 지운다 (LJS 백엔드)
-- 전체 굽기 재설계 (FN-ADM-070-02, 맨 먼저): 2026-11-03 백엔드(사람) 결정으로 시트 내부 API 4개(sheets·sheet-files·PUT item-sheets·POST item-sheets/failure)는 쿠키 인증만 받는다. 지금 `POST /ai/items/{itemSn}/bake`의 쿠키 없는 저장소(`get_server_character_repository`)는 운영에서 401로 전부 건너뛴다. 토큰 30분 만료·남의 캐릭터 시트를 쿠키 전제에서 푸는 방식을 정해 백엔드에 계약 제안. 후보: 관리자 쿠키로 남의 캐릭터 시트 읽기·쓰기 허용 + 관리자 화면이 페이지 단위로 여러 번 호출(요청 하나가 토큰 수명 안에 끝나는 크기) (LJS)
-- 연결 남음: FN-MYP-011-01·FN-ADM-070-02 실제 Java 굽기 계약: 백엔드 PR #120(develop 대상, 2026-11-03 병합 전)에 `bake-items` `{itemSn, regnCd, bakeHint}`(판매 중·지시 있음, 시드 30개), `GET /internal/ai/items/{itemSn}/bake-targets?page=`(0부터, 100개, 관리자 쿠키만, 403 `ADMIN_ONLY`·404 `ITEM_NOT_FOUND`), 관리자 등록·수정 `bakeHint`(300자, 신발은 400, 바뀌면 그 아이템 시트 삭제). 공용 DB v0.12 (3) 적용됨. 병합 순서: 백엔드 #120 먼저 → AI `LJS` PR. AI 쪽 `bake-targets` 연결은 위 "전체 굽기 재설계"와 함께. 곰돌이 후드티 지시는 hood down으로 고치자고 backend-95에 답함
-- 연결 남음: FN-ADM-070-02 관리자 프론트 아이템 등록 화면에 [굽기 지시 만들기](`POST /ai/items/bake-hints`)·[시험해 보기](`POST /ai/items/trial-preview`)·등록 성공 뒤 `POST /ai/items/{itemSn}/bake` 호출 (관리자 프론트)
-- 로컬 시험 데이터: 관리자 mbrSn 2의 반려동물 petSn 1001 "시험복실"·캐릭터 pixelCharSn 601 (시험 굽기용, 2026-11-03)
 - 결정 남음: `bake-hints`의 그림 형식·10MB 오류는 `/ai/characters`와 같은 `FILE_TYPE_NOT_ALLOWED`·`FILE_SIZE_EXCEEDED`로 했다(기획은 `INVALID_REQUEST`) (LJS)
-- 병합 순서: 백엔드 PR #105(`d73ca54`, 캐릭터 내부 API 포함) 먼저 → 병합 직후 공용 DB v0.12 적용(사람) → AI `LJS` PR. 순서가 바뀌면 캐릭터 생성 502 (LJS)
 - 옛 흐름으로 만든 캐릭터는 맨몸 시트가 없어 `/preview`가 404 `PIXEL_CHARACTER_NOT_FOUND`다. 다시 만들어야 한다. 무료 재생성(FN-MYP-010-23)은 사진이 Java로 오지 않아 SCR-ADM-042 전에 계약을 정한다 (LJS 백엔드)
 - 하네스 수정 PR 후보(공용): `verify-loop.sh guard`가 읽기 전용 비교(`git diff --no-index`)까지 막아 verify 절차와 어긋난다
 - 굽기·합성 최적화: 굽기 26개 실측 1회 104.2초(동시 10, 아이템당 31.5~37.0초, 재시도 없음). 동시 13으로 올린 값은 미측정. 합성 1.4초는 시험 그림 값. 후보는 전용 스레드 풀(기본 풀은 CPU+4라 코어 9개 미만 서버에서 13이 안 나온다), 429 대기 후 재시도, OpenAI 계정 한도 확인, 이미지 품질 `low` (LJS)
 - 고양이 꼬리 경계선·다리 사이 분홍 점: 원인 미확인(착용 지시 변경의 영향 포함). 정렬 2단계 탐색은 촘촘한 무늬에서 빗나갈 수 있고 그림체 샘플 1장으로만 확인 (LJS)
-- 굽기 켜기: 팀 비용 결정(26개 기준 캐릭터당 약 $1.64), Java 시트 저장 연결 뒤. 켜기 전 access_token(30분) 만료 대책을 정한다: 만료 뒤 아이템은 비용을 내고도 저장·실패 표시가 안 되어 "안 구운 아이템"으로 남고, 성공 보고 401이면 결과를 잃고 작업은 시간 초과 실패가 된다 (LJS)
+- 굽기 켜기: 팀 비용 결정(26개 기준 캐릭터당 약 $1.64), Java 시트 저장 연결 뒤. 켜기 전 access_token(30분) 만료 대책을 정한다: 만료 뒤 아이템은 비용을 내고도 저장·실패 표시가 안 되어 "안 구운 아이템"으로 남고, 성공 보고 401이면 결과를 잃고 작업은 시간 초과 실패가 된다 (LJS) — 관리자 전체 굽기는 2026-11-04 나눠 굽기로 해결, 회원 캐릭터 생성 뒤 굽기는 남음
 - 백엔드(LJS): 신발을 안 넣기로 해서 공통코드 `MYPC0006`과 시드 신발 4개는 정리 대상이다(공통코드는 DB에서만 고친다) (LJS)
 - DMS 모음: FN-MYP-010-13 겹침 순서(캐릭터 → 의상 → … → 머리장식) vs 합성 순서(머리 착용 바탕 위에 의상) (LJS)
 - DMS 모음: FN-MYP-010-13 "고정 좌표로 겹쳐 표시" vs 서버 합성, FN-MYP-010-17 "기준 좌표 고정" vs 상단 보정(눈 y가 캐릭터마다 다를 수 있음), 얼굴 영역 값 변경 (LJS)
 - 눈 찾기 위험: `dog_fluffy` 512 재검출이 눈이 아닌 쌍을 잡았다. 실제 배치 경로에서는 샘플 10건 모두 맞았으나, 틀리면 규격을 통과한 채 조용히 어긋난다. 검은 털은 하이라이트 기준이라 눈 높이가 몇 px 다를 수 있고 측정하지 않았다 (LJS)
 - 약한 테스트: EXIF 제거·회전 테스트 입력에 EXIF가 없다. 고양이 분기는 가짜 저장소가 짝수 `petSn`일 때만 `PETC0002`를 준다(실제 값은 Java 연결 뒤 확인) (LJS)
-- 얼굴 영역 `(128, 64, 256, 256)` → `(96, 32, 320, 320)` 변경 (LJS 결정 2026-11-02): 백엔드 `CharacterSpec.FACE`·`cropFace`의 256 축소 여부·AI `schemas.py`를 같이 바꾼다(`AGENTS.md` 4번, 백엔드 PR과 함께). AI는 눈 y=207 계산이 `FACE_Y`에 묶여 있어 상수를 분리한다 (LJS)
 - 프론트(LJS) 알리기: SCR-AIM-011 첫 SEARCH 답변은 `done` 뒤 제목 요약(Haiku 한 번)이 끝나야 SSE 스트림이 닫힌다. 입력창 다시 열기는 스트림 종료가 아닌 `done` 기준으로. 바뀐 제목은 대화 목록을 다시 읽어 반영
 - 프론트(LJS) 알리기: 범위 밖 질문도 `intent.kind` FALLBACK 그대로(칩·연속 실패 카운트 같음), `done.message.cnvrsCn`만 범위 안내 문구. 프론트가 폴백 문구를 하드코딩하면 `done.message`를 쓰게 맞춘다
 - backend-90에 알리기: requirements.txt 커밋됨(`bf28ade`, LJS). 배포는 develop → master 병합 뒤. 서버 gunicorn은 워커 1개(`_in_progress` 프로세스 메모리)
