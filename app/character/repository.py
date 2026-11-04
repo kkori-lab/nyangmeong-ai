@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Annotated, Any, Protocol
@@ -77,6 +77,10 @@ class CharacterJobRepository(Protocol):
     async def report_bake_failure(self, pixel_char_sn: int, item_sn: int) -> None: ...
 
     async def find_sheets(self, pixel_char_sn: int, item_sns: Iterable[int]) -> CharacterSheets: ...
+
+    async def save_equipped_image(
+        self, pixel_char_sn: int, item_sns: Sequence[int], image: bytes
+    ) -> None: ...
 
 
 class _JobResponse(BaseModel):
@@ -237,6 +241,19 @@ class JavaCharacterJobRepository:
             Layout(found.scale, found.origin_x, found.origin_y),
             {item.item_sn: sheet for item, sheet in zip(baked, files[1:], strict=True)},
             frozenset(item.item_sn for item in items if item.bake_failed),
+        )
+
+    async def save_equipped_image(
+        self, pixel_char_sn: int, item_sns: Sequence[int], image: bytes
+    ) -> None:
+        # FN-MYP-010-16 : Java 대표 이미지로 저장
+        # 지금 확정 착용 목록과 다르면 409 EQUIPPED_ITEMS_CHANGED (옛 합성 덮어쓰기 방지)
+        await self._call(
+            "PUT",
+            f"{CHARACTERS_PATH}/{pixel_char_sn}/equipped-image",
+            files={"image": _png("image.png", image)},
+            data={"itemSns": [str(sn) for sn in item_sns]},
+            timeout=SHEET_TIMEOUT_SEC,
         )
 
     async def _fetch_sheet(self, pixel_char_sn: int, atch_file_sn: int | None) -> bytes:

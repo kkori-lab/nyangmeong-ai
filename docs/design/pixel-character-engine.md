@@ -32,7 +32,10 @@ Python ↔ Java ↔ React 계약 초안이다. **코드 없음, 팀 확인 전.*
          아이템마다: 맨몸 시트 + 아이템 지시 → 착용 시트 → Java에 저장·상태 보고
 ③ 합성  React ─POST /ai/characters/{pixelCharSn}/preview (장비)─▶ Python
          Python ─시트 조회─▶ Java → 합성 → 512 PNG 응답(저장 안 함)
-         확정은 기존 Java `PUT /pixel-characters/{pixelCharSn}/equipped-items`
+         확정은 기존 Java `PUT /pixel-characters/{pixelCharSn}/equipped-items` (대표 이미지 삭제 → 맨몸)
+④ 저장  확정 성공 뒤 React ─POST /ai/characters/{pixelCharSn}/equipped-image (같은 장비)─▶ Python
+         Python ─시트 조회─▶ Java → 합성 → PUT /internal/ai/characters/{pixelCharSn}/equipped-image
+         Java: 지금 착용 목록과 같으면 대표 이미지로 저장 → GET /pets/{petSn}/character-image
 ```
 
 ## 2. API 초안
@@ -43,6 +46,7 @@ Python ↔ Java ↔ React 계약 초안이다. **코드 없음, 팀 확인 전.*
 | --- | --- | --- | --- |
 | POST | `/ai/characters` (있음) | 사진·petSn 받아 생성 작업 시작. 바뀌는 것은 생성기 구현과 성공 보고 내용뿐 | 202, `charCrtJobSn` |
 | POST | `/ai/characters/{pixelCharSn}/preview` (새로) | 아이템(`itemSns`, 상점에서는 안 산 아이템도 입혀 보므로 보유 번호가 아님)대로 합성한 512 PNG | `image/png`. 아직 안 구운 아이템이 있으면 그 아이템을 큐 맨 앞으로 올리고 409 `ITEM_BAKING` |
+| POST | `/ai/characters/{pixelCharSn}/equipped-image` (새로) | [장착] 확정 뒤 같은 `itemSns`로 합성해 Java에 대표 이미지로 저장 | 200. 오류는 `/preview`와 같고 저장하지 않는다 |
 
 ### Python → Java (새로 필요, 백엔드 몫)
 
@@ -53,6 +57,7 @@ Python ↔ Java ↔ React 계약 초안이다. **코드 없음, 팀 확인 전.*
 | 아이템 착용 시트 저장·굽기 상태 보고 | 캐릭터 × 아이템 단위 |
 | 굽기 대상 아이템 목록 조회 | `ITEM` 중 판매 중 + 엔진이 아는 아이템 |
 | 합성용 시트 조회 | 맨몸 시트 + 요청 장비의 착용 시트 |
+| 대표 이미지 저장 | `PUT /internal/ai/characters/{pixelCharSn}/equipped-image`, 지금 착용 목록과 같을 때만 |
 | 반려동물 정보 | 작업 생성이 이미 `petSeCd`·`vrtyNm`·`colrNm`·`chrcCn`을 돌려준다(`CharacterRequest`). 엔진이 쓰는 성별(`PET_GNDR_CD`)만 없다 — 추가 여부 결정 |
 | 사진 원본 조회 | 굽기는 맨몸 시트로 하므로 생성 뒤에는 필요 없다(생성 때는 요청에 사진이 온다) |
 
