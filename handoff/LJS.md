@@ -1,9 +1,12 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-010 OCR 인식 실패 · 일시 오류 뒤 직접 입력 영수증 연결 — 끝 (2026-11-03). `/ai/receipts`의 504 `OCR_TIMEOUT`·502 `OCR_API_ERROR` 오류 본문에 `data { recptSn }`을 담았다(`AppError.data`, 백엔드 `ApiResponse.errorWithData`와 같은 모양). 상태 보고가 실패해도 남는다. 다른 오류·내부 경로는 `data` 없음. `docs/api/ocr.md` 갱신. 검증 1회차 통과
+SCR-MAN-001 메인페이지 · AI 건강분석 리포트 위젯 (분석 서버, 추가 요청) — 끝 (2026-11-04). 새 패키지 `app/healthreport/`: `GET /ai/pets/{petSn}/health-report`(분석 입력 SHA-256 `inputHash`가 저장본과 같으면 저장본, 다르면 LLM으로 다시 생성·저장. 기준일이 해시에 들어가 자정 갱신도 같은 규칙, 자동 재생성 하루 5회 넘으면 `staleYn`, 14일 기록 없으면 `dataLackYn`), `POST .../refresh`(1일 1회, 넘으면 409 `HEALTH_REPORT_REFRESH_LIMIT`). 계약 `docs/api/healthreport.md`·`internal.md` 두 행(초안). Java는 가짜로 테스트. 검증 1회차 통과
 
 ## 다음에 할 것
+- 연결 남음: FN-MAN-006 Java 리포트 내부 API 2개 (LJS 백엔드): `GET /internal/ai/pets/{petSn}/health-report-input?baseYmd=`(분석 입력 + 최근 저장본 + `rfrshPsblYn`·`autoRgnrPsblYn`), `PUT /internal/ai/pets/{petSn}/health-report`(`inputHash`·`rfrshYn` 저장, 새로고침 1회·자동 재생성 5회 셈). 새 테이블이라 ERD 변경. 계약 초안은 `docs/api/internal.md`, 백엔드 PR과 함께 확정. 백엔드 `docs/api/issues.md` 4번(위젯 정의 없음)을 이 계약으로 닫는다
+- 연결 남음: FN-MAN-006 메인 위젯 연결 (프론트): `AiReportCard.jsx`가 샘플 대신 `GET /ai/pets/{petSn}/health-report`를 부른다. `rptTtl`을 "{petNm}는 지금 ___"에, `tips`·`notice` 표시, `staleYn`이면 "최근 기록이 아직 반영되지 않았어요", `dataLackYn`이면 기록 유도, `rfrshPsblYn`으로 새로고침 버튼(`POST .../refresh`, 409 `HEALTH_REPORT_REFRESH_LIMIT`)
+- 각자 `.env.local`에 `HEALTH_REPORT_TIMEOUT_SEC=20` 추가(없어도 기본값 20) — 디스코드 `.env.local` 갱신
 - 연결 남음: FN-AIM-010-06 프론트 [직접 입력] 영수증 연결 (LJS 프론트, 맨 먼저): frontend-11 세션에 전달함(2026-11-03, SCR-ADM-050 루프 중이라 사람이 그 대화에서 요청해야 반영). `ReceiptUploadModal.jsx` `onError`에서 `setFailedRecptSn(error.data?.recptSn ?? null)`, [직접 입력]이 넘기는 키 `rcptSn`을 받는 쪽 이름과 맞춤, 다시 촬영·닫기 때 초기화. 계약 변경이라 AI PR과 프론트 PR을 함께 낸다
 - 연결 남음: FN-AIM-010-06 직접 입력 저장 뒤 영수증 상태 저장완료 (LJS 백엔드): `CheckupService.create(…, recptSn)`은 상태를 보지 않고 연결만 한다(상태 보고 실패로 분석중이어도 거절 안 함). 저장완료로 바꾸는지 확인([확인 필요] 명세 문구)
 - 인식·0건인데 결과 보고가 실패한 경우(Java 4xx 그대로·502 `EXTERNAL_API_ERROR`)와 프론트 20초 가드가 먼저 끊은 경우는 `recptSn`이 없어 [직접 입력]이 연결 없는 기록이 된다(그대로 두기로 함) (LJS)

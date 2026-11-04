@@ -11,6 +11,7 @@ AI 서버(이 저장소)의 API와 요청·응답 DTO다. **팀 확인 전 초�
 | 영수증 분석 | [`ocr.md`](ocr.md) | React | LJS |
 | 캐릭터 생성 | [`character.md`](character.md) | React | LJS |
 | 검사결과지 PDF 분석 | [`checkup.md`](checkup.md) | React | LJS |
+| AI 건강분석 리포트(메인) | [`healthreport.md`](healthreport.md) | React | LJS |
 
 ## 공통 규칙
 
