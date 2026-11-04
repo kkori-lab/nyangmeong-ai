@@ -4,6 +4,7 @@
 SCR-MYP-011 아이템 상점 모달 (백엔드 #149 연결: 대표 이미지 계약 확정·얼굴 영역·관리자 쿠키 전체 굽기, SCR-MYP-010·ADM-070 공통) — 끝 (2026-11-04). `POST /ai/items/{itemSn}/bake`는 한 묶음(최대 13개)을 관리자 쿠키로 굽고 200 `{itemSn, bakedCnt, failedCnt, lastYn}`, 쿠키 없는 저장소 삭제. 얼굴 영역 `(96, 32, 320, 320)`, 눈 기준점 `(256, 207.36)` 숫자 고정. `internal.md` 30~36행 백엔드 #149 기준 확정. 검증 1회차 확인 못 함 있음(연결 남음뿐), 사람 확인 완료
 
 ## 다음에 할 것
+- 추가 요청(2026-11-04 LJS): AI 대화창 서비스 기능 안내. "픽셀 캐릭터 생성 어디서 해?" 같은 질문이 SEARCH로 가는데 답변 프롬프트(`app/chat/clients.py` `ANSWER_SYSTEM`)에 앱 메뉴·화면 위치 정보가 없어 추측으로 답한다. 라우팅 추가는 필요 없음(`data/routing.yaml` 6번 행에 걸린 뒤 질문꼴이라 AI 분류 → SEARCH). 할 일: DMS 화면설계서·IA에서 기능별 진입 경로·사용 순서를 뽑아 서비스 안내서(`data/service_guide.yaml` 등)를 만들고 `ANSWER_SYSTEM`에 붙임(프롬프트 캐시), SEARCH 관련 화면 바로가기(FN-AIM-002-04)로 이동 버튼 함께. "어디서 해·어디 있어"는 ROUTE로 분류하도록 보강 검토. 마일스톤 SCR-AIM-002 (서비스 기능 안내) 절 (LJS)
 - 병합 순서: 백엔드 PR #149(LJS, 대표 이미지 저장·관리자 쿠키 시트 허용·`CharacterSpec.FACE` `(96, 32, 320, 320)`) 먼저 → AI `LJS` PR. 각자 로컬 DB에 `PIXEL_CHAR.WEAR_IMG_FILE_SN` ALTER(v0.13 (1)) (LJS 백엔드)
 - 연결 남음: FN-ADM-070-02 관리자 프론트 아이템 등록 화면 (관리자 프론트): [굽기 지시 만들기](`POST /ai/items/bake-hints`)·[시험해 보기](`POST /ai/items/trial-preview`), 등록 성공 뒤 `POST /ai/items/{itemSn}/bake`를 `lastYn` true까지 반복(한 번 30~40초, 매 호출 전 토큰 갱신, 502면 멈춤)
 - 연결 남음: FN-MYP-010-16 프론트 꾸미기 [장착] (SJM): Java `PUT equipped-items`(`hldItemSns`) 성공 뒤 `POST /ai/characters/{pixelCharSn}/equipped-image` `{itemSns}`(아이템 번호)
