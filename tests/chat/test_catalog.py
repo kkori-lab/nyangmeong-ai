@@ -38,13 +38,15 @@ def tool_of(raw: dict, name: str) -> dict:
 # 설계 7절 테스트 ①~⑤
 
 
-def test_스냅샷의_도구마다_설명이_있고_설명의_Java_도구는_스냅샷에_있어야_한다():
-    # ①
+def test_스냅샷의_CARD_도구마다_설명이_있고_설명의_Java_도구는_스냅샷에_있어야_한다():
+    # ① READ is listed by Java but not loaded until its prompt exists (design 8-4)
     prompts = catalog.tool_prompts()
-    snapshot = {tool.name for tool in catalog.read_snapshot().tools}
+    snapshot = catalog.read_snapshot().tools
+    cards = {tool.name for tool in snapshot if tool.kind == "CARD"}
     java_prompts = {name for name, prompt in prompts.items() if not prompt.builtin}
 
-    assert snapshot == java_prompts == REGISTER
+    assert cards == java_prompts == REGISTER
+    assert java_prompts <= {tool.name for tool in snapshot}
     assert {name for name, prompt in prompts.items() if prompt.builtin} == BUILTIN
 
 
@@ -326,10 +328,11 @@ def test_structureVersion이_스냅샷과_다르면_경고하고_Java_응답을_
 
 def test_Java_클라이언트는_내부_API_응답의_data를_읽어야_한다():
     requests: list[httpx2.Request] = []
+    raw = fake_catalog_json()
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx2.Response(200, json={"status": "success", "data": fake_catalog_json()})
+        return httpx2.Response(200, json={"status": "success", "data": raw})
 
     backend = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     settings = Settings(_env_file=None, backend_base_url="http://backend.test")
@@ -338,7 +341,7 @@ def test_Java_클라이언트는_내부_API_응답의_data를_읽어야_한다()
 
     assert str(requests[0].url) == "http://backend.test/internal/ai/tools"
     assert "cookie" not in requests[0].headers
-    assert {tool.name for tool in response.tools} == REGISTER
+    assert {tool.name for tool in response.tools} == {tool["name"] for tool in raw["tools"]}
 
 
 def test_기동_때_켜져_있고_Java가_없으면_builtin_도구만_실어야_한다(monkeypatch):
