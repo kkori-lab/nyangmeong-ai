@@ -225,12 +225,17 @@
 - 기능: FN-AIM-004-02 분류, FN-AIM-012-03 등록 칸 추출의 도구 정의를 Java 도구 목록(가짜) + `data/tool_prompts.yaml`로 만든다 (위 `끝` 절에서 센 기능. 대조에 다시 세지 않는다. 설계 `docs/design/tool-catalog.md` 8절 1번, 기능 ID는 기능명세서 v0.13에 아직 없음)
 - 기다리는 것: Java `GET /internal/ai/tools` (LJS 백엔드, 8절 2번). 그 전에는 가짜 응답
 - 완료 조건: `/start` 기획의 완료 조건을 따른다. 응답 계약(`intent.kind`·`done`)은 바꾸지 않고, `CHAT_TOOL_AGENT`를 끈 기본 동작은 지금과 같다.
-- 연결 남음: FN-AIM-004-02·FN-AIM-012-03 가짜 도구 목록 → 실제 Java `GET /internal/ai/tools` (백엔드 구현 통과·PR 전, LJS 백엔드. 설계 8절 3번)
+- 연결: FN-AIM-004-02·FN-AIM-012-03 가짜 도구 목록 → 실제 Java `GET /internal/ai/tools` (끝 2026-11-06, 아래 "도구 목록 API 연결" 절)
 
 ## SCR-AIM-004 대화창 · 도구 목록 1차 후속 (tool_eval 재측정, 추가 요청) — 끝
 - 기능: 도구 목록 1차로 만든 도구 정의로 1단계 실험 평가를 다시 잰다 (위 `끝` 절에서 센 기능. 대조에 다시 세지 않는다. 설계 `docs/design/tool-calling.md` 7-1절)
 - 기다리는 것: 없음
 - 완료 조건: `/start` 기획의 완료 조건을 따른다. 앱 코드는 바꾸지 않는다.
+
+## SCR-AIM-004 대화창 · 도구 목록 API 연결 (가짜 → 실제 Java, 추가 요청) — 끝
+- 기능: 도구 목록 1차의 가짜 Java 응답을 실제 `GET /internal/ai/tools`(백엔드 PR #174 병합)에 맞춘다 (위 `끝` 절에서 센 기능. 대조에 다시 세지 않는다. 설계 `docs/design/tool-catalog.md` 8절 3번)
+- 기다리는 것: 없음
+- 완료 조건: `/start` 기획의 완료 조건을 따른다. 응답 계약(`intent.kind`·`done`)은 바꾸지 않고, `CHAT_TOOL_AGENT`를 끈 기본 동작은 지금과 같다.
 
 ## 제외
 - FN-AIM-001-01~04,06, FN-AIM-002-01,05~06, FN-AIM-004-03~07, FN-AIM-005-03~06, FN-AIM-011-01~02,04~06,17~18,20, FN-AIM-012-09,15 (27건): 프론트 몫 (LJS 프론트: 대화창 화면)

@@ -1,7 +1,26 @@
 {
-  "version": "fake-1",
-  "structureVersion": "fake-structure-1",
+  "version": "snapshot",
+  "structureVersion": "ba5b51bdbd7cc281c42ee6a1be82f690806f254be80618448766258b282ba6ea",
   "tools": [
+    {
+      "name": "draft_care_item",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "POST", "path": "/api/pets/{petSn}/care-items"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "careArtclNm": {"in": "body", "type": "string", "required": true, "maxLength": 40},
+        "rprsIconId": {"in": "body", "type": "string", "maxLength": 20},
+        "careZoneCd": {"in": "body", "type": "code", "group": "HLTG13", "required": true},
+        "careCycleCd": {"in": "body", "type": "code", "group": "HLTG15"},
+        "cycleDrctInptDayCnt": {"in": "body", "type": "int", "min": 1, "max": 9999},
+        "lastCmptnYmd": {"in": "body", "type": "date"}
+      },
+      "rules": [
+        {"requiredIf": {"field": "careCycleCd", "when": "careZoneCd", "equals": "HLTC0037"}},
+        {"requiredIf": {"field": "cycleDrctInptDayCnt", "when": "careCycleCd", "equals": "HLTC0042"}}
+      ]
+    },
     {
       "name": "draft_schedule",
       "domain": "health",
@@ -16,8 +35,8 @@
         "hsptlNm": {"in": "body", "type": "string", "maxLength": 80},
         "schdlNm": {"in": "body", "type": "string", "maxLength": 40},
         "memoCn": {"in": "body", "type": "string", "maxLength": 500},
-        "cldrBadgeColrCd": {"in": "body", "type": "string"},
-        "schdlSrcCd": {"in": "body", "type": "string"}
+        "cldrBadgeColrCd": {"in": "body", "type": "code", "group": "HLTG21"},
+        "schdlSrcCd": {"in": "body", "type": "code", "group": "HLTG22"}
       },
       "rules": [
         {"requiredIf": {"field": "ckupTypeCd", "when": "schdlKndCd", "equals": "HLTC0057"}},
@@ -25,25 +44,6 @@
         {"requiredIf": {"field": "schdlNm", "when": "schdlKndCd", "equals": "HLTC0058"}},
         {"requiredIf": {"field": "schdlNm", "when": "schdlKndCd", "equals": "HLTC0059"}},
         {"requiredIf": {"field": "schdlNm", "when": "schdlKndCd", "equals": "HLTC0060"}}
-      ]
-    },
-    {
-      "name": "draft_care_item",
-      "domain": "health",
-      "kind": "CARD",
-      "call": {"method": "POST", "path": "/api/pets/{petSn}/care-items"},
-      "params": {
-        "petSn": {"in": "path", "type": "long", "required": true},
-        "careArtclNm": {"in": "body", "type": "string", "required": true, "maxLength": 40},
-        "rprsIconId": {"in": "body", "type": "string", "maxLength": 20},
-        "careZoneCd": {"in": "body", "type": "code", "group": "HLTG13", "required": true},
-        "careCycleCd": {"in": "body", "type": "code", "group": "HLTG15"},
-        "cycleDrctInptDayCnt": {"in": "body", "type": "int"},
-        "lastCmptnYmd": {"in": "body", "type": "date"}
-      },
-      "rules": [
-        {"requiredIf": {"field": "careCycleCd", "when": "careZoneCd", "equals": "HLTC0037"}},
-        {"requiredIf": {"field": "cycleDrctInptDayCnt", "when": "careCycleCd", "equals": "HLTC0042"}}
       ]
     }
   ]

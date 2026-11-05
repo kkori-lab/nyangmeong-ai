@@ -50,6 +50,9 @@ class CatalogParam(BaseModel):
     group: str | None = None
     codes: list[CatalogCode] | None = None
     max_length: int | None = Field(None, alias="maxLength")
+    # @Min·@Max (숫자 칸)
+    min_value: int | None = Field(None, alias="min")
+    max_value: int | None = Field(None, alias="max")
 
 
 class RequiredIf(BaseModel):
@@ -146,8 +149,9 @@ class CatalogEntry:
     # LLM 칸 -> Java 칸, LLM 칸 -> hook 역할("date:ymd")
     to_java_name: dict[str, str]
     hook_roles: dict[str, str]
-    # LLM 칸 -> 허용 코드
+    # LLM 칸 -> 허용 코드, LLM 칸 -> (min, max)
     codes: dict[str, frozenset[str]]
+    bounds: dict[str, tuple[int | None, int | None]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -230,6 +234,7 @@ def _entry(tool: CatalogTool, prompt: ToolPrompt) -> CatalogEntry:
     hook_roles: dict[str, str] = {}
     codes: dict[str, frozenset[str]] = {}
     code_names: dict[str, str] = {}
+    bounds: dict[str, tuple[int | None, int | None]] = {}
     for name, param in prompt.params.items():
         java = tool.params.get(param.java) if param.java else None
         py_type = _PY_TYPES[java.type] if java else str
@@ -242,11 +247,13 @@ def _entry(tool: CatalogTool, prompt: ToolPrompt) -> CatalogEntry:
         if java is not None and java.codes:
             codes[name] = frozenset(code.cd for code in java.codes)
             code_names[name] = ", ".join(f"{code.cd} {code.nm}" for code in java.codes)
+        if java is not None and (java.min_value is not None or java.max_value is not None):
+            bounds[name] = (java.min_value, java.max_value)
     model = create_model(_model_name(tool.name), **fields)
     definition = {
         "name": tool.name,
         "description": _description(prompt),
-        "input_schema": _schema(model, codes, code_names),
+        "input_schema": _schema(model, codes, code_names, bounds),
     }
     rules = tuple(rule.required_if for rule in tool.rules if rule.required_if is not None)
     return CatalogEntry(
@@ -261,6 +268,7 @@ def _entry(tool: CatalogTool, prompt: ToolPrompt) -> CatalogEntry:
         to_java_name=to_java_name,
         hook_roles=hook_roles,
         codes=codes,
+        bounds=bounds,
     )
 
 
@@ -273,9 +281,13 @@ def _description(prompt: ToolPrompt) -> str:
 
 
 def _schema(
-    model: type[BaseModel], codes: dict[str, frozenset[str]], code_names: dict[str, str]
+    model: type[BaseModel],
+    codes: dict[str, frozenset[str]],
+    code_names: dict[str, str],
+    bounds: dict[str, tuple[int | None, int | None]],
 ) -> dict:
-    # 설명은 description 칸에만 : 스키마 안 제목·기본값 제거, 코드 칸은 enum + 코드 이름
+    # 설명은 description 칸에만 : 스키마 안 제목·기본값 제거
+    # 코드 칸은 enum + 코드 이름, 숫자 칸은 minimum·maximum
     schema = model.model_json_schema()
     schema.pop("title", None)
     schema.pop("description", None)
@@ -287,6 +299,13 @@ def _schema(
             value = next(item for item in prop["anyOf"] if item.get("type") != "null")
             value["enum"] = sorted(codes[name])
             prop["description"] = f"{prop['description']}: {code_names[name]}"
+        if name in bounds:
+            value = next(item for item in prop["anyOf"] if item.get("type") != "null")
+            low, high = bounds[name]
+            if low is not None:
+                value["minimum"] = low
+            if high is not None:
+                value["maximum"] = high
     return schema
 
 
@@ -302,12 +321,18 @@ def builtin_param_description(name: str, param: str) -> str:
 
 
 def clean_codes(entry: CatalogEntry, args: BaseModel) -> BaseModel:
-    # Java 목록에 없는 코드 값은 비운다(틀린 칸만 비움)
+    # Java 목록에 없는 코드 값과 min·max 밖 숫자는 비운다(틀린 칸만 비움 -> 되물음)
     wrong = {
         name: None
         for name, allowed in entry.codes.items()
         if getattr(args, name) is not None and getattr(args, name) not in allowed
     }
+    for name, (low, high) in entry.bounds.items():
+        value = getattr(args, name)
+        if value is None:
+            continue
+        if (low is not None and value < low) or (high is not None and value > high):
+            wrong[name] = None
     return args.model_copy(update=wrong) if wrong else args
 
 
