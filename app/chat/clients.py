@@ -1,6 +1,6 @@
 import logging
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
@@ -10,10 +10,11 @@ from typing import Annotated, Protocol
 import anthropic
 import httpx2
 from anthropic import AsyncAnthropic
+from anthropic.types import Message
 from fastapi import Depends
 from pydantic import BaseModel, ValidationError
 
-from app.chat import rules
+from app.chat import rules, tools
 from app.core.config import Settings, get_settings
 from app.core.llm import get_anthropic_client
 
@@ -445,6 +446,220 @@ def get_answer_generator(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> AnswerGenerator:
     return AnthropicAnswerGenerator(get_anthropic_client(settings), settings.llm_model)
+
+
+@dataclass(frozen=True)
+class ToolDecision:
+    """[도구 고르기 결과]
+    - call : 고른 도구, None이면 글 답변(text) 또는 빈 응답
+    - text : 글 답변 스트림(이미 시작한 호출의 나머지)
+    - content : 응답 블록 원본 : 서버 도구 결과를 돌려줄 때 assistant 턴으로 다시 보냄"""
+
+    call: tools.ToolCall | None = None
+    text: AsyncIterator[str] | None = None
+    content: tuple[dict, ...] = ()
+
+
+class ToolAgent(Protocol):
+    # docs/design/tool-calling.md 4절 : 분류·목차 선택·등록 칸 추출을 도구 고르기 한 번으로
+    # decide 장애면 ClassifyError, 글 스트림 장애면 AnswerError
+    async def decide(
+        self, messages: list[dict], max_tokens: int, today: date, hint: rules.RouteRow | None = None
+    ) -> ToolDecision: ...
+
+    def answer(
+        self,
+        messages: list[dict],
+        decision: ToolDecision,
+        result: str,
+        max_tokens: int,
+        today: date,
+    ) -> AsyncIterator[str]: ...
+
+
+TOOL_RULES = (
+    "도구\n"
+    "- 회원의 말에 맞는 도구가 있으면 그 도구 하나만 부른다. "
+    "도구를 부를 때는 앞에 글을 쓰지 않는다.\n"
+    "- 서비스 범위 안의 반려동물 건강·생활 정보 질문은 도구 없이 바로 답한다.\n"
+    "- 두 도구가 다 맞아 보이면 도구 없이 무엇을 원하는지 짧게 되묻는다.\n"
+    "- 도구 인자는 회원이 말한 것만 채우고 모르는 칸은 비운다.\n"
+)
+
+
+@lru_cache
+def tool_system() -> str:
+    # 고정 내용 : 도구 정의와 함께 캐시(tools → system 순서로 캐시 앞부분)
+    scope = classify_system().split("- ROUTE:", 1)[0].split("\n", 1)[1]
+    guide_rules = GUIDE_RULES.removesuffix("\n\n안내서\n")
+    return (
+        f"{ANSWER_SYSTEM}\n\n{scope}\n{TOOL_RULES}\n"
+        f"search_guide 결과로 받은 안내서로 답할 때\n{guide_rules}\n\n"
+        f"화면 목록(번호. 화면명: 키워드)\n{tools.screen_list()}\n\n"
+        f"안내서 목차(번호 화면명 · 할 일)\n{_guide_toc()}"
+    )
+
+
+def _tool_hint(hint: rules.RouteRow | None) -> str:
+    if hint is None:
+        return ""
+    return (
+        f"이 입력은 키워드로 '{hint.name}' 화면({hint.scr_id})에 걸렸다. "
+        "키워드가 걸린 것만으로 범위 안이 아니다. 범위 밖이면 decline, "
+        "그 화면으로 가려는 요청이나 그 화면에 있는 내 기록을 묻는 질문이면 navigate, "
+        "그 화면 기능의 위치·사용법을 묻는 질문이면 search_guide."
+    )
+
+
+def tool_system_blocks(today: date, hint: rules.RouteRow | None = None) -> list[dict]:
+    # 오늘 날짜·키워드 힌트는 요청마다 달라 캐시 뒤 블록
+    blocks: list[dict] = [
+        {"type": "text", "text": tool_system(), "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": f"오늘: {today.isoformat()} ({rules.WEEKDAYS[today.weekday()]})"},
+    ]
+    note = _tool_hint(hint)
+    if note:
+        blocks.append({"type": "text", "text": note})
+    return blocks
+
+
+def _stream_failure(error: Exception) -> str:
+    if isinstance(error, anthropic.APIError):
+        return _failure_reason(error)
+    return "timeout" if isinstance(error, httpx2.TimeoutException) else "network"
+
+
+class AnthropicToolAgent:
+    """[도구 고르기 LLM]
+    - 스트리밍 한 번 : 첫 블록이 글이면 그대로 답변, 도구면 끝까지 받아 인자 검증
+    - on_usage : 평가 스크립트의 토큰 집계용(앱은 없음)"""
+
+    def __init__(
+        self,
+        client: AsyncAnthropic,
+        model: str,
+        on_usage: Callable[[str, object], None] | None = None,
+    ):
+        self.client = client
+        self.model = model
+        self.on_usage = on_usage
+
+    def _request(self, messages: list[dict], max_tokens: int, system: list[dict]) -> dict:
+        return {
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "system": system,
+            "tools": list(tools.tool_definitions()),
+            "messages": messages,
+            "output_config": {"effort": LLM_EFFORT},
+        }
+
+    async def _events(self, request: dict) -> AsyncIterator[object]:
+        # 원시 이벤트 뒤에 마지막으로 완성 메시지 : 글 스트림이 같은 호출을 이어 읽게
+        async with self.client.messages.stream(**request) as stream:
+            async for event in stream:
+                yield event
+            yield await stream.get_final_message()
+
+    async def decide(
+        self, messages: list[dict], max_tokens: int, today: date, hint: rules.RouteRow | None = None
+    ) -> ToolDecision:
+        started = time.monotonic()
+        request = self._request(messages, max_tokens, tool_system_blocks(today, hint))
+        request["tool_choice"] = {"type": "auto"}
+        events = self._events(request)
+        final = None
+        try:
+            async for event in events:
+                if isinstance(event, Message):
+                    final = event
+                elif event.type == "content_block_start" and event.content_block.type == "text":
+                    return ToolDecision(text=self._texts(events, started, "도구 답변"))
+        except (anthropic.APIError, httpx2.HTTPError) as error:
+            reason = _stream_failure(error)
+            _log_failure("도구 고르기", started, reason)
+            await events.aclose()
+            raise ClassifyError(reason) from None
+        if final is None or final.stop_reason == "refusal":
+            _log_failure("도구 고르기", started, final.stop_reason if final else "no_output")
+            return ToolDecision()
+        self._log(final, "도구 고르기", started)
+        use = next((block for block in final.content if block.type == "tool_use"), None)
+        if use is None:
+            return ToolDecision()
+        call = tools.parse(use.name, use.input if isinstance(use.input, dict) else {}, use.id)
+        content = tuple(block.model_dump(exclude_none=True) for block in final.content)
+        logger.info("LLM 도구: %s 인자 %s", call.name, "통과" if call.args else "거부")
+        return ToolDecision(call=call, content=content)
+
+    async def _texts(
+        self, events: AsyncIterator[object], started: float, task: str
+    ) -> AsyncIterator[str]:
+        length = 0
+        try:
+            async for event in events:
+                if isinstance(event, Message):
+                    if event.stop_reason == "refusal":
+                        _log_failure(task, started, "refusal")
+                        raise AnswerError("refusal")
+                    if any(block.type == "tool_use" for block in event.content):
+                        # 글 뒤 도구 : 1단계는 글만 사용, 평가에서 건수 확인
+                        logger.warning("LLM %s: 글 뒤 도구 호출 무시", task)
+                    self._log(event, task, started, length)
+                elif event.type == "content_block_delta" and event.delta.type == "text_delta":
+                    length += len(event.delta.text)
+                    yield event.delta.text
+        except (anthropic.APIError, httpx2.HTTPError) as error:
+            reason = _stream_failure(error)
+            _log_failure(task, started, reason)
+            raise AnswerError(reason) from None
+        finally:
+            await events.aclose()
+
+    def answer(
+        self,
+        messages: list[dict],
+        decision: ToolDecision,
+        result: str,
+        max_tokens: int,
+        today: date,
+    ) -> AsyncIterator[str]:
+        # 서버 도구 결과를 돌려준 뒤 같은 대화로 답변 : 도구 반복 없이 1번(상한 2번 안)
+        use_id = decision.call.use_id if decision.call else ""
+        follow = [
+            *messages,
+            {"role": "assistant", "content": list(decision.content)},
+            {
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": use_id, "content": result}],
+            },
+        ]
+        request = self._request(follow, max_tokens, tool_system_blocks(today))
+        request["tool_choice"] = {"type": "none"}
+        return self._texts(self._events(request), time.monotonic(), "도구 결과 답변")
+
+    def _log(self, final: Message, task: str, started: float, length: int | None = None) -> None:
+        usage = final.usage
+        if self.on_usage is not None:
+            self.on_usage(task, usage)
+        logger.info(
+            "LLM %s: %d토큰(캐시 읽기 %d·쓰기 %d) 출력 %d토큰%s %s (%.0fms)",
+            task,
+            usage.input_tokens,
+            usage.cache_read_input_tokens or 0,
+            usage.cache_creation_input_tokens or 0,
+            usage.output_tokens,
+            "" if length is None else f"·{length}자",
+            final.stop_reason,
+            (time.monotonic() - started) * 1000,
+        )
+
+
+def get_tool_agent(settings: Annotated[Settings, Depends(get_settings)]) -> ToolAgent | None:
+    # CHAT_TOOL_AGENT 꺼짐(기본)이면 None : 지금 흐름 그대로, 키 확인도 하지 않음
+    if not settings.chat_tool_agent:
+        return None
+    return AnthropicToolAgent(get_anthropic_client(settings), settings.llm_model)
 
 
 class RegisterExtractor(Protocol):

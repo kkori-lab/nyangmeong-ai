@@ -1,11 +1,16 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-002 대화창 · 서비스 기능 안내 후속 (프론트 대조·새 평가 세트 평가·분류 캐시, 추가 요청) — 끝 (2026-11-05). ① 안내서를 프론트 develop de4b256과 대조해 32곳 고침(`docs/guide-review.md` "프론트 대조"). ② 안내서를 보지 않고 만든 새 세트 50문항으로 재평가: M1+LLM hit@3 22~24/44, 화면 이동 14/14, 범위 밖 5/5, 답변 정확도 24/27(`docs/design/service-guide-search.md` 4-1절), 평가 스크립트 `scripts/guide_eval.py`. ③ 분류 `system` 캐시 켬(캐시 읽기 7,501토큰). 추가-1 `llm_smoke` 분류 로그 INFO. 검증 1회차 통과, 사람 확인 완료
+끝: SCR-AIM-004 도구 목록 1차 (2026-11-05, 루프 다시 시작 뒤 검증 1회차 통과·사람 확인). `app/chat/catalog.py`가 Java 도구 목록(가짜: `data/tools.snapshot.json` + `tests/chat/fakes.py` 코드 값)과 `data/tool_prompts.yaml`을 합쳐 `draft_schedule`·`draft_care_item` 모델·정의를 만들고, 도구 흐름의 빈 칸은 Java 필수·`requiredIf`로(`build_card`). 칸 이름은 실제 DTO(`schdlDt`·`hrInptYn`·`cycleDrctInptDayCnt`), LLM 칸은 snake_case 그대로 + `date` hook. 기존 `test_tools.py` 기대값 그대로(conftest autouse fixture, 커밋 분리)
 
 ## 다음에 할 것
+- 도구 목록 1차 후속 (LJS): `tool_eval` 재측정 — 1단계 실험 값(지금 32/44, 도구 Haiku 35~36/44, 쓰기 잘못 0)에서 떨어지지 않는지. `scripts/tool_eval.py`(git 밖)를 찾거나 다시 쓴다 재측정 때 도구 순서가 실험과 다르다(Java 목록 이름순이라 `draft_care_item`이 먼저).
+- 연결 남음: 도구 목록 API 연결 (LJS·백엔드, 설계 `tool-catalog.md` 8절 3번): 백엔드 LJS가 `GET /internal/ai/tools` 구현·검증 통과(2026-11-05, 커밋·PR 전, 정본 백엔드 `docs/api/ai.md`). 실제 응답 JSON 한 벌을 받아 `data/tools.snapshot.json`(코드 값 뺌)과 `tests/chat/fakes.py`를 바꾼다. 가짜와 다른 곳: `cldrBadgeColrCd` code HLTG21, `schdlSrcCd` code HLTG22, code 칸 `codes` 사용 중만 sortSeq 순, `cycleDrctInptDayCnt` `min` 1·`max` 9999, `tools` 이름순, `version`·`structureVersion` 64자 해시. 같이: `docs/api/internal.md` 행 확정, `tool-catalog.md` 3-3절을 백엔드 결정으로(400은 지금 모양 `data: [{field, message}]`, 서비스 검사 칸 이름은 다음 백엔드 마일스톤, `min`·`max`·`datetime` 추가). 2단계 카드 실행 때 `schdlSrcCd` HLTC0067(AI 등록 출처). 결정: 도구 목록 보관은 `tools.use_catalog()` 모듈 전역(`routing_table()`과 같은 방식, `app.state` 안은 기존 테스트 기대값이 깨져 버림, 2026-11-05 사람 결정). 그 뒤 8절 4번(읽기 도구·도메인 고르기), 기능명세서 기능 ID(8절 0번)
+- tool calling 후속 (LJS, 다음 차수): 정식 도입은 기능명세서 기능 ID 뒤. 그때 볼 것 — 룰 라우팅의 질문꼴 표지("어디서 바꿔요"·"어케" 놓침)와 등록 정규식("한달에 한번"·"일정에 넣어줘" 놓침)이 LLM 앞에서 9문항을 정함(7-1절, 세트 맞춤 보강은 안 함), 사용법 답변 품질(`tool_eval --answer`로 사람 채점), 글 답변 질문의 연관 바로가기(FN-AIM-002-04) 없음, "가계부는 어떻게 쓰는거야"를 범위 밖으로 보는 범위 규칙, 검증 때 오류로 끝난 등록 턴이 이력에 남은 방에서 "주식 추천해 줘"에 `draft_schedule`을 고른 일(1회). `scripts/tool_eval.py`는 공용 하네스 PR로 / 안건(2026-11-05 사람 요청): 회원정보 수정 질문("이메일 바꿨는데 내 정보 고칠 수 있나요?")은 안내서 답변 대신 대화창에서 수정하게 하기 — `tool-calling.md` 3-4절 "회원정보 변경은 본인 확인 필요 → navigate" 결정을 뒤집을지, 본인 확인(프론트 `PasswordConfirm.jsx` 비밀번호 재확인)을 대화창 카드에서 어떻게 할지, Java 회원정보 API·기능 ID를 같이 정한다
+- 다음 차수 안건·DMS 모음 (LJS): SCR-AIM-013 ⑤(영수증 확인을 대화창 카드로)·②(첨부 이미지를 LLM이 용도 판단, 함께 보낸 글을 판단에 씀) 변경 제안, 기능명세서에 tool calling 기능 ID. 반려동물·영수증 사진을 Anthropic에 보내는 것(이미지 판단 ②단계)이 개인정보 처리방침에 들어가는지 확인
+- 프론트에 알리기 (tool calling): 대화창 등록 카드 저장이 아직 가짜(`registerToHealth`, JAJ 연결 전) — Java `POST /pets/{petSn}/care-schedules`·`care-items` 연결, 대화창 → 본창 새로고침 장치 없음(창 사이 알림 필요), 다음 차수에 지도·여러 마리 탭 카드를 대화창 폭에(예외 없이 전부 대화창)
 - DMS 모음: AI매니저 기능명세서에 사용법 안내 기능 ID 추가(GUIDE 분류·안내서 검색, 지금은 FN-AIM-002-02·002-04·004-02에 걸어 둠), 사용법 답변에도 의료 고지를 붙일지(지금은 명세대로 붙임), 부록 A에 1:1 문의(SCR-CSC-003) 행 없음 (LJS)
-- 서비스 안내 후속 (LJS): M1에 결과가 있으면 목차 선택을 버려 R03·R08·R19를 놓친다(`docs/design/service-guide-search.md` 4-1절) — "M1과 목차 선택이 다르면 목차 선택을 앞에 붙이기"를 고치면 세 번째 세트로 다시 잰다. 로그인·비밀번호 찾기는 안내서 밖(R18). 안내서에 "대화창에 영수증 사진 올려 등록하기"(SCR-AIM-013) task가 없다(R03 사람 채점 틀림). 답변 정확도 24/27 맞음(4-1절). 실제 대화 로그·팀원 질문 평가는 아직
+- 서비스 안내 후속 (LJS): 남은 놓침 R13(SEARCH로 분류)·R15(채팅 10-1을 고름)·R24(FALLBACK)·R36(실행마다 다름), 로그인·비밀번호 찾기는 안내서 밖(R18). 2회차 답변 정확도는 사람 채점 안 함(`.cache/guide_eval/` 1530 실행). 실제 대화 로그·팀원 질문 평가는 아직
 - 프론트에 알리기: `screenPaths.js`가 num 27 공동양육 관리를 라우트에 없는 `/mypage/caregivers`로 보냄(실제 화면은 `/mypage/pets` 카드 아래 가족 영역). 사용법 답변 바로가기(`done.shortcut`)가 SCR-MYP-004를 줄 수 있음. 2026-11-05 대조로 더 나온 것(`docs/guide-review.md` "프론트 대조"): 메인 [토탈 케어리스트] 해시 `#c-care` → `#hlt003-care`, 폭 760px 이하에서 회원정보 수정 가는 메뉴 없음, `/mypage/withdraw` 라우트 없음, 플레이스 회원 전용(96707a9)이 의도인지 확인
 - 병합 순서: 백엔드 PR #149(LJS, 대표 이미지 저장·관리자 쿠키 시트 허용·`CharacterSpec.FACE` `(96, 32, 320, 320)`) 먼저 → AI `LJS` PR. 각자 로컬 DB에 `PIXEL_CHAR.WEAR_IMG_FILE_SN` ALTER(v0.13 (1)) (LJS 백엔드)
 - 연결 남음: FN-ADM-070-02 관리자 프론트 아이템 등록 화면 (관리자 프론트): [굽기 지시 만들기](`POST /ai/items/bake-hints`)·[시험해 보기](`POST /ai/items/trial-preview`), 등록 성공 뒤 `POST /ai/items/{itemSn}/bake`를 `lastYn` true까지 반복(한 번 30~40초, 매 호출 전 토큰 갱신, 502면 멈춤)
@@ -23,13 +28,12 @@ SCR-AIM-002 대화창 · 서비스 기능 안내 후속 (프론트 대조·새 �
 - 개발 DB 정리: 2026-11-03 검증이 회원 1·반려동물 2의 RECPT 501·502(백엔드 #124 검증으로 505·508, SCR-AIM-010 검증으로 514 추가)와 원본 파일을 남겼다. 필요하면 지운다 (LJS 백엔드)
 - 결정 남음: `bake-hints`의 그림 형식·10MB 오류는 `/ai/characters`와 같은 `FILE_TYPE_NOT_ALLOWED`·`FILE_SIZE_EXCEEDED`로 했다(기획은 `INVALID_REQUEST`) (LJS)
 - 옛 흐름으로 만든 캐릭터는 맨몸 시트가 없어 `/preview`가 404 `PIXEL_CHARACTER_NOT_FOUND`다. 다시 만들어야 한다. 무료 재생성(FN-MYP-010-23)은 사진이 Java로 오지 않아 SCR-ADM-042 전에 계약을 정한다 (LJS 백엔드)
-- 하네스 수정 PR 후보(공용): `verify-loop.sh guard`가 읽기 전용 비교(`git diff --no-index`)까지 막아 verify 절차와 어긋난다
+- 하네스 수정 PR 후보(공용): `verify-loop.sh guard`가 읽기 전용 비교(`git diff --no-index`)까지 막아 verify 절차와 어긋난다 / 하네스 수정 PR 후보(공용): `verify-collect.sh:18` `cut -c8-` 멀티바이트 문제, `start-check.sh` 수정분, macOS BSD `sed`(`milestone-status.sh`·`impl-check.sh`·`api-row.sh`. `sed -i`가 실패해도 두 스크립트 모두 종료 코드 0이고 `impl-check.sh`는 "바꿈:"까지 출력한다, 2026-10-28 실측), `verify-collect.sh:37-38` `case` 문법, `impl-check.sh:18`이 "질문" 글자가 든 줄(제목 "검색 질문/응답" 등)을 모두 질문으로 읽음 / 커밋 안 한 평가 스크립트: `scripts/guide_eval.py`·`scripts/tool_eval.py`(git 밖), `scripts/llm_smoke.py` 분류 로그 INFO / 2026-11-05 재현: `milestone-status.sh`·`impl-check.sh` BSD `sed`로 상태를 못 바꾸고 종료 0(손으로 고침), `verify-collect.sh` 37행 `case` 문법 오류로 종료 2·18행 시작 시각 잘림(검증 에이전트가 사본으로 우회)
 - 굽기·합성 최적화: 굽기 26개 실측 1회 104.2초(동시 10, 아이템당 31.5~37.0초, 재시도 없음). 동시 13으로 올린 값은 미측정. 합성 1.4초는 시험 그림 값. 후보는 전용 스레드 풀(기본 풀은 CPU+4라 코어 9개 미만 서버에서 13이 안 나온다), 429 대기 후 재시도, OpenAI 계정 한도 확인, 이미지 품질 `low` (LJS)
 - 고양이 꼬리 경계선·다리 사이 분홍 점: 원인 미확인(착용 지시 변경의 영향 포함). 정렬 2단계 탐색은 촘촘한 무늬에서 빗나갈 수 있고 그림체 샘플 1장으로만 확인 (LJS)
 - 굽기 켜기: 팀 비용 결정(26개 기준 캐릭터당 약 $1.64), Java 시트 저장 연결 뒤. 켜기 전 access_token(30분) 만료 대책을 정한다: 만료 뒤 아이템은 비용을 내고도 저장·실패 표시가 안 되어 "안 구운 아이템"으로 남고, 성공 보고 401이면 결과를 잃고 작업은 시간 초과 실패가 된다 (LJS) — 관리자 전체 굽기는 2026-11-04 나눠 굽기로 해결, 회원 캐릭터 생성 뒤 굽기는 남음
 - 백엔드(LJS): 신발을 안 넣기로 해서 공통코드 `MYPC0006`과 시드 신발 4개는 정리 대상이다(공통코드는 DB에서만 고친다) (LJS)
-- DMS 모음: FN-MYP-010-13 겹침 순서(캐릭터 → 의상 → … → 머리장식) vs 합성 순서(머리 착용 바탕 위에 의상) (LJS)
-- DMS 모음: FN-MYP-010-13 "고정 좌표로 겹쳐 표시" vs 서버 합성, FN-MYP-010-17 "기준 좌표 고정" vs 상단 보정(눈 y가 캐릭터마다 다를 수 있음), 얼굴 영역 값 변경 (LJS)
+- DMS 모음: FN-MYP-010-13 겹침 순서(캐릭터 → 의상 → … → 머리장식) vs 합성 순서(머리 착용 바탕 위에 의상) (LJS) / DMS 모음: FN-MYP-010-13 "고정 좌표로 겹쳐 표시" vs 서버 합성, FN-MYP-010-17 "기준 좌표 고정" vs 상단 보정(눈 y가 캐릭터마다 다를 수 있음), 얼굴 영역 값 변경 (LJS)
 - 눈 찾기 위험: `dog_fluffy` 512 재검출이 눈이 아닌 쌍을 잡았다. 실제 배치 경로에서는 샘플 10건 모두 맞았으나, 틀리면 규격을 통과한 채 조용히 어긋난다. 검은 털은 하이라이트 기준이라 눈 높이가 몇 px 다를 수 있고 측정하지 않았다 (LJS)
 - 약한 테스트: EXIF 제거·회전 테스트 입력에 EXIF가 없다. 고양이 분기는 가짜 저장소가 짝수 `petSn`일 때만 `PETC0002`를 준다(실제 값은 Java 연결 뒤 확인) (LJS)
 - 프론트(LJS) 알리기: SCR-AIM-011 첫 SEARCH 답변은 `done` 뒤 제목 요약(Haiku 한 번)이 끝나야 SSE 스트림이 닫힌다. 입력창 다시 열기는 스트림 종료가 아닌 `done` 기준으로. 바뀐 제목은 대화 목록을 다시 읽어 반영
@@ -43,7 +47,7 @@ SCR-AIM-002 대화창 · 서비스 기능 안내 후속 (프론트 대조·새 �
 - 백엔드에 요청(LJS 백엔드): Java `/api/receipts`(업로드)·`/{recptSn}/analyze`·`FakeOcrClient` 흐름 정리. 분석은 React → Python `/ai/receipts`라 Java 분석 경로는 `/internal/v1/ocr` 삭제와 함께 정리. Postman이 8080으로 가면 가짜 결과(초코·아포퀠)가 온다
 - 중복 분석 차단(`_in_progress`)은 프로세스 메모리라 워커 1개 전제. 여러 워커로 띄우면 Java 영수증 상태로 옮긴다
 - OCR 인식률: 실제 영수증 1건(메이동물메디컬센터, 1구역)으로 맞춤. 프론트 확인(2026-10-29)에서 아조딜은 `mdcnUsage`가 null이라 1일 횟수 칸이 빈다(회원 입력). 2마리 청구서·다른 병원 영수증으로 더 확인(샘플 10건 목표, 사진은 git 제외)
-- 각자 `.env.local`: `GOOGLE_APPLICATION_CREDENTIALS` → `GOOGLE_VISION_API_KEY`(API 키), `OCR_TIMEOUT_SEC` 15. 디스코드 `.env.local` 갱신
+- 각자 `.env.local`: `GOOGLE_APPLICATION_CREDENTIALS` → `GOOGLE_VISION_API_KEY`(API 키), `OCR_TIMEOUT_SEC` 15. 디스코드 `.env.local` 갱신 / 각자 `.env.local` 정리: `BACKEND_INTERNAL_KEY`·`INTERNAL_API_KEY`·`APP_PROFILE`·`*_DB_*`·`CONVERSATION_ENC_KEY` 삭제, `BACKEND_BASE_URL` 필수(없으면 `/ai/**` 전부 502). 운영 Nginx가 `/internal`을 막는지 확인
 - 연결 남음(JAJ): Java register-context의 `careArtclNms`가 빈 배열이라 같은 이름 케어 항목 안내(FN-AIM-012-08)가 실제로는 뜨지 않는다. JAJ 케어 항목 service가 생기면 Python은 고칠 것 없음
 - JAJ 대기: React→Java 일정·케어 항목 등록 API(출처 HLTC0067, SCR-HLT-003 토탈 케어리스트 대기). 카드 `cycleDays`는 `CARE_ARTCL.CYCLE_DRCT_INPT_DAY_CNT`에 대응(요청 필드 이름은 JAJ API가 정함)
 - DMS AI매니저 기능명세서 표지(v0.12)의 "대상 화면 … (화면설계서 v0.11 기준)"·"기준 문서 … AI매니저 화면설계서 v0.11(2026-10-26)"을 v0.12로 맞춘다. 다음 DMS 모음 때 함께(LJS)
@@ -52,7 +56,5 @@ SCR-AIM-002 대화창 · 서비스 기능 안내 후속 (프론트 대조·새 �
 - 백엔드에 요청(LJS 백엔드): AI 설정값 조회 내부 API(SYS_STNG_AI_TKN_UPLMT_CNT·SYS_STNG_AI_CNVRS_TURN_CNT, 연결되면 가짜 `get_ai_settings` 교체), AI 역할 메시지 `cnvrsCn` 1,000자 상한 확대(상한 없이 저장 요청 중, 넘으면 저장 실패). `docs/api/internal.md` "미정" 행은 "설정값 조회"만 남긴다(최근 6턴은 GET 대화, 미완료 완료 처리는 불필요)
 - 프론트(LJS)와 맞출 것: 메시지 API SSE 이벤트(`intent`·`delta`·`done`·`error`, `chat.md` MessageEvent), 화면 ID → 프론트 경로 변환, 칩 재노출·연속 실패 카운트·FAQ 버튼(FN-AIM-005-03~06)은 프론트 몫
 - 계약은 백엔드 PR과 함께 낸다(`AGENTS.md` 4번): 백엔드 LJS의 `ai` 도메인(대화 내부 API, 정본 백엔드 `docs/api/ai.md`, 10-27 PR 전)·서버 간 키 제거. 이 저장소 `docs/api/internal.md`와 같은 때 병합
-- 각자 `.env.local` 정리: `BACKEND_INTERNAL_KEY`·`INTERNAL_API_KEY`·`APP_PROFILE`·`*_DB_*`·`CONVERSATION_ENC_KEY` 삭제, `BACKEND_BASE_URL` 필수(없으면 `/ai/**` 전부 502). 운영 Nginx가 `/internal`을 막는지 확인
-- 하네스 수정 PR 후보(공용): `verify-collect.sh:18` `cut -c8-` 멀티바이트 문제, `start-check.sh` 수정분, macOS BSD `sed`(`milestone-status.sh`·`impl-check.sh`·`api-row.sh`. `sed -i`가 실패해도 두 스크립트 모두 종료 코드 0이고 `impl-check.sh`는 "바꿈:"까지 출력한다, 2026-10-28 실측), `verify-collect.sh:37-38` `case` 문법, `impl-check.sh:18`이 "질문" 글자가 든 줄(제목 "검색 질문/응답" 등)을 모두 질문으로 읽음
 - `docs/api/internal.md` OCR mock은 고정 응답 1개(Java `FakeOcrClient` 시나리오 미구현). 필요해지면 구현
 - 이 PC는 애플리케이션 제어 정책이 `.venv\Scripts\*.exe`(uvicorn 등)를 막는다. `uv run python -m uvicorn ...`으로 띄운다

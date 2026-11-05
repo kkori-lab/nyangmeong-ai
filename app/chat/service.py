@@ -8,7 +8,7 @@ from datetime import date
 from pydantic import BaseModel
 from pydantic.alias_generators import to_camel
 
-from app.chat import rules
+from app.chat import rules, tools
 from app.chat.clients import (
     AnswerError,
     AnswerGenerator,
@@ -18,6 +18,8 @@ from app.chat.clients import (
     IntentClassifier,
     RegisterExtractor,
     TitleGenerator,
+    ToolAgent,
+    ToolDecision,
 )
 from app.chat.repository import (
     AiSettings,
@@ -109,6 +111,11 @@ class Judged:
     out_of_scope: bool = False
     # 사용법 질문일 때 답변 근거로 쓸 안내서 청크 id (SEARCH로 응답)
     guide_ids: tuple[str, ...] = ()
+    # 도구 흐름(tool calling 1단계) : 이미 시작한 답변 스트림, 등록 도구 인자
+    stream: AsyncIterator[str] | None = None
+    ai_values: dict | None = None
+    # 고른 등록 도구 이름 : 빈 칸을 Java 도구 목록 규칙으로 판정
+    tool: str | None = None
 
 
 async def judge(text: str, has_image: bool, classifier: IntentClassifier) -> Judged:
@@ -150,11 +157,10 @@ async def judge(text: str, has_image: bool, classifier: IntentClassifier) -> Jud
 
 
 def _guide_judged(text: str, classified: Classified) -> Judged | None:
-    # FN-AIM-002-02 : 1단계 M1 키워드 색인, 없으면 2단계 분류 LLM의 목차 선택
-    ids = rules.search_guide(text)
-    stage = "M1"
-    if not ids and classified.guide_id is not None:
-        ids, stage = [classified.guide_id], "목차"
+    # FN-AIM-002-02 : 분류 LLM의 목차 선택을 앞에, M1 키워드 색인 결과를 뒤에
+    ids = rules.merge_guide(classified.guide_id, text)
+    picked = bool(ids) and ids[0] == classified.guide_id
+    stage = ("목차+M1" if len(ids) > 1 else "목차") if picked else "M1"
     if not ids:
         logger.info("사용법 안내: 안내서 청크 없음")
         return None
@@ -170,6 +176,66 @@ def _guide_shortcut(chunk_id: str, classified: Classified) -> Intent | None:
     num = chunk.num if chunk else None
     row = next((r for r in rules.routing_table() if r.no == num and r.routable), None)
     return row.to_intent() if row is not None else _shortcut_of(classified)
+
+
+async def judge_tools(
+    text: str,
+    context: list[dict],
+    agent: ToolAgent,
+    max_tokens: int,
+    today: date,
+    first_token_sec: float,
+) -> Judged:
+    """도구 흐름 판정(docs/design/tool-calling.md 4절)"""
+    row = None
+    # FN-AIM-004-13 : 등록 요청은 라우팅 키워드보다 먼저, 칸은 도구 인자로
+    if not rules.is_register_request(text):
+        # FN-AIM-002-10 : 룰 라우팅은 LLM 앞이라 LLM 장애와 무관
+        row = rules.match_route(text)
+        if row is not None and not rules.is_question(text):
+            return Judged(row.to_intent())
+    try:
+        async with asyncio.timeout(first_token_sec):
+            decision = await agent.decide(context, max_tokens, today, hint=row)
+    except (ClassifyError, TimeoutError):
+        if row is not None:
+            return Judged(row.to_intent())
+        raise ClassifyError("tool_decide") from None
+    return _tool_judged(text, context, agent, decision, max_tokens, today)
+
+
+def _tool_judged(
+    text: str,
+    context: list[dict],
+    agent: ToolAgent,
+    decision: ToolDecision,
+    max_tokens: int,
+    today: date,
+) -> Judged:
+    # 1단계는 응답 계약 그대로 : 도구 -> 지금 intent 값 (설계 6절)
+    call = decision.call
+    if call is None:
+        if decision.text is not None:
+            return Judged(Intent(kind=IntentKind.SEARCH), stream=decision.text)
+        return Judged(Intent(kind=IntentKind.FALLBACK))
+    if call.args is None:
+        logger.info("도구 인자 거부: %s", call.name)
+        return Judged(Intent(kind=IntentKind.FALLBACK))
+    if call.name == tools.NAVIGATE:
+        return Judged(tools.route_row(call).to_intent())
+    if call.name in tools.REGISTER_TOOLS:
+        values = tools.register_values(call)
+        return Judged(Intent(kind=IntentKind.REGISTER), ai_values=values, tool=call.name)
+    if call.name == tools.DECLINE:
+        return Judged(Intent(kind=IntentKind.FALLBACK), out_of_scope=not call.args.unclear)
+    ids = tuple(tools.guide_ids(call, text))
+    if not ids:
+        logger.info("사용법 안내: 안내서 청크 없음")
+        return Judged(Intent(kind=IntentKind.FALLBACK), out_of_scope=True)
+    logger.info("사용법 안내: 도구 %d개 %s", len(ids), ",".join(ids))
+    stream = agent.answer(context, decision, guide_text(ids) or "", max_tokens, today)
+    shortcut = _guide_shortcut(ids[0], Classified(ClassifiedKind.GUIDE))
+    return Judged(Intent(kind=IntentKind.SEARCH), shortcut, guide_ids=ids, stream=stream)
 
 
 def guide_text(ids: tuple[str, ...]) -> str | None:
@@ -270,10 +336,13 @@ async def answer_turn(
     limits: AnswerLimits,
     register: "RegisterDeps | None" = None,
     titles: TitleGenerator | None = None,
+    agent: ToolAgent | None = None,
 ) -> AsyncIterator[Event]:
     queue: asyncio.Queue[Event | None] = asyncio.Queue()
     task = asyncio.create_task(
-        _run_turn(turn, repo, classifier, answers, ai, limits, queue.put_nowait, register, titles)
+        _run_turn(
+            turn, repo, classifier, answers, ai, limits, queue.put_nowait, register, titles, agent
+        )
     )
     _running.add(task)
     task.add_done_callback(_running.discard)
@@ -291,6 +360,7 @@ async def _run_turn(
     emit: Callable[[Event | None], None],
     register: "RegisterDeps | None" = None,
     titles: TitleGenerator | None = None,
+    agent: ToolAgent | None = None,
 ) -> None:
     try:
         text = turn.question.cnvrs_cn
@@ -301,13 +371,28 @@ async def _run_turn(
             card = await build_card(text, turn.pet_sn, turn.draft, register)
         if card is not None:
             judged = Judged(Intent(kind=IntentKind.REGISTER))
+        elif agent is not None:
+            # CHAT_TOOL_AGENT 켜짐 : 분류·목차 선택·등록 칸 추출을 도구 고르기 한 번으로
+            context = build_context(turn.messages, turn.question.msg_seq, ai.context_turns)
+            today = register.today if register is not None else rules.today_kst()
+            judged = await judge_tools(
+                text, context, agent, ai.max_tokens, today, limits.first_token_sec
+            )
         else:
             judged = await judge(text, False, classifier)
         emit(("intent", judged.intent))
         kind = judged.intent.kind
         if kind is IntentKind.SEARCH:
             answer = await _search_answer(
-                turn, repo, answers, ai, limits, judged.shortcut, emit, guide_text(judged.guide_ids)
+                turn,
+                repo,
+                answers,
+                ai,
+                limits,
+                judged.shortcut,
+                emit,
+                guide_text(judged.guide_ids),
+                judged.stream,
             )
             if answer is not None and titles is not None and _is_first_answer(turn):
                 await _retitle(repo, titles, turn, answer)
@@ -319,7 +404,9 @@ async def _run_turn(
             move = route_message(judged.intent.scr_nm or "")
             emit(("done", AnswerDone(message=await _save(repo, turn.room_sn, move, True))))
         elif kind is IntentKind.REGISTER and register is not None:
-            card = card or await build_card(text, turn.pet_sn, None, register)
+            card = card or await build_card(
+                text, turn.pet_sn, None, register, judged.ai_values, judged.tool
+            )
             await _register_reply(repo, turn.room_sn, card, emit)
         else:
             # RECEIPT는 SCR-AIM-013에서 잇는다
@@ -343,11 +430,15 @@ async def _search_answer(
     shortcut: Intent | None,
     emit: Callable[[Event | None], None],
     guide: str | None = None,
+    started: AsyncIterator[str] | None = None,
 ) -> str | None:
     # FN-AIM-002-02·07 : 완료면 고지 전 본문 반환(제목 요약용), 실패·미완료면 None
     context = build_context(turn.messages, turn.question.msg_seq, ai.context_turns)
+    # started : 도구 흐름이 이미 시작한 답변 스트림
     # 안내서가 없으면 guide 인자 없이 : 안내서를 모르는 답변기 구현과도 호환
-    if guide is None:
+    if started is not None:
+        stream = started
+    elif guide is None:
         stream = answers.stream(context, ai.max_tokens)
     else:
         stream = answers.stream(context, ai.max_tokens, guide=guide)
@@ -504,7 +595,12 @@ def _pick_pet(
 
 
 async def build_card(
-    text: str, room_pet: int | None, draft: RegisterDraft | None, deps: RegisterDeps
+    text: str,
+    room_pet: int | None,
+    draft: RegisterDraft | None,
+    deps: RegisterDeps,
+    ai_values: dict | None = None,
+    tool: str | None = None,
 ) -> RegisterCard | None:
     # FN-AIM-012-02~08·10. 초안이 있는데 이 메시지에서 뽑힌 칸이 없으면 None(일반 판정으로)
     pets = await deps.contexts.get_pets()
@@ -519,7 +615,11 @@ async def build_card(
         if not found and not named:
             return None
         values = _draft_values(draft) | found
-    if _missing(values):
+    if _missing(values) and ai_values is not None:
+        # 도구 흐름 : 도구 인자가 AI 보충 값(추출기 미호출)
+        for name, value in ai_values.items():
+            values.setdefault(name, value)
+    elif _missing(values):
         # FN-AIM-012-03 : 빈 칸만 AI 보충, 반려동물 목록 제외
         try:
             raw = await deps.extractor.extract(text, deps.today)
@@ -530,11 +630,12 @@ async def build_card(
             values.setdefault(name, value)
     if values.get("schdl_knd_cd") == rules.SCHEDULE_HOSPITAL:
         values.pop("schdl_nm", None)
-    care = bool(values.get("care_zone_cd"))
+    care = tool == tools.DRAFT_CARE_ITEM or bool(values.get("care_zone_cd"))
     keep = _CARE_FIELDS if care else _SCHEDULE_FIELDS
     values = {name: value for name, value in values.items() if name in keep}
     pet = _pick_pet(pets, named, draft.pet_sn if draft else None, room_pet)
-    missing = (["pet_sn"] if pet is None else []) + _missing(values)
+    empty = tools.register_missing(tool, values)
+    missing = (["pet_sn"] if pet is None else []) + (_missing(values) if empty is None else empty)
     card = RegisterCard(
         card_type=CardType.ASK if missing else CardType.CARE_ITEM if care else CardType.SCHEDULE,
         pet_sn=pet.pet_sn if pet else None,
@@ -570,6 +671,8 @@ def ask_message(card: RegisterCard) -> str:
         parts.append(f"어느 아이의 {target}인가요? 아래에서 골라 주세요.")
     if "careArtclNm" in missing:
         parts.append("어떤 케어 항목인가요?")
+    if "careZoneCd" in missing:
+        parts.append("매일 하나요, 주기마다 하나요?")
     if missing & {"careCycleCd", "cycleDays"}:
         parts.append("얼마나 자주 하나요? (예: 매주, 2주마다, 한달마다)")
     if "schdlKndCd" in missing:
