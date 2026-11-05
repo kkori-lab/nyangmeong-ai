@@ -97,14 +97,15 @@
 }
 ```
 
-칸 `type`: `string`·`long`·`int`·`decimal`(`precision`·`scale`)·`boolean`·`date`·`time`·`code`. 목록(`List<…>`)·중첩 객체는
+칸 `type`: `string`·`long`·`int`·`decimal`(`precision`·`scale`)·`boolean`·`date`·`time`·`datetime`·`code`. 숫자 칸은
+`@Min`·`@Max`를 `min`·`max`로 준다(Python은 `input_schema`의 `minimum`·`maximum`으로 싣고 범위 밖 값은 비운다). 목록(`List<…>`)·중첩 객체는
 1단계에서 쓰지 않는다(나오면 그 도구를 싣지 않고 경고).
 
 ### 3-3. 같이 맞출 것
 
 | 항목 | 내용 | 왜 |
 | --- | --- | --- |
-| 오류에 필드 이름 | 400 응답에 `fieldErrors: [{field, reason}]`. 서비스 검사(`INVALID_INPUT_VALUE`)도 어느 칸인지 담는다 | 지금은 `checkPet` 등 서비스 오류가 칸을 알려 주지 않아 다시 물을 칸을 정할 수 없다 |
+| 오류에 필드 이름 | 400 응답은 지금 모양 그대로 `data: [{field, message}]`(Bean Validation 오류만 칸 이름이 있다). 서비스 검사(`INVALID_INPUT_VALUE`)의 칸 이름은 다음 백엔드 마일스톤(2026-11-05 백엔드 결정) | 지금은 `checkPet` 등 서비스 오류가 칸을 알려 주지 않아 다시 물을 칸을 정할 수 없다 |
 | 수정은 PATCH | 2단계 수정 API가 PUT(전체 덮어쓰기)이면 PATCH로 받거나, Python이 지금 값을 읽어 덮어 보낸다 | 말하지 않은 칸 때문에 필수 오류 |
 | 출처 기록 | 대화로 실행한 쓰기는 등록 출처 코드(지금 일정의 AI 대화창 출처와 같은 방식)를 남긴다 | 감사·통계 |
 | 검증만 하는 호출 | 규칙이 많은 도구만 나중에(`POST …/validate`, 저장 없이 `fieldErrors`) | 처음부터 맞게 보내기. 1단계 범위 밖 |
@@ -195,7 +196,7 @@
 | 0 | 기능명세서 AI매니저에 도구 목록·읽기 도구·확인 카드 기능 ID 추가, 팀 확인 | LJS(명세) | — |
 | 1 | Python: 목록 받기·합치기·동적 모델(`catalog.py`), 지금 도구 5개를 가짜 Java 응답(`tests/` 가짜 + 스냅샷)으로 옮김, `tool_eval` 재측정 | LJS(AI) | 0 |
 | 2 | Java: 어노테이션, `GET /internal/ai/tools`, `fieldErrors`, 지금 일정·케어 항목 API에 표시 | 백엔드 | 0 |
-| 3 | 연결: 가짜 → 실제 Java, `docs/api/internal.md` 행 확정 | LJS·백엔드 | 1·2 |
+| 3 | 연결: 가짜 → 실제 Java, `docs/api/internal.md` 행 확정 (끝 2026-11-06) | LJS·백엔드 | 1·2 |
 | 4 | 1단계 읽기를 도메인별로 연다(건강 → 가계부 → 반려동물 → 커뮤니티·플레이스·FAQ). 도메인 고르기 | LJS·백엔드 | 3 |
 | 5 | 프론트 범용 카드·본창 새로고침, 2단계 쓰기(건강 → 가계부) | 프론트·LJS | 3, 응답 계약 |
 | 6 | 스냅샷 자동 PR 파이프라인 | LJS·백엔드 | 3 |

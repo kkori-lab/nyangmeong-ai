@@ -102,7 +102,7 @@ class FakeToolAgent:
 
 
 # 가짜 Java 도구 목록(docs/design/tool-catalog.md 3-2절) : 스냅샷 구조 + 공통코드 값
-# 코드 값은 백엔드 db insert_base_data v0.13 기준(HLTG01·13·15·19)
+# 코드 값은 백엔드 로컬 GET /internal/ai/tools 응답 기준(2026-11-06, 백엔드 PR #174)
 FAKE_CODES: dict[str, list[dict]] = {
     "HLTG19": [
         {"cd": "HLTC0057", "nm": "병원"},
@@ -124,6 +124,18 @@ FAKE_CODES: dict[str, list[dict]] = {
         {"cd": "HLTC0040", "nm": "한달"},
         {"cd": "HLTC0041", "nm": "1년"},
         {"cd": "HLTC0042", "nm": "직접입력"},
+    ],
+    "HLTG21": [
+        {"cd": "HLTC0079", "nm": "보라"},
+        {"cd": "HLTC0080", "nm": "초록"},
+        {"cd": "HLTC0081", "nm": "빨강"},
+        {"cd": "HLTC0082", "nm": "파랑"},
+        {"cd": "HLTC0083", "nm": "회색"},
+    ],
+    "HLTG22": [
+        {"cd": "HLTC0065", "nm": "직접 등록"},
+        {"cd": "HLTC0066", "nm": "검진기록 연동"},
+        {"cd": "HLTC0067", "nm": "AI 생성"},
     ],
 }
 
