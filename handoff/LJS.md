@@ -1,9 +1,12 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-MYP-011 아이템 상점 모달 (백엔드 #149 연결: 대표 이미지 계약 확정·얼굴 영역·관리자 쿠키 전체 굽기, SCR-MYP-010·ADM-070 공통) — 끝 (2026-11-04). `POST /ai/items/{itemSn}/bake`는 한 묶음(최대 13개)을 관리자 쿠키로 굽고 200 `{itemSn, bakedCnt, failedCnt, lastYn}`, 쿠키 없는 저장소 삭제. 얼굴 영역 `(96, 32, 320, 320)`, 눈 기준점 `(256, 207.36)` 숫자 고정. `internal.md` 30~36행 백엔드 #149 기준 확정. 검증 1회차 확인 못 함 있음(연결 남음뿐), 사람 확인 완료
+SCR-AIM-002 대화창 · 서비스 기능 안내 (서비스 안내서, 추가 요청) — 끝 (2026-11-05). 사용법 질문은 분류 `GUIDE`(내부만, 응답 `intent.kind`는 SEARCH) → M1 키워드 색인 상위 3개, 없으면 분류 LLM이 목차에서 고른 1개, 둘 다 없으면 범위 안내. 안내서는 `data/guide/*.yaml`(task 144개, id 직접 기재), 사람용 메모는 `docs/guide-review.md`, 설계는 `docs/design/service-guide-search.md`. 분류 캐시는 켜지 않음(추가-1). 검증 1회차 통과, 사람 확인 완료
 
 ## 다음에 할 것
+- DMS 모음: AI매니저 기능명세서에 사용법 안내 기능 ID 추가(GUIDE 분류·안내서 검색, 지금은 FN-AIM-002-02·002-04·004-02에 걸어 둠), 사용법 답변에도 의료 고지를 붙일지(지금은 명세대로 붙임), 부록 A에 1:1 문의(SCR-CSC-003) 행 없음 (LJS)
+- 서비스 안내 후속 (LJS): 새 질문 세트로 M1+LLM 다시 평가(hit@3·답변 정확도·토큰, 지금 세트는 회귀 하한 25/45로만 씀), 안내서 버튼 이름·경로를 프론트 코드와 대조(초안은 서브에이전트 작성), 분류 입력이 목차 때문에 약 7,800토큰(캐시 없음, 질문 1만 번에 약 $8) — 사용량이 늘면 분류 `system` 캐시(기존 테스트 2개 기대값을 블록으로 바꿔야 함)
+- 프론트에 알리기: `screenPaths.js`가 num 27 공동양육 관리를 라우트에 없는 `/mypage/caregivers`로 보냄(실제 화면은 `/mypage/pets` 카드 아래 가족 영역). 사용법 답변 바로가기(`done.shortcut`)가 SCR-MYP-004를 줄 수 있음
 - 병합 순서: 백엔드 PR #149(LJS, 대표 이미지 저장·관리자 쿠키 시트 허용·`CharacterSpec.FACE` `(96, 32, 320, 320)`) 먼저 → AI `LJS` PR. 각자 로컬 DB에 `PIXEL_CHAR.WEAR_IMG_FILE_SN` ALTER(v0.13 (1)) (LJS 백엔드)
 - 연결 남음: FN-ADM-070-02 관리자 프론트 아이템 등록 화면 (관리자 프론트): [굽기 지시 만들기](`POST /ai/items/bake-hints`)·[시험해 보기](`POST /ai/items/trial-preview`), 등록 성공 뒤 `POST /ai/items/{itemSn}/bake`를 `lastYn` true까지 반복(한 번 30~40초, 매 호출 전 토큰 갱신, 502면 멈춤)
 - 연결 남음: FN-MYP-010-16 프론트 꾸미기 [장착] (SJM): Java `PUT equipped-items`(`hldItemSns`) 성공 뒤 `POST /ai/characters/{pixelCharSn}/equipped-image` `{itemSns}`(아이템 번호)

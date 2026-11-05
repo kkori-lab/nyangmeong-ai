@@ -107,6 +107,8 @@ class Judged:
     shortcut: Intent | None = None
     # FALLBACK일 때 서비스 범위 밖 질문 여부 : 안내 문구만 다름
     out_of_scope: bool = False
+    # 사용법 질문일 때 답변 근거로 쓸 안내서 청크 id (SEARCH로 응답)
+    guide_ids: tuple[str, ...] = ()
 
 
 async def judge(text: str, has_image: bool, classifier: IntentClassifier) -> Judged:
@@ -132,6 +134,12 @@ async def judge(text: str, has_image: bool, classifier: IntentClassifier) -> Jud
             return Judged(row.to_intent())
     if classified.kind is ClassifiedKind.SEARCH:
         return Judged(Intent(kind=IntentKind.SEARCH), _shortcut_of(classified))
+    if classified.kind is ClassifiedKind.GUIDE:
+        guided = _guide_judged(text, classified)
+        if guided is not None:
+            return guided
+        # 설계 초안 0절 : M1·목차 선택 모두 못 찾으면 범위 안내
+        return Judged(Intent(kind=IntentKind.FALLBACK), out_of_scope=True)
     if classified.kind is ClassifiedKind.ROUTE and classified.scr_id is not None:
         row = rules.find_route(classified.scr_id, classified.param)
         if row is not None:
@@ -139,6 +147,34 @@ async def judge(text: str, has_image: bool, classifier: IntentClassifier) -> Jud
     # ④ FN-AIM-004-12·005-01 : 어디에도 해당하지 않으면 폴백
     out_of_scope = classified.kind is ClassifiedKind.OUT_OF_SCOPE
     return Judged(Intent(kind=IntentKind.FALLBACK), out_of_scope=out_of_scope)
+
+
+def _guide_judged(text: str, classified: Classified) -> Judged | None:
+    # FN-AIM-002-02 : 1단계 M1 키워드 색인, 없으면 2단계 분류 LLM의 목차 선택
+    ids = rules.search_guide(text)
+    stage = "M1"
+    if not ids and classified.guide_id is not None:
+        ids, stage = [classified.guide_id], "목차"
+    if not ids:
+        logger.info("사용법 안내: 안내서 청크 없음")
+        return None
+    logger.info("사용법 안내: %s %d개 %s", stage, len(ids), ",".join(ids))
+    return Judged(
+        Intent(kind=IntentKind.SEARCH), _guide_shortcut(ids[0], classified), guide_ids=tuple(ids)
+    )
+
+
+def _guide_shortcut(chunk_id: str, classified: Classified) -> Intent | None:
+    # FN-AIM-002-04 : 첫 청크 화면이 라우팅 대상이면 그 화면, 아니면 분류의 연관 화면
+    chunk = rules.find_guide(chunk_id)
+    num = chunk.num if chunk else None
+    row = next((r for r in rules.routing_table() if r.no == num and r.routable), None)
+    return row.to_intent() if row is not None else _shortcut_of(classified)
+
+
+def guide_text(ids: tuple[str, ...]) -> str | None:
+    chunks = [chunk for chunk in map(rules.find_guide, ids) if chunk is not None]
+    return "\n\n".join(chunk.text for chunk in chunks) or None
 
 
 def _shortcut_of(classified: Classified) -> Intent | None:
@@ -270,7 +306,9 @@ async def _run_turn(
         emit(("intent", judged.intent))
         kind = judged.intent.kind
         if kind is IntentKind.SEARCH:
-            answer = await _search_answer(turn, repo, answers, ai, limits, judged.shortcut, emit)
+            answer = await _search_answer(
+                turn, repo, answers, ai, limits, judged.shortcut, emit, guide_text(judged.guide_ids)
+            )
             if answer is not None and titles is not None and _is_first_answer(turn):
                 await _retitle(repo, titles, turn, answer)
         elif kind is IntentKind.FALLBACK:
@@ -304,10 +342,15 @@ async def _search_answer(
     limits: AnswerLimits,
     shortcut: Intent | None,
     emit: Callable[[Event | None], None],
+    guide: str | None = None,
 ) -> str | None:
     # FN-AIM-002-02·07 : 완료면 고지 전 본문 반환(제목 요약용), 실패·미완료면 None
     context = build_context(turn.messages, turn.question.msg_seq, ai.context_turns)
-    stream = answers.stream(context, ai.max_tokens)
+    # 안내서가 없으면 guide 인자 없이 : 안내서를 모르는 답변기 구현과도 호환
+    if guide is None:
+        stream = answers.stream(context, ai.max_tokens)
+    else:
+        stream = answers.stream(context, ai.max_tokens, guide=guide)
     loop = asyncio.get_running_loop()
     deadline = loop.time() + limits.total_sec
     try:

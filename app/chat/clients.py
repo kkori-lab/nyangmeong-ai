@@ -146,6 +146,8 @@ class ClassifiedKind(StrEnum):
     UNKNOWN = "UNKNOWN"
     # 서비스 범위 밖 질문(2026-10-30) : 폴백이지만 안내 문구가 다름
     OUT_OF_SCOPE = "OUT_OF_SCOPE"
+    # 앱 기능의 위치·사용법 질문(2026-11-05) : 안내서 근거 답변, 응답 intent는 SEARCH
+    GUIDE = "GUIDE"
 
 
 @dataclass(frozen=True)
@@ -157,6 +159,8 @@ class Classified:
     # SEARCH일 때 답과 관련된 화면(FN-AIM-002-04 연관 바로가기). 매핑표에 있는 행만
     related_scr_id: str | None = None
     related_param: str | None = None
+    # GUIDE일 때 안내서 목차에서 고른 청크. 안내서에 없는 id는 None
+    guide_id: str | None = None
 
 
 class ClassifyError(Exception):
@@ -177,8 +181,10 @@ class ClassifyOutput(BaseModel):
     # 구조화 출력 모양. route_num은 매핑표(data/routing.yaml)의 num
     kind: ClassifiedKind
     route_num: int | None = None
-    # SEARCH일 때 답과 관련된 화면 번호(FN-AIM-002-04)
+    # SEARCH·GUIDE일 때 답과 관련된 화면 번호(FN-AIM-002-04)
     related_num: int | None = None
+    # GUIDE일 때 안내서 목차의 청크 번호(2단계 목차 선택)
+    guide_id: str | None = None
 
 
 @lru_cache
@@ -202,16 +208,28 @@ def classify_system() -> str:
         "'강아지 가계부 쓰는 법 알려줘'·'앱에서 가계부 어떻게 써'·'병원 어디가 좋아?'는 범위 안.\n"
         "- ROUTE: 서비스 범위 안에서 아래 화면 중 하나로 가려는 요청. "
         "route_num에 그 화면 번호를 쓴다.\n"
-        "- SEARCH: 서비스 범위 안에서 답을 찾아 줘야 하는 질문.\n"
+        "- GUIDE: 서비스 범위 안에서 이 앱 기능의 위치나 사용 방법을 묻는 질문"
+        "(예: '캐릭터 어디서 만들어?'·'가족 초대 어떻게 해?'·'알림 어디서 꺼?'). "
+        "guide_id에 아래 안내서 목차에서 가장 맞는 번호 하나를, 맞는 것이 없으면 null을 쓴다. "
+        "화면 키워드가 들어 있어도 그 기능의 위치·사용법을 물으면 ROUTE가 아니라 GUIDE.\n"
+        "- SEARCH: 서비스 범위 안에서 답을 찾아 줘야 하는 그 밖의 질문"
+        "(반려동물 건강·생활 정보 등).\n"
         "- OUT_OF_SCOPE: 뜻은 분명하지만 서비스 범위 밖인 질문·요청(반려동물·이 앱과 관계없는 "
         "일반 질문, 예: 집 가계부 쓰는 법·요리·코딩). "
         "화면 키워드가 들어 있어도 서비스 범위 밖이면 OUT_OF_SCOPE.\n"
         "- UNKNOWN: 그 밖의 입력(뜻 없는 글자, 욕설, 판단하기 어려운 것). "
         "확실하지 않으면 UNKNOWN.\n"
-        "ROUTE가 아니면 route_num은 null.\n"
-        "SEARCH이고 답과 관련된 화면이 아래에 있으면 related_num에 그 번호를, "
+        "ROUTE가 아니면 route_num은 null. GUIDE가 아니면 guide_id는 null.\n"
+        "SEARCH·GUIDE이고 답과 관련된 화면이 아래에 있으면 related_num에 그 번호를, "
         "없으면 null을 쓴다.\n\n"
-        f"화면 목록(번호. 화면명: 키워드)\n{screens}"
+        f"화면 목록(번호. 화면명: 키워드)\n{screens}\n\n"
+        f"안내서 목차(번호 화면명 · 할 일)\n{_guide_toc()}"
+    )
+
+
+def _guide_toc() -> str:
+    return "\n".join(
+        f"- {chunk.id} {chunk.screen or '공통'} · {chunk.title}" for chunk in rules.guide_chunks()
     )
 
 
@@ -235,6 +253,18 @@ def _search_of(related_num: int | None) -> Classified:
     return Classified(ClassifiedKind.SEARCH, related_scr_id=row.scr_id, related_param=row.param)
 
 
+def _guide_of(output: ClassifyOutput) -> Classified:
+    # 목차에 없는 번호는 버림 : M1 결과도 없으면 서비스가 범위 안내
+    related = _search_of(output.related_num)
+    chunk = rules.find_guide(output.guide_id)
+    return Classified(
+        ClassifiedKind.GUIDE,
+        related_scr_id=related.related_scr_id,
+        related_param=related.related_param,
+        guide_id=chunk.id if chunk else None,
+    )
+
+
 def _hint_note(hint: rules.RouteRow | None) -> str:
     # 키워드에 걸린 화면 알림 : 범위 안 이동이면 ROUTE, 범위 밖이면 OUT_OF_SCOPE
     if hint is None:
@@ -243,7 +273,9 @@ def _hint_note(hint: rules.RouteRow | None) -> str:
         f"\n\n이 입력은 키워드로 {hint.no}번 화면({hint.name})에 걸렸다. "
         "키워드가 걸린 것만으로 범위 안이 아니다. 위 서비스 범위 규칙대로 범위 밖이면 OUT_OF_SCOPE."
         "범위 안에서 그 화면으로 가려는 요청이나 그 화면에 있는 내 기록을 묻는 질문"
-        "(예: '이번 달 병원비 얼마 나왔어?')이면 ROUTE, 그 밖의 범위 안 질문이면 SEARCH."
+        "(예: '이번 달 병원비 얼마 나왔어?')이면 ROUTE, "
+        "그 화면 기능의 위치·사용법을 묻는 질문(예: '캐릭터 꾸미기 어디서 해?')이면 GUIDE, "
+        "그 밖의 범위 안 질문이면 SEARCH."
     )
 
 
@@ -277,9 +309,11 @@ class AnthropicIntentClassifier:
         if response.stop_reason == "refusal" or output is None:
             _log_failure("의도 분류", started, response.stop_reason or "no_output")
             return Classified(ClassifiedKind.UNKNOWN)
+        # 추가-1(2026-11-05) : 분류 캐시 없음, 목차 비용 확인용 입력 토큰 수
         logger.info(
-            "LLM 의도 분류: 입력 %d자 → %s (%.0fms)",
+            "LLM 의도 분류: 입력 %d자·%d토큰 → %s (%.0fms)",
             len(text),
+            response.usage.input_tokens,
             output.kind,
             (time.monotonic() - started) * 1000,
         )
@@ -287,6 +321,8 @@ class AnthropicIntentClassifier:
             return _route_of(output.route_num)
         if output.kind is ClassifiedKind.SEARCH:
             return _search_of(output.related_num)
+        if output.kind is ClassifiedKind.GUIDE:
+            return _guide_of(output)
         return Classified(output.kind)
 
 
@@ -306,7 +342,10 @@ class AnswerError(Exception):
 
 class AnswerGenerator(Protocol):
     # FN-AIM-002-02 : 답변 조각 스트리밍, 실패 시 AnswerError
-    def stream(self, messages: list[dict], max_tokens: int) -> AsyncIterator[str]: ...
+    # guide : 사용법 질문일 때 안내서에서 꺼낸 청크 글
+    def stream(
+        self, messages: list[dict], max_tokens: int, guide: str | None = None
+    ) -> AsyncIterator[str]: ...
 
 
 # FN-AIM-002-08·09 : 개인 데이터는 모른다고 보고 화면 안내, 진단 대신 수의사 상담 안내
@@ -321,6 +360,28 @@ ANSWER_SYSTEM = (
     "- 답 끝에 의료 고지 문구를 따로 쓰지 않는다."
 )
 
+# FN-AIM-002-02 : 사용법 질문은 안내서에서 꺼낸 청크만 근거 (2026-11-05)
+GUIDE_RULES = (
+    "아래는 이 앱의 사용법 안내서에서 질문과 관련 있어 보이는 부분이다.\n"
+    "- 앱 기능의 위치와 사용 방법은 이 안내서 내용만 근거로 답한다. "
+    "메뉴·버튼 이름은 [ ] 안의 글자를 그대로 쓴다.\n"
+    "- 준비 상태가 정상이 아닌 화면의 준비 중 기능은 곧 제공된다고 안내한다.\n"
+    "- 안내서에 없는 기능이나 경로는 지어내지 않는다. 모른다고 말하고 "
+    "고객센터의 FAQ나 1:1 문의를 안내한다.\n"
+    "- 질문과 관계없는 항목은 쓰지 않는다. [6-1] 같은 항목 번호는 답에 쓰지 않는다.\n\n"
+    "안내서\n"
+)
+
+
+def answer_system(guide: str | None) -> str | list[dict]:
+    # 안내서는 둘째 블록 : 고정 문구인 첫 블록과 분리
+    if guide is None:
+        return ANSWER_SYSTEM
+    return [
+        {"type": "text", "text": ANSWER_SYSTEM},
+        {"type": "text", "text": GUIDE_RULES + guide},
+    ]
+
 
 class AnthropicAnswerGenerator:
     # FN-AIM-002-02 : 대화 메시지 텍스트만 전송 (FN-AIM-011-16 반려동물 기록 제외)
@@ -328,14 +389,16 @@ class AnthropicAnswerGenerator:
         self.client = client
         self.model = model
 
-    async def stream(self, messages: list[dict], max_tokens: int) -> AsyncIterator[str]:
+    async def stream(
+        self, messages: list[dict], max_tokens: int, guide: str | None = None
+    ) -> AsyncIterator[str]:
         started = time.monotonic()
         length = 0
         try:
             async with self.client.messages.stream(
                 model=self.model,
                 max_tokens=max_tokens,
-                system=ANSWER_SYSTEM,
+                system=answer_system(guide),
                 messages=messages,
                 output_config={"effort": LLM_EFFORT},
             ) as stream:
