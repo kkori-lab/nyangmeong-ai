@@ -100,10 +100,12 @@ React가 실행한다. **이동** = 본창 이동(지금 ROUTE). "Java API"는 �
 
 ### 3-5. 도구 설명 (LLM이 고르는 기준)
 
-도구를 고르는 정확도는 거의 도구 설명이 정한다. 그래서 도구마다 설명을 쓰되, **정본은 Python 도구 모델**에 둔다(2026-11-05 결정, 따로 파일·문서를 만들지 않는다).
+도구를 고르는 정확도는 거의 도구 설명이 정한다. 그래서 도구마다 설명을 쓰되, **정본은 `data/tool_prompts.yaml`**에 둔다
+(2026-11-05 `tool-catalog.md` 결정. 처음의 "Python 도구 모델 docstring이 정본" 결정을 바꿨다).
 
-- 위치: `app/chat/` 안의 도구별 pydantic 모델(1단계 구현 때 만든다). 모델 docstring이 도구 `description`, `Field(description=...)`이 인자 설명이 되고,
-  `input_schema`도 그 모델에서 뽑는다. 인자 검증(2절)과 설명이 한 곳에 있다. 지금 분류 출력 `ClassifyOutput`과 같은 방식이다.
+- 위치: `data/tool_prompts.yaml`의 도구 이름별 `description`(도구 설명)과 `params.<칸>.description`(인자 설명).
+  등록 도구(`draft_*`)의 칸·필수·코드 값은 Java 도구 목록(`GET /internal/ai/tools`)이 정본이고, `app/chat/catalog.py`가 둘을 합쳐
+  검증 모델과 `input_schema`를 만든다. `navigate`·`search_guide`·`decline`은 `builtin: true`(Java API가 아님)이고 인자 모델은 `app/chat/tools.py`에 있다.
 - 이 문서에는 쓰는 규칙과 예시만 두고 전문을 옮기지 않는다(두 곳이 어긋나지 않게).
 - 말: 한국어. 회원 질문과 안내서가 한국어다. 도구 이름과 인자 이름은 영어.
 - 도구마다 다섯 칸을 쓴다.
@@ -302,7 +304,7 @@ Python이 Java 내부 GET을 쿠키와 함께 불러 결과를 LLM에 돌려주�
 
 | 파일 | 바뀐 것 |
 | --- | --- |
-| `app/chat/tools.py` (새 파일) | 도구 모델 5개(`Navigate`·`SearchGuide`·`DraftSchedule`·`DraftCareItem`·`Decline`). docstring·`Field` 설명이 도구 설명(3-5절)이다. Anthropic `tools` 목록과 인자 enum(매핑표의 라우팅 가능 행 번호, 안내서 목차 번호)도 여기서 `rules.routing_table()`·`rules.guide_chunks()`로 만든다. 인자 재검증(`parse`·`route_row`·`register_values`·`guide_ids`)도 여기 있다 |
+| `app/chat/tools.py` (새 파일) | 도구 5개. `navigate`·`search_guide`·`decline`은 인자 모델(`Navigate`·`SearchGuide`·`Decline`), `draft_schedule`·`draft_care_item`은 도구 목록 1차(2026-11-05, `tool-catalog.md`)부터 `app/chat/catalog.py`가 Java 도구 목록과 `data/tool_prompts.yaml`로 만든다. 설명은 yaml(3-5절). Anthropic `tools` 목록과 인자 enum(매핑표의 라우팅 가능 행 번호, 안내서 목차 번호)도 여기서 `rules.routing_table()`·`rules.guide_chunks()`로 만든다. 인자 재검증(`parse`·`route_row`·`register_values`·`guide_ids`)도 여기 있다 |
 | `app/chat/clients.py` | `ToolAgent` Protocol과 `AnthropicToolAgent`(스트리밍 한 번, 첫 블록이 글이면 그대로 답변, `search_guide`면 `tool_result`를 붙여 한 번 더 부름), `tool_system`(답변 규칙·서비스 범위·화면 목록·안내서 목차, 캐시), `get_tool_agent`(설정이 꺼져 있으면 `None`). 지금 `IntentClassifier`·`RegisterExtractor`는 그대로 둔다 |
 | `app/chat/service.py` | `judge_tools`·`_tool_judged`(도구 → 지금 intent 값). 이미지·초안 이어 쓰기·룰 라우팅은 그대로, 등록 정규식에 걸리면 룰 라우팅을 건너뛰고 LLM으로. `build_card`는 도구 인자를 AI 보충 값으로 받는다 |
 | `app/chat/router.py` | `send_message`가 `get_tool_agent`를 받아 넘긴다 |

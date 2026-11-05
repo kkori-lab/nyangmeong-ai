@@ -114,6 +114,8 @@ class Judged:
     # 도구 흐름(tool calling 1단계) : 이미 시작한 답변 스트림, 등록 도구 인자
     stream: AsyncIterator[str] | None = None
     ai_values: dict | None = None
+    # 고른 등록 도구 이름 : 빈 칸을 Java 도구 목록 규칙으로 판정
+    tool: str | None = None
 
 
 async def judge(text: str, has_image: bool, classifier: IntentClassifier) -> Judged:
@@ -222,7 +224,8 @@ def _tool_judged(
     if call.name == tools.NAVIGATE:
         return Judged(tools.route_row(call).to_intent())
     if call.name in tools.REGISTER_TOOLS:
-        return Judged(Intent(kind=IntentKind.REGISTER), ai_values=tools.register_values(call))
+        values = tools.register_values(call)
+        return Judged(Intent(kind=IntentKind.REGISTER), ai_values=values, tool=call.name)
     if call.name == tools.DECLINE:
         return Judged(Intent(kind=IntentKind.FALLBACK), out_of_scope=not call.args.unclear)
     ids = tuple(tools.guide_ids(call, text))
@@ -401,7 +404,9 @@ async def _run_turn(
             move = route_message(judged.intent.scr_nm or "")
             emit(("done", AnswerDone(message=await _save(repo, turn.room_sn, move, True))))
         elif kind is IntentKind.REGISTER and register is not None:
-            card = card or await build_card(text, turn.pet_sn, None, register, judged.ai_values)
+            card = card or await build_card(
+                text, turn.pet_sn, None, register, judged.ai_values, judged.tool
+            )
             await _register_reply(repo, turn.room_sn, card, emit)
         else:
             # RECEIPT는 SCR-AIM-013에서 잇는다
@@ -595,6 +600,7 @@ async def build_card(
     draft: RegisterDraft | None,
     deps: RegisterDeps,
     ai_values: dict | None = None,
+    tool: str | None = None,
 ) -> RegisterCard | None:
     # FN-AIM-012-02~08·10. 초안이 있는데 이 메시지에서 뽑힌 칸이 없으면 None(일반 판정으로)
     pets = await deps.contexts.get_pets()
@@ -624,11 +630,12 @@ async def build_card(
             values.setdefault(name, value)
     if values.get("schdl_knd_cd") == rules.SCHEDULE_HOSPITAL:
         values.pop("schdl_nm", None)
-    care = bool(values.get("care_zone_cd"))
+    care = tool == tools.DRAFT_CARE_ITEM or bool(values.get("care_zone_cd"))
     keep = _CARE_FIELDS if care else _SCHEDULE_FIELDS
     values = {name: value for name, value in values.items() if name in keep}
     pet = _pick_pet(pets, named, draft.pet_sn if draft else None, room_pet)
-    missing = (["pet_sn"] if pet is None else []) + _missing(values)
+    empty = tools.register_missing(tool, values)
+    missing = (["pet_sn"] if pet is None else []) + (_missing(values) if empty is None else empty)
     card = RegisterCard(
         card_type=CardType.ASK if missing else CardType.CARE_ITEM if care else CardType.SCHEDULE,
         pet_sn=pet.pet_sn if pet else None,
@@ -664,6 +671,8 @@ def ask_message(card: RegisterCard) -> str:
         parts.append(f"어느 아이의 {target}인가요? 아래에서 골라 주세요.")
     if "careArtclNm" in missing:
         parts.append("어떤 케어 항목인가요?")
+    if "careZoneCd" in missing:
+        parts.append("매일 하나요, 주기마다 하나요?")
     if missing & {"careCycleCd", "cycleDays"}:
         parts.append("얼마나 자주 하나요? (예: 매주, 2주마다, 한달마다)")
     if "schdlKndCd" in missing:

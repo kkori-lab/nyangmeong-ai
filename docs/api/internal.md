@@ -36,9 +36,24 @@ Java가 만드는 API다(백엔드 저장소 기준). 키 헤더는 없다. 인�
 | PUT | `/internal/ai/characters/{pixelCharSn}/equipped-image` | 착용 모습 대표 이미지 저장(백엔드 PR #149). React가 Java `PUT /pixel-characters/{pixelCharSn}/equipped-items` 성공 뒤 Python `/ai/characters/{pixelCharSn}/equipped-image`를 부르면 Python이 합성해 보낸다. 쿠키로 주양육자만. multipart `image`(512×512 PNG), 폼 `itemSns`(여러 번, 맨몸이면 없음). `itemSns`가 지금 확정 착용 목록과 같을 때만 저장하고, 다르면 409 `EQUIPPED_ITEMS_CHANGED`(늦게 끝난 옛 합성이 덮어쓰지 않게). 512×512 PNG가 아니면 400 `FILE_TYPE_NOT_ALLOWED`, 공동양육자 403 `PET_PRIMARY_ONLY`, 없는 캐릭터 404 `PIXEL_CHARACTER_NOT_FOUND`. Java는 `PUT equipped-items`(착용 확정)와 캐릭터 생성 성공 보고 때 대표 이미지를 지우고, `GET /pets/{petSn}/character-image`는 대표 이미지 → 맨몸 → 기본 캐릭터 순으로 준다. 응답 200 본문 없음 | MYP-010-16, MYP-010-13 | 백엔드 | - | - |
 | GET | `/internal/ai/pets/{petSn}/health-report-input?baseYmd=` | **초안(2026-11-04, Java 미구현, LJS 백엔드)** 메인 AI 건강분석 리포트의 분석 입력과 저장된 최근 리포트를 한 번에 준다. 쿠키로 그 반려동물을 양육하는 회원만(아니면 4xx, Python이 그대로 전달). `baseYmd`(KST 오늘) 포함 14일 기록을 자른다. 응답 `data {input, report, rfrshPsblYn: Boolean, autoRgnrPsblYn: Boolean}`. `input {petNm, petSeCd, vrtyNm, ageMm: Integer, nutrYn, goalBdwg, weights·meals·waters·walks [{ymd, rcdNvl}](DAILY_HLTH_RCD HLTC0014·0015·0016·0018), stools [{ymd, crsdSttsCdNm}](HLTC0017), latestCkupYmd, inspOutOfRange [{inspArtclNm, rsltNvl, unitNm, refLlmtNvl, refUplmtNvl}](가장 최근 검진 1회의 INSP_NVL 중 참고 범위 밖)}`. `report {rptTtl, tips: [String], inputHash: String(64), crtDt}`는 그 반려동물의 가장 최근 저장본, 없으면 null. `rfrshPsblYn`은 `baseYmd`에 새로고침(`rfrshYn: true` 저장)을 아직 안 했으면 true. `autoRgnrPsblYn`은 `baseYmd`에 자동 재생성(그날 첫 생성 뒤 `rfrshYn: false` 저장)이 5회 미만이면 true | MAN-006 | 백엔드 | - | - |
 | PUT | `/internal/ai/pets/{petSn}/health-report` | **초안(2026-11-04, Java 미구현, LJS 백엔드)** 리포트 저장(반려동물·기준일당 최신 1건을 덮어써도 된다). 요청 `{baseYmd, rptTtl(≤20), tips: [String](≤3, 각 ≤40), inputHash: String(64), rfrshYn: Boolean}`. Java는 `rfrshYn`으로 새로고침 횟수를, 그날 이미 저장본이 있는데 `rfrshYn: false`면 자동 재생성 횟수를 센다. 200. 새 테이블(ERD 변경) | MAN-006 | 백엔드 | - | - |
+| GET | `/internal/ai/tools` | **초안(2026-11-05, Java 미구현, LJS 백엔드. 설계 `docs/design/tool-catalog.md` 3-2절)** AI 매니저 도구 목록. `@AiTool`을 붙인 컨트롤러 메서드와 요청 DTO의 검증 어노테이션(`@NotNull`·`@NotBlank`·`@Size` 등)·`@AiCode`·`@AiRequiredIf`를 읽어 만든다. 회원과 관계없는 목록이라 쿠키·키 없이 부른다. 응답 `data` AiToolCatalogResponse. Python은 `CHAT_TOOL_AGENT` 켜짐일 때만 기동 때 1회 부르고, 실패(연결 실패·5xx·4xx·모양 다름)하면 `data/tools.snapshot.json`으로 뜨고 코드 칸이 있는 도구는 싣지 않는다(`app/chat/catalog.py`). 400 응답은 지금 모양 그대로 `data: [{field, message}]`(Bean Validation 오류만 칸 이름이 있고, 서비스 검사 `INVALID_INPUT_VALUE`의 칸 이름은 다음 백엔드 마일스톤. 2026-11-05 백엔드 결정) | AIM-004-02, AIM-012-03(도구 목록 기능 ID는 기능명세서 추가 전) | 백엔드 | - | AiToolCatalogResponse |
 | (미정) | 미완료 메시지 완료 처리·최근 6턴·AI 설정값 조회 | 백엔드 `docs/api/ai.md`에 PATCH 설계만 있음. SCR-AIM-002에서 필요해지면 요청 | AIM-002 | 백엔드 | 미정 | 미정 |
 
 ## DTO
+
+### AiToolCatalogResponse
+쓰는 API: GET /internal/ai/tools (**초안**, 백엔드 PR과 함께 확정). 가짜 응답은 `tests/chat/fakes.py` `fake_catalog_json()`(스냅샷 + 공통코드 값)
+
+| 필드 | 타입 | 필수 | 검증·설명 | 근거 |
+| --- | --- | --- | --- | --- |
+| version | String | Y | 응답 본문(구조 + 코드 값)의 해시 | tool-catalog 3-2 |
+| structureVersion | String | Y | 코드 값을 뺀 구조의 해시. Python 스냅샷과 다르면 경고 로그(배포 순서 어긋남) | tool-catalog 3-2·4-2 |
+| tools[].name | String | Y | `@AiTool(name)`. `data/tool_prompts.yaml`과 짝짓는 키(예: `draft_schedule`) | tool-catalog 3-1 |
+| tools[].domain | String | Y | `health` 등 | tool-catalog 3-1 |
+| tools[].kind | String | Y | `READ`·`CARD` | tool-catalog 3-1 |
+| tools[].call | `{method, path}` | Y | 컨트롤러 매핑(예: `POST /api/pets/{petSn}/care-schedules`) | tool-catalog 3-2 |
+| tools[].params.<Java 칸> | `{in, type, required?, group?, codes?, maxLength?, min?, max?}` | Y | `in`: `path`·`query`·`body`. `type`: `string`·`long`·`int`·`decimal`·`boolean`·`date`·`time`·`datetime`·`code`(`datetime`은 `LocalDateTime` 칸 때문에 3-2절에 더함). `code`면 `group`(공통코드 그룹)과 `codes: [{cd, nm}]`(사용 중인 값). `min`·`max`는 `@Min`·`@Max`(예: `cycleDrctInptDayCnt` 1~9999, 백엔드 결정 2026-11-05). 목록·중첩 객체는 1단계에서 쓰지 않는다 | tool-catalog 3-2 |
+| tools[].rules[] | `{requiredIf: {field, when, equals}}` | N | 조건부 필수. "병원이 아니면 일정명"처럼 같지 않음 조건은 값마다 한 줄(가짜 응답은 HLTC0058·0059·0060 세 줄) | tool-catalog 3-1 |
 
 ### ReceiptOcrRequest
 쓰는 API: POST /internal/v1/ocr/receipt (multipart/form-data)

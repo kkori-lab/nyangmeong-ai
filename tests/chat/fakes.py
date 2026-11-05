@@ -1,10 +1,12 @@
+import json
 import re
 from collections.abc import AsyncIterator
 from datetime import date
 
-from app.chat import tools
+from app.chat import catalog, tools
 from app.chat.clients import Classified, ClassifiedKind, ClassifyError, ToolDecision
 from app.chat.rules import RouteRow
+from app.core.backend import external_error
 
 TITLE_LENGTH = 30
 # 가짜 분류기가 질문으로 보는 표현
@@ -97,3 +99,62 @@ class FakeToolAgent:
     ) -> AsyncIterator[str]:
         self.results.append(result)
         return _chunks(self.answer_chunks)
+
+
+# 가짜 Java 도구 목록(docs/design/tool-catalog.md 3-2절) : 스냅샷 구조 + 공통코드 값
+# 코드 값은 백엔드 db insert_base_data v0.13 기준(HLTG01·13·15·19)
+FAKE_CODES: dict[str, list[dict]] = {
+    "HLTG19": [
+        {"cd": "HLTC0057", "nm": "병원"},
+        {"cd": "HLTC0058", "nm": "미용·목욕"},
+        {"cd": "HLTC0059", "nm": "케어·투약"},
+        {"cd": "HLTC0060", "nm": "기타"},
+    ],
+    "HLTG01": [
+        {"cd": "HLTC0001", "nm": "정기검진"},
+        {"cd": "HLTC0002", "nm": "예방접종"},
+        {"cd": "HLTC0003", "nm": "질병진료"},
+        {"cd": "HLTC0004", "nm": "검사"},
+        {"cd": "HLTC0005", "nm": "기타 진료"},
+    ],
+    "HLTG13": [{"cd": "HLTC0036", "nm": "일상관리"}, {"cd": "HLTC0037", "nm": "정기관리"}],
+    "HLTG15": [
+        {"cd": "HLTC0038", "nm": "1주"},
+        {"cd": "HLTC0039", "nm": "2주"},
+        {"cd": "HLTC0040", "nm": "한달"},
+        {"cd": "HLTC0041", "nm": "1년"},
+        {"cd": "HLTC0042", "nm": "직접입력"},
+    ],
+}
+
+
+def fake_catalog_json(structure_version: str | None = None) -> dict:
+    raw = json.loads((catalog.DATA_DIR / "tools.snapshot.json").read_text(encoding="utf-8"))
+    for tool in raw["tools"]:
+        for param in tool["params"].values():
+            if param["type"] == "code":
+                param["codes"] = FAKE_CODES[param["group"]]
+    if structure_version is not None:
+        raw["structureVersion"] = structure_version
+    return raw
+
+
+class FakeToolCatalogClient:
+    """[가짜 Java 도구 목록]
+    - response : 돌려줄 JSON(기본 스냅샷 + 코드 값), fail : 502
+    - 받은 횟수(calls) 기록"""
+
+    def __init__(self, response: dict | None = None, fail: bool = False) -> None:
+        self.response = fake_catalog_json() if response is None else response
+        self.fail = fail
+        self.calls = 0
+
+    async def fetch(self) -> catalog.ToolCatalogResponse:
+        self.calls += 1
+        if self.fail:
+            raise external_error()
+        return catalog.ToolCatalogResponse.model_validate(self.response)
+
+
+def fake_catalog() -> catalog.Catalog:
+    return catalog.build(catalog.ToolCatalogResponse.model_validate(fake_catalog_json()))
