@@ -365,11 +365,20 @@ class AnswerGenerator(Protocol):
 
 # FN-AIM-002-08·09 : 개인 데이터는 모른다고 보고 화면 안내, 진단 대신 수의사 상담 안내
 # 의료 고지 문구는 서비스가 붙이므로 프롬프트에서 제외
-ANSWER_SYSTEM = (
-    "너는 반려동물 케어 앱의 AI 매니저다. 반려동물 보호자의 질문에 한국어로 답한다.\n"
+PRIVATE_DATA_RULE = (
     "- 너는 사용자의 반려동물 기록, 일정, 다녀온 병원 같은 앱 안의 개인 데이터를 볼 수 없다. "
     "그런 내용을 물으면 추측하지 말고 앱의 해당 화면(케어 캘린더, 건강 기록 등)에서 "
     "확인하라고 안내한다.\n"
+)
+# 도구 흐름 : 건강 READ 도구 결과만 근거 (docs/design/tool-catalog.md 8절 4번)
+TOOL_DATA_RULE = (
+    "- 반려동물 기록·일정은 읽기 도구(get_·list_)로 받은 결과만 근거로 답한다. "
+    "도구 없이 기록을 추측하지 않는다. 도구 결과에 없거나 불러오지 못했으면 "
+    "앱의 해당 화면(케어 캘린더, 건강 기록 등)에서 확인하라고 안내한다.\n"
+)
+ANSWER_SYSTEM = (
+    "너는 반려동물 케어 앱의 AI 매니저다. 반려동물 보호자의 질문에 한국어로 답한다.\n"
+    f"{PRIVATE_DATA_RULE}"
     "- 진단이나 처방을 하지 않는다. 증상을 물으면 일반적인 정보를 주고 "
     "수의사 상담을 권한다. 응급으로 보이면 바로 동물병원에 가라고 먼저 말한다.\n"
     "- 답 끝에 의료 고지 문구를 따로 쓰지 않는다."
@@ -493,7 +502,7 @@ def tool_system() -> str:
     scope = classify_system().split("- ROUTE:", 1)[0].split("\n", 1)[1]
     guide_rules = GUIDE_RULES.removesuffix("\n\n안내서\n")
     return (
-        f"{ANSWER_SYSTEM}\n\n{scope}\n{TOOL_RULES}\n"
+        f"{ANSWER_SYSTEM.replace(PRIVATE_DATA_RULE, TOOL_DATA_RULE)}\n\n{scope}\n{TOOL_RULES}\n"
         f"search_guide 결과로 받은 안내서로 답할 때\n{guide_rules}\n\n"
         f"화면 목록(번호. 화면명: 키워드)\n{tools.screen_list()}\n\n"
         f"안내서 목차(번호 화면명 · 할 일)\n{_guide_toc()}"
@@ -506,7 +515,8 @@ def _tool_hint(hint: rules.RouteRow | None) -> str:
     return (
         f"이 입력은 키워드로 '{hint.name}' 화면({hint.scr_id})에 걸렸다. "
         "키워드가 걸린 것만으로 범위 안이 아니다. 범위 밖이면 decline, "
-        "그 화면으로 가려는 요청이나 그 화면에 있는 내 기록을 묻는 질문이면 navigate, "
+        "그 화면으로 가려는 요청이나 그 화면에 있는 내 기록을 묻는 질문이면 navigate"
+        "(건강 기록·일정·검진·약의 내용을 묻는 질문에 맞는 읽기 도구가 있으면 그 도구), "
         "그 화면 기능의 위치·사용법을 묻는 질문이면 search_guide."
     )
 

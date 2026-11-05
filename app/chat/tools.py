@@ -148,6 +148,11 @@ def register_missing(name: str | None, values: dict) -> list[str] | None:
     return catalog.missing_llm(entry, values) if entry is not None else None
 
 
+def read_entry(name: str) -> catalog.CatalogEntry | None:
+    entry = _catalog.entries.get(name) if _catalog is not None else None
+    return entry if entry is not None and entry.kind == "READ" else None
+
+
 def guide_ids(call: ToolCall, text: str) -> list[str]:
     # FN-AIM-002-02 : LLM이 고른 목차 청크를 앞에, M1 키워드 색인 결과를 뒤에(최대 3개)
     picked_id = call.args.chunk_id if isinstance(call.args, SearchGuide) else None

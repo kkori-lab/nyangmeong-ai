@@ -24,9 +24,11 @@ from app.chat.repository import (
     AiSettings,
     ConversationRepository,
     RegisterContextRepository,
+    ToolReader,
     get_ai_settings,
     get_conversation_repository,
     get_register_context_repository,
+    get_tool_reader,
 )
 from app.chat.schemas import (
     ConversationCreateRequest,
@@ -103,6 +105,7 @@ async def send_message(
     extractor: Annotated[RegisterExtractor, Depends(get_register_extractor)],
     titles: Annotated[TitleGenerator, Depends(get_title_generator)],
     agent: Annotated[ToolAgent | None, Depends(get_tool_agent)],
+    reader: Annotated[ToolReader, Depends(get_tool_reader)],
     room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
 ) -> StreamingResponse:
     # 스트림 시작 전 오류(400·401·403·404·502)는 다른 API와 같은 JSON 응답
@@ -110,7 +113,7 @@ async def send_message(
     limits = service.AnswerLimits(settings.answer_first_token_sec, settings.answer_total_sec)
     register = service.RegisterDeps(contexts, extractor, rules.today_kst())
     events = service.answer_turn(
-        turn, repo, classifier, answers, ai, limits, register, titles, agent
+        turn, repo, classifier, answers, ai, limits, register, titles, agent, reader
     )
     return StreamingResponse(_sse(events), media_type="text/event-stream")
 

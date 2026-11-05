@@ -162,3 +162,33 @@ def get_register_context_repository(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> RegisterContextRepository:
     return JavaRegisterContextRepository(client, settings, request.headers.get("cookie"))
+
+
+class ToolReader(Protocol):
+    # 도구 흐름 READ : Java 공개 API GET -> ApiResponse의 data (4xx·5xx는 BackendError·AppError)
+    async def read(self, path: str, params: dict) -> object: ...
+
+
+class JavaToolReader:
+    """[READ 도구 실행]
+    - 회원 판정·소유 검사는 Java 공개 API 그대로 : 브라우저 Cookie 전달, mbrSn 미전달"""
+
+    def __init__(self, client: httpx2.AsyncClient, settings: Settings, cookie: str | None) -> None:
+        self._client = client
+        self._settings = settings
+        self._headers = {REQUESTED_WITH_HEADER: REQUESTED_WITH}
+        if cookie:
+            self._headers["Cookie"] = cookie
+
+    async def read(self, path: str, params: dict) -> object:
+        return await call_backend(
+            self._client, self._settings, "GET", path, params=params, headers=self._headers
+        )
+
+
+def get_tool_reader(
+    request: Request,
+    client: Annotated[httpx2.AsyncClient, Depends(get_backend_client)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ToolReader:
+    return JavaToolReader(client, settings, request.headers.get("cookie"))
