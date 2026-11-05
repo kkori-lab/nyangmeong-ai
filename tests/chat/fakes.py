@@ -2,7 +2,8 @@ import re
 from collections.abc import AsyncIterator
 from datetime import date
 
-from app.chat.clients import Classified, ClassifiedKind
+from app.chat import tools
+from app.chat.clients import Classified, ClassifiedKind, ClassifyError, ToolDecision
 from app.chat.rules import RouteRow
 
 TITLE_LENGTH = 30
@@ -50,3 +51,49 @@ class FakeRegisterExtractor:
 
     async def extract(self, text: str, today: date) -> dict:
         return {}
+
+
+async def _chunks(texts) -> AsyncIterator[str]:
+    for text in texts:
+        yield text
+
+
+class FakeToolAgent:
+    """[가짜 도구 고르기 LLM]
+    - tool·raw : 고를 도구와 원 인자, texts : 도구 대신 글 답변, fail : ClassifyError
+    - 받은 호출(decides)과 서버 도구 결과(results) 기록"""
+
+    def __init__(
+        self,
+        tool: str | None = None,
+        raw: dict | None = None,
+        texts: tuple[str, ...] | None = None,
+        fail: bool = False,
+        answer_chunks: tuple[str, ...] = ("안내서대로 ", "답할게요."),
+    ) -> None:
+        self.tool = tool
+        self.raw = raw or {}
+        self.texts = texts
+        self.fail = fail
+        self.answer_chunks = answer_chunks
+        self.decides: list[tuple[list[dict], date, RouteRow | None]] = []
+        self.results: list[str] = []
+
+    async def decide(
+        self, messages: list[dict], max_tokens: int, today: date, hint: RouteRow | None = None
+    ) -> ToolDecision:
+        self.decides.append((messages, today, hint))
+        if self.fail:
+            raise ClassifyError("api_error")
+        if self.texts is not None:
+            return ToolDecision(text=_chunks(self.texts))
+        if self.tool is None:
+            return ToolDecision()
+        use = {"type": "tool_use", "id": "toolu_1", "name": self.tool, "input": self.raw}
+        return ToolDecision(call=tools.parse(self.tool, self.raw, "toolu_1"), content=(use,))
+
+    def answer(
+        self, messages: list[dict], decision: ToolDecision, result: str, max_tokens: int, today
+    ) -> AsyncIterator[str]:
+        self.results.append(result)
+        return _chunks(self.answer_chunks)

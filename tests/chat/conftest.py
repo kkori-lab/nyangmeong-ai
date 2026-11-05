@@ -170,6 +170,8 @@ def client(monkeypatch: pytest.MonkeyPatch, java: FakeJava) -> TestClient:
     app.dependency_overrides[clients.get_intent_classifier] = FakeIntentClassifier
     app.dependency_overrides[clients.get_answer_generator] = FakeAnswerGenerator
     app.dependency_overrides[clients.get_register_extractor] = FakeRegisterExtractor
+    # 도구 흐름은 기본 꺼짐(CHAT_TOOL_AGENT) : 켜는 테스트만 가짜를 끼움
+    app.dependency_overrides[clients.get_tool_agent] = lambda: None
     return TestClient(app)
 
 

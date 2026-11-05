@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     # FN-AIM-002-07 : 답변 첫 글자 제한·전체 제한(초)
     answer_first_token_sec: float = 10.0
     answer_total_sec: float = 60.0
+    # tool calling 1단계 실험(docs/design/tool-calling.md) : 켜면 분류·추출 대신 도구 고르기 LLM
+    chat_tool_agent: bool = False
 
 
 @lru_cache

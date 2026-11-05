@@ -1,0 +1,44 @@
+{"id": "T01", "type": "사용법", "q": "가계부 한도 설정 어디서 바꿔요", "intent": "가계부 월 한도 바꾸는 곳", "tool": "search_guide", "scr_id": "SCR-MYP-030"}
+{"id": "T02", "type": "사용법", "q": "울집 냥이 몸무게 기록은 어디다 남기는거야", "intent": "체중 기록 입력 위치", "tool": "search_guide", "scr_id": "SCR-HLT-002"}
+{"id": "T03", "type": "사용법", "q": "피검사 수치 직접 입력하는데가 어디예요", "intent": "혈액검사 수치 입력 화면 위치", "tool": "search_guide", "scr_id": "SCR-HLT-007"}
+{"id": "T04", "type": "사용법", "q": "관리항목 추가 버튼 어딧어 안보임", "intent": "케어 관리 항목 추가 위치", "tool": "search_guide", "scr_id": "SCR-HLT-003"}
+{"id": "T05", "type": "사용법", "q": "남편도 같이 초코 관리하게 하고싶은데 초대 어케 보내요", "intent": "공동양육자 초대 방법", "tool": "search_guide", "scr_id": "SCR-MYP-005"}
+{"id": "T06", "type": "사용법", "q": "포인트는 어떻게 모으는 거에요?", "intent": "포인트 적립 방법(케어미션)", "tool": "search_guide", "scr_id": "SCR-MYP-020"}
+{"id": "T07", "type": "사용법", "q": "강아지 한마리 더 데려왔는데 등록 어떻게해", "intent": "반려동물 추가 등록 방법", "tool": "search_guide", "scr_id": "SCR-MYP-002"}
+{"id": "T08", "type": "사용법", "q": "병원서 받은 검사결과지 pdf 올려서 분석하는거 어디서 해요", "intent": "검사결과지 PDF 분석 기능 위치", "tool": "search_guide", "scr_id": "SCR-HLT-005"}
+{"id": "T09", "type": "사용법", "q": "영수증 찍어서 진료기록 넣는법 알려줘", "intent": "영수증으로 검진기록 등록하는 방법", "tool": "search_guide", "scr_id": "SCR-HLT-002"}
+{"id": "T10", "type": "사용법", "q": "내 닉네임 수정 어디서함", "intent": "회원정보 수정 위치", "tool": "search_guide", "scr_id": "SCR-MYP-040"}
+{"id": "T11", "type": "사용법", "q": "근처 동물병원 찾아보는 기능도 있나요", "intent": "주변 병원 찾기 기능 위치", "tool": "search_guide", "scr_id": "SCR-HOS-001"}
+{"id": "T12", "type": "사용법", "q": "강아지 잃어버렸을때 글 올리는 데가 어디야ㅠ", "intent": "실종 신고 글 작성 위치", "tool": "search_guide", "scr_id": "SCR-CMU-002"}
+{"id": "T13", "type": "이동", "q": "가계부 열어줘", "intent": "가계부 화면 열기", "tool": "navigate", "scr_id": "SCR-MYP-030"}
+{"id": "T14", "type": "이동", "q": "뭉치 케어캘린더 보여줘", "intent": "케어 캘린더 보기", "tool": "navigate", "scr_id": "SCR-HLT-003"}
+{"id": "T15", "type": "이동", "q": "이번달 초코 사료값 얼마 썼더라", "intent": "이번 달 지출 확인", "tool": "navigate", "scr_id": "SCR-MYP-030"}
+{"id": "T16", "type": "이동", "q": "저번에 병원에서 한 피검사 결과 다시 보고싶어", "intent": "지난 검진 결과 상세 보기", "tool": "navigate", "scr_id": "SCR-HLT-005"}
+{"id": "T17", "type": "이동", "q": "내 포인트 얼마 남음?", "intent": "포인트 잔액 확인", "tool": "navigate", "scr_id": "SCR-MYP-020"}
+{"id": "T18", "type": "이동", "q": "공지사항 띄워줘", "intent": "공지사항 보기", "tool": "navigate", "scr_id": "SCR-CSC-001"}
+{"id": "T19", "type": "이동", "q": "요즘 두부 체중 변화 그래프 좀 보자", "intent": "체중 변화 그래프 확인", "tool": "navigate", "scr_id": "SCR-HLT-002"}
+{"id": "T20", "type": "이동", "q": "우리애 캐릭터 보러 가자", "intent": "픽셀 캐릭터 화면 열기", "tool": "navigate", "scr_id": "SCR-MYP-010"}
+{"id": "T21", "type": "일정", "q": "모레 오후 3시 초코 예방접종 잡아줘", "intent": "모레 병원 예방접종 일정 등록", "tool": "draft_schedule", "args": {"schdl_knd_cd": "HLTC0057"}}
+{"id": "T22", "type": "일정", "q": "다음주 토요일 뭉치 미용 예약 넣어줘", "intent": "다음 주 토요일 미용 일정 등록", "tool": "draft_schedule", "args": {"schdl_knd_cd": "HLTC0058"}}
+{"id": "T23", "type": "일정", "q": "낼 아침 9시에 구충제 먹이는거 일정 등록해줘", "intent": "내일 투약 일정 등록", "tool": "draft_schedule", "args": {"schdl_knd_cd": "HLTC0059"}}
+{"id": "T24", "type": "일정", "q": "11월 20일에 나비 목욕시키는 일정 추가", "intent": "11월 20일 목욕 일정 등록", "tool": "draft_schedule", "args": {"schdl_knd_cd": "HLTC0058"}}
+{"id": "T25", "type": "일정", "q": "담주 화욜 펫시터 오기로함 일정에 넣어줘", "intent": "다음 주 화요일 펫시터 방문 기타 일정 등록", "tool": "draft_schedule", "args": {"schdl_knd_cd": "HLTC0060"}}
+{"id": "T26", "type": "케어", "q": "매일 아침저녁 산책 케어항목으로 추가해줘", "intent": "매일 산책 케어 항목 등록", "tool": "draft_care_item", "args": {"care_zone_cd": "HLTC0036"}}
+{"id": "T27", "type": "케어", "q": "발톱 2주마다 깎는거 넣어줘", "intent": "2주 주기 발톱 관리 등록", "tool": "draft_care_item", "args": {"care_zone_cd": "HLTC0037", "care_cycle_cd": "HLTC0039"}}
+{"id": "T28", "type": "케어", "q": "심장사상충약 한달에 한번 먹이는거 등록해 줄래", "intent": "한 달 주기 심장사상충약 등록", "tool": "draft_care_item", "args": {"care_zone_cd": "HLTC0037", "care_cycle_cd": "HLTC0040"}}
+{"id": "T29", "type": "케어", "q": "일주일에 한번 귀청소 관리항목 만들어줘", "intent": "1주 주기 귀 청소 등록", "tool": "draft_care_item", "args": {"care_zone_cd": "HLTC0037", "care_cycle_cd": "HLTC0038"}}
+{"id": "T30", "type": "케어", "q": "초코 열흘에 한번 샴푸 목욕 하는거 케어로 넣어줘", "intent": "10일 주기 목욕 케어 등록", "tool": "draft_care_item", "args": {"care_zone_cd": "HLTC0037", "care_cycle_cd": "HLTC0042"}}
+{"id": "T31", "type": "지식", "q": "고양이가 사료 안먹고 자꾸 토하는데 왜그래요", "intent": "고양이 식욕부진·구토 원인", "tool": "answer"}
+{"id": "T32", "type": "지식", "q": "강아지 양파 먹으면 위험해?", "intent": "강아지 양파 섭취 위험성", "tool": "answer"}
+{"id": "T33", "type": "지식", "q": "노견 하루 산책 몇분이 적당함", "intent": "노령견 적정 산책 시간", "tool": "answer"}
+{"id": "T34", "type": "지식", "q": "고양이 중성화는 몇개월에 하는게 좋아요", "intent": "고양이 중성화 적정 시기", "tool": "answer"}
+{"id": "T35", "type": "범위밖", "q": "삼성전자 지금 사도 됨?", "intent": "주식 투자 질문", "tool": "decline", "unclear": false}
+{"id": "T36", "type": "범위밖", "q": "김치찌개 맛있게 끓이는법 알려줘", "intent": "요리 레시피", "tool": "decline", "unclear": false}
+{"id": "T37", "type": "범위밖", "q": "ㅁㄴㅇㄹㅋㅋㅋ", "intent": "의미 없는 입력", "tool": "decline", "unclear": true}
+{"id": "T38", "type": "범위밖", "q": "asdf qwer", "intent": "의미 없는 입력", "tool": "decline", "unclear": true}
+{"id": "T39", "type": "헷갈림", "q": "케어캘린더에 일정 추가는 어떻게 하는거임", "intent": "일정 등록 방법 질문(등록 요청 아님)", "tool": "search_guide", "scr_id": "SCR-HLT-003"}
+{"id": "T40", "type": "헷갈림", "q": "매달 1일에 병원 정기검진 가는거 넣어줘", "intent": "매달 반복 병원 방문을 케어 항목으로 등록", "tool": "draft_care_item", "args": {"care_zone_cd": "HLTC0037", "care_cycle_cd": "HLTC0040"}}
+{"id": "T41", "type": "헷갈림", "q": "가계부는 어떻게 쓰는거야", "intent": "가계부 사용법 질문(화면 이동 아님)", "tool": "search_guide", "scr_id": "SCR-MYP-030"}
+{"id": "T42", "type": "헷갈림", "q": "강아지 키우는 집 생활비 가계부 좀 짜줘 월급 300임", "intent": "반려동물과 무관한 가정 생활비 예산 짜기", "tool": "decline", "unclear": false}
+{"id": "T43", "type": "헷갈림", "q": "건강일지에 체중 적으라던데 코숏 적정 체중이 몇키로야", "intent": "고양이 적정 체중 지식 질문", "tool": "answer"}
+{"id": "T44", "type": "헷갈림", "q": "다음달 3일에 종합백신 맞으러 가는거 캘린더에 넣어줘", "intent": "1회성 병원 일정 등록(캘린더 이동 아님)", "tool": "draft_schedule", "args": {"schdl_knd_cd": "HLTC0057"}}
