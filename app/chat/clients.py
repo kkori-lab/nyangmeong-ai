@@ -233,6 +233,17 @@ def _guide_toc() -> str:
     )
 
 
+def classify_system_blocks(hint: rules.RouteRow | None = None) -> list[dict]:
+    # 고정 규칙·목차(약 7,800토큰)는 캐시, 요청마다 다른 키워드 힌트는 캐시 뒤 블록
+    blocks: list[dict] = [
+        {"type": "text", "text": classify_system(), "cache_control": {"type": "ephemeral"}}
+    ]
+    note = _hint_note(hint)
+    if note:
+        blocks.append({"type": "text", "text": note.strip()})
+    return blocks
+
+
 def _routable_row(num: int | None) -> rules.RouteRow | None:
     return next((row for row in rules.routing_table() if row.no == num and row.routable), None)
 
@@ -292,7 +303,7 @@ class AnthropicIntentClassifier:
             response = await self.client.messages.parse(
                 model=self.model,
                 max_tokens=LLM_MAX_TOKENS,
-                system=classify_system() + _hint_note(hint),
+                system=classify_system_blocks(hint),
                 messages=[{"role": "user", "content": text}],
                 output_config={"effort": LLM_EFFORT},
                 output_format=ClassifyOutput,
@@ -309,11 +320,14 @@ class AnthropicIntentClassifier:
         if response.stop_reason == "refusal" or output is None:
             _log_failure("의도 분류", started, response.stop_reason or "no_output")
             return Classified(ClassifiedKind.UNKNOWN)
-        # 추가-1(2026-11-05) : 분류 캐시 없음, 목차 비용 확인용 입력 토큰 수
+        # 목차 캐시 확인용 : input_tokens는 캐시 밖 토큰만 센다
+        usage = response.usage
         logger.info(
-            "LLM 의도 분류: 입력 %d자·%d토큰 → %s (%.0fms)",
+            "LLM 의도 분류: 입력 %d자·%d토큰(캐시 읽기 %d·쓰기 %d) → %s (%.0fms)",
             len(text),
-            response.usage.input_tokens,
+            usage.input_tokens,
+            usage.cache_read_input_tokens or 0,
+            usage.cache_creation_input_tokens or 0,
             output.kind,
             (time.monotonic() - started) * 1000,
         )

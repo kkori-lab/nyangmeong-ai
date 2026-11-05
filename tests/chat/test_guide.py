@@ -161,6 +161,28 @@ def test_M1_평가_세트_회귀_하한():
     assert rejected == 5
 
 
+def test_M1_새_평가_세트_회귀_하한():
+    # 2026-11-05 프론트 대조 반영 뒤 값(hit@3 21/44). 안내서·키워드를 보지 않고 만든 세트
+    # 정답 None은 안내서에 없는 기능(비밀번호 찾기)이라 뺀다. 범위 밖은 분류 LLM이 먼저 거른다
+    lines = (DATA / "guide_eval2.jsonl").read_text(encoding="utf-8").splitlines()
+    questions = [json.loads(line) for line in lines if line.strip()]
+    labels = json.loads((DATA / "guide_labels2.json").read_text(encoding="utf-8"))
+    usage = [q for q in questions if labels[q["id"]]]
+    out_of_scope = [q for q in questions if labels[q["id"]] == []]
+    assert (len(questions), len(usage), len(out_of_scope)) == (50, 44, 5)
+    hit = sum(
+        any(chunk_id in labels[q["id"]] for chunk_id in rules.search_guide(q["q"])) for q in usage
+    )
+    assert hit >= 21
+
+
+def test_새_평가_정답표의_청크_id는_안내서에_있다():
+    labels = json.loads((DATA / "guide_labels2.json").read_text(encoding="utf-8"))
+    for expected in labels.values():
+        for chunk_id in expected or []:
+            assert rules.find_guide(chunk_id) is not None, chunk_id
+
+
 def test_평가_정답표의_청크_id는_안내서에_있다():
     labels = json.loads((DATA / "guide_labels.json").read_text(encoding="utf-8"))
     for expected in labels.values():
@@ -183,7 +205,7 @@ def test_키워드_힌트에도_위치·사용법_질문은_GUIDE():
     row = routing_row("SCR-MYP-010")
     fake = guide_result("6-1")
     asyncio.run(AnthropicIntentClassifier(fake.client(), MODEL).classify("캐릭터 어디서 해?", row))
-    hint = fake.requests[0]["system"][len(classify_system()) :]
+    hint = fake.requests[0]["system"][1]["text"]
     assert "위치·사용법을 묻는 질문" in hint
     assert "GUIDE" in hint
 
@@ -204,12 +226,14 @@ def test_목차에_없는_번호는_버린다(guide_id):
     assert classify(guide_result(guide_id)) == Classified(ClassifiedKind.GUIDE)
 
 
-def test_분류_요청은_system을_문자열로_보낸다():
-    # 추가-1(2026-11-05) : 분류 캐시를 켜지 않음
+def test_분류_요청은_고정_system을_캐시_블록으로_보낸다():
+    # 후속(2026-11-05) : 규칙·목차 블록 하나에 캐시 표시, 힌트가 없으면 블록 하나
     fake = guide_result("6-1")
     classify(fake, PIXEL_QUESTION)
     body = fake.requests[0]
-    assert body["system"] == classify_system()
+    assert body["system"] == [
+        {"type": "text", "text": classify_system(), "cache_control": {"type": "ephemeral"}}
+    ]
     assert "cache_control" not in body
 
 

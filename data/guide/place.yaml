@@ -2,7 +2,7 @@
 # 청크 = task 하나. id는 바꾸지 않는다(평가 정답표 tests/chat/data/guide_labels.json이 id로 가리킴)
 # num·name·scr_id·param은 data/routing.yaml과 같다. 사람용 메모는 docs/guide-review.md
 version: draft-0.1
-updated: '2026-11-04'
+updated: '2026-11-05'
 screens:
 - num: 2
   scr_id: SCR-HOS-001
@@ -10,7 +10,7 @@ screens:
   param: ?cat=hospital
   routable: true
   path: /places?category=hospital
-  login_required: false
+  login_required: true
   summary: 전주 지역의 동물병원·미용·용품·동반 장소·호텔을 지도와 목록으로 찾아보는 곳이에요. 병원 화면이 처음 열리는 기본 화면이에요.
   entry:
     pc:
@@ -140,7 +140,7 @@ screens:
   param: null
   routable: true
   path: /places
-  login_required: false
+  login_required: true
   see: 2
   summary: 종류를 정하지 않고 플레이스를 열었을 때의 화면이에요. 병원 화면과 똑같이 열려요.
   entry:
@@ -183,7 +183,7 @@ screens:
   param: ?cat=beauty
   routable: true
   path: /places?category=beauty
-  login_required: false
+  login_required: true
   see: 2
   summary: 미용실 같은 반려동물 미용 장소를 지도와 목록으로 찾는 화면이에요.
   entry:
@@ -226,7 +226,7 @@ screens:
   param: ?cat=goods
   routable: true
   path: /places?category=goods
-  login_required: false
+  login_required: true
   see: 2
   summary: 사료나 용품을 파는 가게를 지도와 목록으로 찾는 화면이에요.
   entry:
@@ -259,7 +259,7 @@ screens:
   param: ?cat=pet-friendly
   routable: true
   path: /places?category=pet-friendly
-  login_required: false
+  login_required: true
   see: 2
   summary: 반려동물과 같이 갈 수 있는 카페·식당 같은 동반 장소를 찾는 화면이에요.
   entry:
@@ -292,7 +292,7 @@ screens:
   param: ?cat=hotel
   routable: true
   path: /places?category=hotel
-  login_required: false
+  login_required: true
   see: 2
   summary: 여행이나 외출 때 반려동물을 맡길 수 있는 호텔을 찾는 화면이에요.
   entry:
@@ -325,7 +325,7 @@ screens:
   param: null
   routable: false
   path: /places
-  login_required: false
+  login_required: true
   summary: 지도에서 핀을 눌렀을 때 지도 위에 뜨는 작은 요약 카드예요. 이름·전화·주소를 보고 상세보기나 길찾기로 이어져요.
   entry:
     pc:
