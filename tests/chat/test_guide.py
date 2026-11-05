@@ -238,10 +238,41 @@ def test_분류_요청은_고정_system을_캐시_블록으로_보낸다():
 
 
 def test_GUIDE면_M1_결과를_쓰고_SEARCH로_내보낸다():
-    result = judged(PIXEL_QUESTION, Classified(ClassifiedKind.GUIDE, guide_id="28-1"))
+    result = judged(PIXEL_QUESTION, Classified(ClassifiedKind.GUIDE))
     assert result.intent.kind is IntentKind.SEARCH
     assert result.guide_ids == tuple(rules.search_guide(PIXEL_QUESTION))
     assert "6-1" in result.guide_ids
+
+
+def test_M1_결과가_있어도_목차에서_고른_청크가_맨_앞():
+    # 후속 2(2026-11-05) : M1이 엉뚱한 청크를 잡아도 목차 선택을 버리지 않는다(R03·R08·R19)
+    m1 = rules.search_guide(PIXEL_QUESTION)
+    assert m1 and "28-1" not in m1
+    result = judged(PIXEL_QUESTION, Classified(ClassifiedKind.GUIDE, guide_id="28-1"))
+    assert result.intent.kind is IntentKind.SEARCH
+    assert result.guide_ids == ("28-1", *m1[: rules.GUIDE_TOP_K - 1])
+
+
+def test_목차_선택이_M1_결과에_있으면_중복_없이_맨_앞():
+    m1 = rules.search_guide(PIXEL_QUESTION)
+    picked = m1[-1]
+    result = judged(PIXEL_QUESTION, Classified(ClassifiedKind.GUIDE, guide_id=picked))
+    assert result.guide_ids[0] == picked
+    assert len(result.guide_ids) == len(set(result.guide_ids)) == len(m1)
+    assert set(result.guide_ids) == set(m1)
+
+
+@pytest.mark.parametrize("guide_id", [None, "99-9"])
+def test_목차_선택이_없거나_없는_번호면_M1_결과_그대로(guide_id):
+    result = judged(PIXEL_QUESTION, Classified(ClassifiedKind.GUIDE, guide_id=guide_id))
+    assert result.guide_ids == tuple(rules.search_guide(PIXEL_QUESTION))
+
+
+def test_합친_청크는_최대_3개():
+    for guide_id in ("28-1", "C-1", "27-1"):
+        result = judged(PIXEL_QUESTION, Classified(ClassifiedKind.GUIDE, guide_id=guide_id))
+        assert len(result.guide_ids) <= rules.GUIDE_TOP_K
+        assert result.guide_ids[0] == guide_id
 
 
 def test_GUIDE이고_M1_결과가_없으면_목차에서_고른_청크를_쓴다():

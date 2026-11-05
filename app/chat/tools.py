@@ -207,7 +207,5 @@ def register_values(call: ToolCall) -> dict:
 
 def guide_ids(call: ToolCall, text: str) -> list[str]:
     # FN-AIM-002-02 : LLM이 고른 목차 청크를 앞에, M1 키워드 색인 결과를 뒤에(최대 3개)
-    picked = rules.find_guide(call.args.chunk_id) if isinstance(call.args, SearchGuide) else None
-    ids = [picked.id] if picked else []
-    ids += [chunk_id for chunk_id in rules.search_guide(text) if chunk_id not in ids]
-    return ids[: rules.GUIDE_TOP_K]
+    picked_id = call.args.chunk_id if isinstance(call.args, SearchGuide) else None
+    return rules.merge_guide(picked_id, text)

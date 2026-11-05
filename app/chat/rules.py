@@ -216,6 +216,15 @@ def search_guide(text: str) -> list[str]:
     return [chunks[pos].id for pos in ranked]
 
 
+def merge_guide(picked_id: str | None, text: str) -> list[str]:
+    # FN-AIM-002-02 : LLM이 목차에서 고른 청크를 앞에, M1 결과를 중복 없이 뒤에(최대 3개)
+    # M1이 엉뚱한 청크를 잡아도 목차 선택을 버리지 않는다. 없는 번호는 버린다
+    picked = find_guide(picked_id)
+    ids = [picked.id] if picked else []
+    ids += [chunk_id for chunk_id in search_guide(text) if chunk_id not in ids]
+    return ids[:GUIDE_TOP_K]
+
+
 # 서버 서머타임 없음 : 고정 오프셋 사용 (Windows에는 tzdata 없음)
 KST = timezone(timedelta(hours=9))
 WEEKDAYS = "월화수목금토일"

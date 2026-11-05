@@ -155,11 +155,10 @@ async def judge(text: str, has_image: bool, classifier: IntentClassifier) -> Jud
 
 
 def _guide_judged(text: str, classified: Classified) -> Judged | None:
-    # FN-AIM-002-02 : 1단계 M1 키워드 색인, 없으면 2단계 분류 LLM의 목차 선택
-    ids = rules.search_guide(text)
-    stage = "M1"
-    if not ids and classified.guide_id is not None:
-        ids, stage = [classified.guide_id], "목차"
+    # FN-AIM-002-02 : 분류 LLM의 목차 선택을 앞에, M1 키워드 색인 결과를 뒤에
+    ids = rules.merge_guide(classified.guide_id, text)
+    picked = bool(ids) and ids[0] == classified.guide_id
+    stage = ("목차+M1" if len(ids) > 1 else "목차") if picked else "M1"
     if not ids:
         logger.info("사용법 안내: 안내서 청크 없음")
         return None
