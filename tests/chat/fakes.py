@@ -102,7 +102,7 @@ class FakeToolAgent:
 
 
 # 가짜 Java 도구 목록(docs/design/tool-catalog.md 3-2절) : 스냅샷 구조 + 공통코드 값
-# 코드 값은 백엔드 로컬 GET /internal/ai/tools 응답 기준(2026-11-06, 백엔드 PR #174)
+# 코드 값은 백엔드 로컬 GET /internal/ai/tools 응답 기준(2026-11-06, 백엔드 PR #174·#177)
 FAKE_CODES: dict[str, list[dict]] = {
     "HLTG19": [
         {"cd": "HLTC0057", "nm": "병원"},
@@ -136,6 +136,36 @@ FAKE_CODES: dict[str, list[dict]] = {
         {"cd": "HLTC0065", "nm": "직접 등록"},
         {"cd": "HLTC0066", "nm": "검진기록 연동"},
         {"cd": "HLTC0067", "nm": "AI 생성"},
+    ],
+    "HLTG06": [
+        {"cd": "HLTC0010", "nm": "복용중"},
+        {"cd": "HLTC0011", "nm": "종료"},
+    ],
+    "HLTG09": [
+        {"cd": "HLTC0014", "nm": "체중"},
+        {"cd": "HLTC0015", "nm": "식사량"},
+        {"cd": "HLTC0016", "nm": "음수량"},
+        {"cd": "HLTC0017", "nm": "배변상태"},
+        {"cd": "HLTC0018", "nm": "산책"},
+    ],
+    "HLTG12": [
+        {"cd": "HLTC0024", "nm": "WBC"},
+        {"cd": "HLTC0025", "nm": "RBC"},
+        {"cd": "HLTC0026", "nm": "HGB"},
+        {"cd": "HLTC0027", "nm": "HCT"},
+        {"cd": "HLTC0028", "nm": "PLT"},
+        {"cd": "HLTC0029", "nm": "BUN"},
+        {"cd": "HLTC0030", "nm": "CREA"},
+        {"cd": "HLTC0031", "nm": "ALT"},
+        {"cd": "HLTC0032", "nm": "AST"},
+        {"cd": "HLTC0033", "nm": "ALP"},
+        {"cd": "HLTC0034", "nm": "GLU"},
+        {"cd": "HLTC0078", "nm": "SDMA"},
+        {"cd": "HLTC0035", "nm": "직접입력"},
+    ],
+    "HLTG18": [
+        {"cd": "HLTC0055", "nm": "관찰중"},
+        {"cd": "HLTC0056", "nm": "종료"},
     ],
 }
 

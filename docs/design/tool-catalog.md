@@ -27,7 +27,7 @@
 | 도메인 | 도구 후보 | Java API |
 | --- | --- | --- |
 | 반려동물·캐릭터 | 내 반려동물 목록·상세, 공동양육자, 받은 초대, 오늘의 케어 미션, 포인트·내역, 캐릭터·보유 아이템 | `GET /api/pets`, `/api/pets/{petSn}`, `/api/pets/{petSn}/caregivers`, `GET /api/caregiver-invitations`, `GET /api/pets/{petSn}/daily-missions`, `GET /api/members/me/points`, `GET /api/point-ledgers`, `GET /api/pixel-characters`, `/{pixelCharSn}/held-items` |
-| 건강 | 일정, 케어 항목·완료, 건강 일지, 검진·처방약·검사 수치·기타검사, 반복 예방, 건강 지표, 관찰 | `/api/pets/{petSn}/care-schedules`, `/care-items`, `/care-completions`, `/care-item-exposures`, `/daily-health-records`, `/checkups`, `/prescriptions`, `/inspection-values`, `/etc-inspections`, `/repeat-preventions`, `/health-indicators`, `/observation-items`, `/observation-cycles` |
+| 건강 | 일정, 케어 항목·완료, 건강 일지, 검진·처방약·검사 수치·기타검사, 반복 예방, 건강 지표, 관찰(메인 노출 여부는 `list_care_items`의 `mainExpsrYn`. `/care-item-exposures`는 PUT만 있어 읽기 아님, 2026-11-06 백엔드 확인) | `/api/pets/{petSn}/care-schedules`, `/care-items`, `/care-completions`, `/daily-health-records`, `/checkups`, `/prescriptions`, `/inspection-values`, `/etc-inspections`, `/repeat-preventions`, `/health-indicators`, `/observation-items`, `/observation-cycles` |
 | 가계부 | 지출 목록·합계·월별·통계·반려동물별, 영수증 상세 | `GET /api/expenses`, `/totals`, `/months`, `/statistics`, `/pets`, `/api/receipts/{recptSn}` |
 | 커뮤니티·플레이스 | 글 목록·인기·건강 팁·상세·댓글, 실종 신고, 돌봄 모집, 뉴스, 장소·즐겨찾기 | `GET /api/posts`, `/popular-photo`, `/health-tips`, `/{pstSn}`, `/{pstSn}/comments`, `GET /api/lost-reports`, `GET /api/care-recruitments`, `GET /api/news`, `GET /api/places`, `GET /api/place-bookmarks` |
 | 고객센터 | 자주 묻는 질문 | `GET /api/faqs` |
@@ -67,7 +67,7 @@
 
 표시를 빠뜨리면 그 API가 도구로 열리지 않을 뿐이다(잘못 열리는 쪽의 사고는 없다).
 
-### 3-2. `GET /internal/ai/tools` (계약 초안)
+### 3-2. `GET /internal/ai/tools` (확정, 백엔드 PR #174·#177)
 
 - 위치·인증: 다른 Python → Java 내부 API와 같다(nginx 밖, 키 없음). 회원과 관계없는 목록이라 쿠키가 없어도 된다.
 - 만드는 법: `RequestMappingHandlerMapping`에서 `@AiTool` 메서드를 모으고, 매핑(메서드·경로), `@PathVariable`·`@RequestParam`,
@@ -92,10 +92,27 @@
         "hsptlNm": {"in": "body", "type": "string", "maxLength": 50}
       },
       "rules": [{"requiredIf": {"field": "hsptlNm", "when": "schdlKndCd", "equals": "<코드>"}}]
+    },
+    {
+      "name": "list_checkups",
+      "domain": "health",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/pets/{petSn}/checkups"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "year": {"in": "query", "type": "int", "min": 1900, "max": 2200},
+        "ckupTypeCd": {"in": "query", "type": "code", "group": "<그룹>",
+                       "codes": [{"cd": "<코드>", "nm": "<이름>"}]},
+        "page": {"in": "query", "type": "int", "min": 1},
+        "size": {"in": "query", "type": "int", "min": 1, "max": 50}
+      },
+      "rules": []
     }
   ]
 }
 ```
+
+`in`: `path`·`query`(`@RequestParam`과 `@ModelAttribute` 검색 조건·페이지 칸, PR #177)·`body`.
 
 칸 `type`: `string`·`long`·`int`·`decimal`(`precision`·`scale`)·`boolean`·`date`·`time`·`datetime`·`code`. 숫자 칸은
 `@Min`·`@Max`를 `min`·`max`로 준다(Python은 `input_schema`의 `minimum`·`maximum`으로 싣고 범위 밖 값은 비운다). 목록(`List<…>`)·중첩 객체는
@@ -105,8 +122,8 @@
 
 | 항목 | 내용 | 왜 |
 | --- | --- | --- |
-| 오류에 필드 이름 | 400 응답은 지금 모양 그대로 `data: [{field, message}]`(Bean Validation 오류만 칸 이름이 있다). 서비스 검사(`INVALID_INPUT_VALUE`)의 칸 이름은 다음 백엔드 마일스톤(2026-11-05 백엔드 결정) | 지금은 `checkPet` 등 서비스 오류가 칸을 알려 주지 않아 다시 물을 칸을 정할 수 없다 |
-| 수정은 PATCH | 2단계 수정 API가 PUT(전체 덮어쓰기)이면 PATCH로 받거나, Python이 지금 값을 읽어 덮어 보낸다 | 말하지 않은 칸 때문에 필수 오류 |
+| 오류에 필드 이름 | 400 응답은 지금 모양 그대로 `data: [{field, message}]`(Bean Validation 오류만 칸 이름이 있다). 서비스 검사(`INVALID_INPUT_VALUE`)의 칸 이름은 백엔드 PR #175로 `CareScheduleService`·`CareItemService`만 담는다. 다른 서비스는 칸 없이 그대로라, 2단계에서 새 도메인에 CARD를 붙일 때 그 서비스도 칸을 담게 바꾼다 | 지금은 `checkPet` 등 서비스 오류가 칸을 알려 주지 않아 다시 물을 칸을 정할 수 없다 |
+| 수정은 PATCH | 2-2절 수정 API는 이미 PATCH다(일정 `/{schdlSn}`·케어 항목·지출 `/{expndSn}`·반려동물 `/{petSn}`, 2026-11-06 백엔드 확인). PUT은 월 지출 한도(값 하나)뿐이라 그대로 둔다 | 말하지 않은 칸 때문에 필수 오류 |
 | 출처 기록 | 대화로 실행한 쓰기는 등록 출처 코드(지금 일정의 AI 대화창 출처와 같은 방식)를 남긴다 | 감사·통계 |
 | 검증만 하는 호출 | 규칙이 많은 도구만 나중에(`POST …/validate`, 저장 없이 `fieldErrors`) | 처음부터 맞게 보내기. 1단계 범위 밖 |
 
@@ -209,4 +226,4 @@
 - 목록을 다시 받는 주기(기동 때만 vs 몇 분마다)와 Java 장애 때 카드 도구를 끌지
 - 읽기 결과가 길 때(지출 목록 수백 건) 자르는 기준: Java 쪽 페이지 크기 vs Python 요약
 - 2단계 실행을 React가 할지, 확인 토큰을 받아 서버가 할지(지금 원칙은 React)
-- `@AiTool` 표시를 붙일 API 목록 최종(2절은 후보)과 PUT 10개의 PATCH 여부
+- `@AiTool` 표시를 붙일 API 목록 최종(2절은 후보). PATCH 여부는 3-3절에서 정함(백엔드 PUT 10개 중 2-2절 대상은 월 지출 한도뿐)

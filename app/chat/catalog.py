@@ -386,7 +386,7 @@ class ToolCatalogClient(Protocol):
 
 
 class JavaToolCatalogClient:
-    """GET /internal/ai/tools (초안, Java 미구현). 회원과 관계없는 목록이라 쿠키 없이"""
+    """GET /internal/ai/tools (백엔드 PR #174·#177). 회원과 관계없는 목록이라 쿠키 없이"""
 
     def __init__(self, client: httpx2.AsyncClient, settings: Settings):
         self.client = client
