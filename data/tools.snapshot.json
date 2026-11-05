@@ -1,6 +1,6 @@
 {
   "version": "snapshot",
-  "structureVersion": "ba5b51bdbd7cc281c42ee6a1be82f690806f254be80618448766258b282ba6ea",
+  "structureVersion": "9f7fd17c57abf9c50ceb4a22fc2535e9cd79e884aebcae039adfd67311b2750b",
   "tools": [
     {
       "name": "draft_care_item",
@@ -45,6 +45,164 @@
         {"requiredIf": {"field": "schdlNm", "when": "schdlKndCd", "equals": "HLTC0059"}},
         {"requiredIf": {"field": "schdlNm", "when": "schdlKndCd", "equals": "HLTC0060"}}
       ]
+    },
+    {
+      "name": "get_checkup",
+      "domain": "health",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/pets/{petSn}/checkups/{ckupRcdSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "ckupRcdSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "get_health_indicators",
+      "domain": "health",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/pets/{petSn}/health-indicators"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "list_care_completions",
+      "domain": "health",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/pets/{petSn}/care-completions"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "careArtclSn": {"in": "query", "type": "long"},
+        "fromYmd": {"in": "query", "type": "date"},
+        "toYmd": {"in": "query", "type": "date"}
+      },
+      "rules": []
+    },
+    {
+      "name": "list_care_items",
+      "domain": "health",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/pets/{petSn}/care-items"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "mainExpsrYn": {"in": "query", "type": "boolean"},
+        "careArtclNm": {"in": "query", "type": "string"}
+      },
+      "rules": []
+    },
+    {
+      "name": "list_care_schedules",
+      "domain": "health",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/pets/{petSn}/care-schedules"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "fromYmd": {"in": "query", "type": "date"},
+        "toYmd": {"in": "query", "type": "date"},
+        "schdlKndCd": {"in": "query", "type": "code", "group": "HLTG19"},
+        "ckupTypeCd": {"in": "query", "type": "code", "group": "HLTG01"},
+        "size": {"in": "query", "type": "int", "min": 1, "max": 50}
+      },
+      "rules": []
+    },
+    {
+      "name": "list_checkups",
+      "domain": "health",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/pets/{petSn}/checkups"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "year": {"in": "query", "type": "int", "min": 1900, "max": 2200},
+        "ckupTypeCd": {"in": "query", "type": "code", "group": "HLTG01"},
+        "page": {"in": "query", "type": "int", "min": 1},
+        "size": {"in": "query", "type": "int", "min": 1, "max": 50}
+      },
+      "rules": []
+    },
+    {
+      "name": "list_daily_health_records",
+      "domain": "health",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/pets/{petSn}/daily-health-records"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "dailyRcdIdctCd": {"in": "query", "type": "code", "group": "HLTG09"},
+        "fromYmd": {"in": "query", "type": "date"},
+        "toYmd": {"in": "query", "type": "date"},
+        "size": {"in": "query", "type": "int", "min": 1, "max": 100}
+      },
+      "rules": []
+    },
+    {
+      "name": "list_etc_inspections",
+      "domain": "health",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/pets/{petSn}/etc-inspections"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "ckupRcdSn": {"in": "query", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "list_inspection_values",
+      "domain": "health",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/pets/{petSn}/inspection-values"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "ckupRcdSn": {"in": "query", "type": "long"},
+        "inspArtclCd": {"in": "query", "type": "code", "group": "HLTG12"}
+      },
+      "rules": []
+    },
+    {
+      "name": "list_observation_cycles",
+      "domain": "health",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/pets/{petSn}/observation-cycles"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "obsrvArtclSn": {"in": "query", "type": "long", "required": true},
+        "obsrvCyclSn": {"in": "query", "type": "long"}
+      },
+      "rules": []
+    },
+    {
+      "name": "list_observation_items",
+      "domain": "health",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/pets/{petSn}/observation-items"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "obsrvSttsCd": {"in": "query", "type": "code", "group": "HLTG18"}
+      },
+      "rules": []
+    },
+    {
+      "name": "list_prescriptions",
+      "domain": "health",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/pets/{petSn}/prescriptions"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "ckupRcdSn": {"in": "query", "type": "long"},
+        "prscSttsCd": {"in": "query", "type": "code", "group": "HLTG06"}
+      },
+      "rules": []
+    },
+    {
+      "name": "list_repeat_preventions",
+      "domain": "health",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/pets/{petSn}/repeat-preventions"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "ckupRcdSn": {"in": "query", "type": "long"}
+      },
+      "rules": []
     }
   ]
 }
