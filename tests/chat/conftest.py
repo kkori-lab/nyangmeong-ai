@@ -5,7 +5,7 @@ import httpx2
 import pytest
 from fastapi.testclient import TestClient
 
-from app.chat import clients
+from app.chat import clients, tools
 from app.core.backend import get_backend_client
 from app.core.config import get_settings
 from app.main import create_app
@@ -14,6 +14,7 @@ from tests.chat.fakes import (
     FakeIntentClassifier,
     FakeRegisterExtractor,
     FakeTitleGenerator,
+    fake_catalog,
 )
 
 AJAX = {"X-Requested-With": "XMLHttpRequest"}
@@ -151,6 +152,14 @@ def _ok(data, status: int = 200) -> httpx2.Response:
     if data is not None:
         body["data"] = data
     return httpx2.Response(status, json=body)
+
+
+@pytest.fixture(autouse=True)
+def tool_catalog():
+    # 등록 도구는 Java 도구 목록으로 만든다 : 테스트마다 가짜 목록(코드 값 포함)을 끼운다
+    tools.use_catalog(fake_catalog())
+    yield
+    tools.use_catalog(None)
 
 
 @pytest.fixture
