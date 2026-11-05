@@ -354,6 +354,31 @@ def _compose_datetime(ymd, tm) -> dict:
     return {"schdlDt": datetime.combine(day, clock).isoformat(), "hrInptYn": tm is not None}
 
 
+def read_request(entry: CatalogEntry, values: dict, pet_sn: int) -> tuple[str, dict] | None:
+    """READ 도구 인자 -> Java 경로·query (경로 칸이 비면 None)"""
+    java = to_java(entry, values) | {"petSn": pet_sn}
+    for name, value in list(java.items()):
+        if entry.params.get(name) is not None and entry.params[name].type == "date":
+            # LLM 날짜 글자 재검증 : 틀리면 그 조건만 비움
+            try:
+                java[name] = date.fromisoformat(str(value)).isoformat()
+            except ValueError:
+                del java[name]
+    path = entry.call.path
+    for name, param in entry.params.items():
+        if param.loc != "path":
+            continue
+        if java.get(name) is None:
+            return None
+        path = path.replace(f"{{{name}}}", str(java[name]))
+    query = {
+        name: str(value).lower() if isinstance(value, bool) else value
+        for name, value in java.items()
+        if name in entry.params and entry.params[name].loc == "query"
+    }
+    return path, query
+
+
 def missing(entry: CatalogEntry, java_values: dict) -> list[str]:
     """Java 필수·requiredIf로 빈 Java 칸 (설계 4-3절 CARD)"""
     names = [name for name, param in entry.params.items() if param.required]

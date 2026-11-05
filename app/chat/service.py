@@ -8,7 +8,7 @@ from datetime import date
 from pydantic import BaseModel
 from pydantic.alias_generators import to_camel
 
-from app.chat import rules, tools
+from app.chat import catalog, rules, tools
 from app.chat.clients import (
     AnswerError,
     AnswerGenerator,
@@ -26,6 +26,7 @@ from app.chat.repository import (
     ConversationRepository,
     PetInfo,
     RegisterContextRepository,
+    ToolReader,
 )
 from app.chat.schemas import (
     ROLE_AI,
@@ -66,6 +67,9 @@ OUT_OF_SCOPE_MESSAGE = (
 DISCLAIMER = "\n\n※ 참고 정보이며 의료 진단이 아닙니다. 이상 징후가 있다면 수의사와 상담하세요."
 # FN-AIM-002-07 : 화면설계서 SCR-AIM-002 처리 조건 문구
 ANSWER_ERROR_MESSAGE = "일시적으로 답변할 수 없어요"
+# READ 도구 : 반려동물을 못 정하면 Java 미호출, 고정 문구로 되물음 (2026-11-06 LJS 결정)
+READ_PET_ASK = "어느 아이의 기록을 볼까요? {names} 중에서 이름을 넣어 다시 물어봐 주세요."
+READ_NO_PET = "등록된 반려동물이 없어요. 반려동물을 먼저 등록해 주세요."
 
 # SSE 이벤트 하나 : (이름, 내용)
 Event = tuple[str, BaseModel | dict]
@@ -185,6 +189,7 @@ async def judge_tools(
     max_tokens: int,
     today: date,
     first_token_sec: float,
+    read: "ReadDeps | None" = None,
 ) -> Judged:
     """도구 흐름 판정(docs/design/tool-calling.md 4절)"""
     row = None
@@ -201,7 +206,7 @@ async def judge_tools(
         if row is not None:
             return Judged(row.to_intent())
         raise ClassifyError("tool_decide") from None
-    return _tool_judged(text, context, agent, decision, max_tokens, today)
+    return _tool_judged(text, context, agent, decision, max_tokens, today, read)
 
 
 def _tool_judged(
@@ -211,6 +216,7 @@ def _tool_judged(
     decision: ToolDecision,
     max_tokens: int,
     today: date,
+    read: "ReadDeps | None" = None,
 ) -> Judged:
     # 1단계는 응답 계약 그대로 : 도구 -> 지금 intent 값 (설계 6절)
     call = decision.call
@@ -228,6 +234,14 @@ def _tool_judged(
         return Judged(Intent(kind=IntentKind.REGISTER), ai_values=values, tool=call.name)
     if call.name == tools.DECLINE:
         return Judged(Intent(kind=IntentKind.FALLBACK), out_of_scope=not call.args.unclear)
+    entry = tools.read_entry(call.name)
+    if entry is not None:
+        if read is None:
+            logger.info("READ 도구 실행 불가: %s", call.name)
+            return Judged(Intent(kind=IntentKind.FALLBACK))
+        # Java 호출은 답변 스트림 안 : 첫 글자 제한이 Java 호출까지 덮음
+        stream = _read_answer(text, context, agent, decision, entry, max_tokens, today, read)
+        return Judged(Intent(kind=IntentKind.SEARCH), stream=stream)
     ids = tuple(tools.guide_ids(call, text))
     if not ids:
         logger.info("사용법 안내: 안내서 청크 없음")
@@ -236,6 +250,53 @@ def _tool_judged(
     stream = agent.answer(context, decision, guide_text(ids) or "", max_tokens, today)
     shortcut = _guide_shortcut(ids[0], Classified(ClassifiedKind.GUIDE))
     return Judged(Intent(kind=IntentKind.SEARCH), shortcut, guide_ids=ids, stream=stream)
+
+
+@dataclass(frozen=True)
+class ReadDeps:
+    reader: ToolReader
+    contexts: RegisterContextRepository
+    # 대화의 펫 태그. null이면 "전체"
+    room_pet: int | None = None
+
+
+async def _read_answer(
+    text: str,
+    context: list[dict],
+    agent: ToolAgent,
+    decision: ToolDecision,
+    entry: "catalog.CatalogEntry",
+    max_tokens: int,
+    today: date,
+    read: ReadDeps,
+) -> AsyncIterator[str]:
+    try:
+        pets = await read.contexts.get_pets()
+    except (AppError, BackendError):
+        raise AnswerError("read_pets") from None
+    compact = re.sub(r"\s+", "", text)
+    pet = _pick_pet(pets, [p for p in pets if p.pet_nm in compact], None, read.room_pet)
+    if pet is None:
+        names = ", ".join(p.pet_nm for p in pets)
+        yield READ_PET_ASK.format(names=names) if pets else READ_NO_PET
+        return
+    args = decision.call.args if decision.call is not None else None
+    values = args.model_dump(exclude_none=True) if args is not None else {}
+    request = catalog.read_request(entry, values, pet.pet_sn)
+    result = rules.READ_FAILED
+    if request is not None:
+        try:
+            result = rules.read_result_text(await read.reader.read(*request))
+        except (AppError, BackendError) as error:
+            logger.info("READ 도구 Java 실패: %s %s", entry.name, type(error).__name__)
+    else:
+        logger.info("READ 도구 경로 칸 없음: %s", entry.name)
+    answer = agent.answer(context, decision, result, max_tokens, today)
+    try:
+        async for chunk in answer:
+            yield chunk
+    finally:
+        await answer.aclose()
 
 
 def guide_text(ids: tuple[str, ...]) -> str | None:
@@ -337,11 +398,22 @@ async def answer_turn(
     register: "RegisterDeps | None" = None,
     titles: TitleGenerator | None = None,
     agent: ToolAgent | None = None,
+    reader: ToolReader | None = None,
 ) -> AsyncIterator[Event]:
     queue: asyncio.Queue[Event | None] = asyncio.Queue()
     task = asyncio.create_task(
         _run_turn(
-            turn, repo, classifier, answers, ai, limits, queue.put_nowait, register, titles, agent
+            turn,
+            repo,
+            classifier,
+            answers,
+            ai,
+            limits,
+            queue.put_nowait,
+            register,
+            titles,
+            agent,
+            reader,
         )
     )
     _running.add(task)
@@ -361,6 +433,7 @@ async def _run_turn(
     register: "RegisterDeps | None" = None,
     titles: TitleGenerator | None = None,
     agent: ToolAgent | None = None,
+    reader: ToolReader | None = None,
 ) -> None:
     try:
         text = turn.question.cnvrs_cn
@@ -375,8 +448,13 @@ async def _run_turn(
             # CHAT_TOOL_AGENT 켜짐 : 분류·목차 선택·등록 칸 추출을 도구 고르기 한 번으로
             context = build_context(turn.messages, turn.question.msg_seq, ai.context_turns)
             today = register.today if register is not None else rules.today_kst()
+            read = (
+                ReadDeps(reader, register.contexts, turn.pet_sn)
+                if reader is not None and register is not None
+                else None
+            )
             judged = await judge_tools(
-                text, context, agent, ai.max_tokens, today, limits.first_token_sec
+                text, context, agent, ai.max_tokens, today, limits.first_token_sec, read
             )
         else:
             judged = await judge(text, False, classifier)

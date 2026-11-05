@@ -13,6 +13,7 @@ navigate:
       예) "가계부 보여 줘", "실종센터 가자", "이번 달 병원비 얼마 나왔어?"
     쓰지 않을 때: 기능의 위치·사용 방법을 묻는 말("캐릭터 어디서 만들어?", "알림 어떻게 꺼?")은
       search_guide. 날짜·주기가 있는 일정·케어 항목 등록 요청은 draft_schedule·draft_care_item.
+      건강 기록·일정·검진·약의 내용을 묻는 말("체중 어때?", "다음 병원 언제야?")은 맞는 get_·list_ 도구.
     인자: screen_num은 시스템의 화면 목록 번호 그대로. 목록에 없는 화면은 고르지 않는다.
     말하는 법: 글을 쓰지 않는다. 이동 안내 문구는 서버가 붙인다.
   params:
@@ -96,6 +97,196 @@ draft_care_item:
     last_cmptn_ymd:
       java: lastCmptnYmd
       description: 마지막으로 한 날 YYYY-MM-DD
+
+# 건강 READ 도구 (docs/design/tool-catalog.md 8절 4번) : Python이 바로 실행, 결과로 답한다
+# get_checkup·list_etc_inspections·list_observation_cycles는 싣지 않는다 :
+#   필수 번호 칸(ckupRcdSn·obsrvArtclSn)을 LLM이 알 수 없음(한 턴 READ 1번, 읽기 결과는 이력에 안 남음)
+# 앞 결과의 번호 칸(careArtclSn·ckupRcdSn·obsrvCyclSn)도 같은 이유로 LLM 칸에 두지 않는다
+
+get_health_indicators:
+  hooks: [pet]
+  description: |
+    반려동물의 건강 지표(체중·식사량·음수량·산책 추이, 크레아티닌)를 읽어 와 답한다.
+    아무것도 저장하지 않는다.
+
+    쓸 때: 요즘 체중·식사·물·산책이 어떤지, 추이가 어떤지 묻는 말.
+      예) "복실이 요즘 체중 어때?", "최근에 물 잘 마셨어?", "크레아티닌 수치 어때?"
+    쓰지 않을 때: 날짜별 기록 하나하나를 보려는 말은 list_daily_health_records.
+      건강 기록 화면으로 가자는 말("건강 기록 열어 줘")은 navigate.
+    인자: 반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 받은 수치만 쓴다. 진단하지 않고, 걱정되는 변화는 수의사 상담을 권한다.
+
+list_daily_health_records:
+  hooks: [pet]
+  description: |
+    날짜별 건강 일지(체중·식사량·음수량·배변상태·산책 기록)를 읽어 와 답한다.
+    아무것도 저장하지 않는다.
+
+    쓸 때: 특정 날·기간의 일지 기록을 묻는 말.
+      예) "어제 산책 기록 있어?", "지난주 배변 상태 어땠어?", "이번 달 체중 기록 보여 줘"
+    쓰지 않을 때: 전체 추이·요약은 get_health_indicators.
+    인자: 기간은 시스템의 오늘 날짜 기준으로 계산한다. 말하지 않은 칸은 비운다.
+    말하는 법: 받은 기록만 쓴다. 기록이 없으면 없다고 말한다.
+  params:
+    daily_rcd_idct_cd:
+      java: dailyRcdIdctCd
+      description: 일지 지표 종류
+    from_ymd:
+      java: fromYmd
+      description: 시작 날짜 YYYY-MM-DD
+    to_ymd:
+      java: toYmd
+      description: 끝 날짜 YYYY-MM-DD
+    size:
+      java: size
+      description: 가져올 기록 수
+
+list_care_schedules:
+  hooks: [pet]
+  description: |
+    캘린더 일정(병원·미용·케어 등)을 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 예정된 일정이나 지난 일정을 묻는 말.
+      예) "이번 달 병원 일정 있어?", "다음 미용 언제야?", "지난주에 뭐 했지?"
+    쓰지 않을 때: 일정을 새로 넣어 달라는 말은 draft_schedule. 반복하는 케어 항목은 list_care_items.
+      캘린더 화면으로 가자는 말은 navigate.
+    인자: 기간은 시스템의 오늘 날짜 기준으로 계산한다. 말하지 않은 칸은 비운다.
+    말하는 법: 받은 일정만 날짜순으로 쓴다. 일정이 없으면 없다고 말한다.
+  params:
+    from_ymd:
+      java: fromYmd
+      description: 시작 날짜 YYYY-MM-DD
+    to_ymd:
+      java: toYmd
+      description: 끝 날짜 YYYY-MM-DD
+    schdl_knd_cd:
+      java: schdlKndCd
+      description: 일정 종류
+    ckup_type_cd:
+      java: ckupTypeCd
+      description: 병원 일정의 검진유형
+    size:
+      java: size
+      description: 가져올 일정 수
+
+list_care_items:
+  hooks: [pet]
+  description: |
+    반복 케어 항목(산책·발톱 깎기·예방약 등)과 다음 예정일·마지막 한 날을 읽어 와 답한다.
+    아무것도 저장하지 않는다.
+
+    쓸 때: 등록된 케어 항목, 다음에 할 날, 오늘 할 케어를 묻는 말.
+      예) "발톱 깎기 다음에 언제야?", "등록된 케어 뭐 있어?", "심장사상충약 언제 먹였지?"
+    쓰지 않을 때: 케어 항목을 새로 넣어 달라는 말은 draft_care_item.
+      완료 기록 목록은 list_care_completions.
+    인자: 이름을 말했으면 care_artcl_nm에 그 이름. 말하지 않은 칸은 비운다.
+    말하는 법: 받은 항목만 쓴다.
+  params:
+    care_artcl_nm:
+      java: careArtclNm
+      description: 케어 항목 이름(일부만 말해도 됨)
+    main_expsr_yn:
+      java: mainExpsrYn
+      description: 메인 화면에 보이는 항목만 볼 때 true
+
+list_care_completions:
+  hooks: [pet]
+  description: |
+    케어 항목을 완료한 기록(언제 무엇을 했는지)을 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 기간 동안 케어를 몇 번·언제 했는지 묻는 말.
+      예) "이번 주에 산책 몇 번 했어?", "지난달 케어 완료한 거 알려 줘"
+    쓰지 않을 때: 항목의 다음 예정일은 list_care_items.
+    인자: 기간은 시스템의 오늘 날짜 기준으로 계산한다.
+    말하는 법: 받은 기록만 쓴다. 기록이 없으면 없다고 말한다.
+  params:
+    from_ymd:
+      java: fromYmd
+      description: 시작 날짜 YYYY-MM-DD
+    to_ymd:
+      java: toYmd
+      description: 끝 날짜 YYYY-MM-DD
+
+list_checkups:
+  hooks: [pet]
+  description: |
+    병원 검진 기록(날짜·병원·검진유형)을 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 언제 어느 병원에 다녀왔는지, 검진·접종을 언제 했는지 묻는 말.
+      예) "마지막으로 병원 간 게 언제야?", "올해 예방접종 했어?", "작년 검진 기록 알려 줘"
+    쓰지 않을 때: 앞으로 갈 병원 일정은 list_care_schedules. 혈액 수치는 list_inspection_values.
+    인자: 연도를 말했으면 year. 말하지 않은 칸은 비운다.
+    말하는 법: 받은 기록만 쓴다. 진료 내용·메모는 받지 않으므로 지어내지 않는다.
+  params:
+    year:
+      java: year
+      description: 검진 연도
+    ckup_type_cd:
+      java: ckupTypeCd
+      description: 검진유형
+    page:
+      java: page
+      description: 페이지 번호
+    size:
+      java: size
+      description: 한 페이지 기록 수
+
+list_inspection_values:
+  hooks: [pet]
+  description: |
+    혈액검사 수치(항목·결과값·단위·참고 범위)를 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 혈액검사 항목 수치나 참고 범위 안인지 묻는 말.
+      예) "BUN 수치 어땠어?", "지난 혈액검사 결과 알려 줘", "간 수치 정상이야?"
+    쓰지 않을 때: 크레아티닌 추이는 get_health_indicators. 검진 날짜·병원은 list_checkups.
+    인자: 항목을 말했으면 insp_artcl_cd. 말하지 않았으면 비운다.
+    말하는 법: 받은 수치와 참고 범위만 쓴다. 진단하지 않고, 범위 밖이면 수의사 상담을 권한다.
+  params:
+    insp_artcl_cd:
+      java: inspArtclCd
+      description: 혈액검사 항목
+
+list_prescriptions:
+  hooks: [pet]
+  description: |
+    처방약(약 이름·복용 기간·하루 횟수·상태)을 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 먹고 있는 약, 약을 언제까지 먹는지 묻는 말.
+      예) "지금 먹는 약 뭐야?", "항생제 언제까지 먹어?"
+    쓰지 않을 때: 반복 예방(심장사상충·구충 등)은 list_repeat_preventions.
+    인자: 지금 먹는 약만 물으면 prsc_stts_cd는 복용중. 말하지 않았으면 비운다.
+    말하는 법: 받은 기록만 쓴다. 복용량을 바꾸라고 하지 않는다.
+  params:
+    prsc_stts_cd:
+      java: prscSttsCd
+      description: 처방 상태
+
+list_repeat_preventions:
+  hooks: [pet]
+  description: |
+    반복 예방(예방접종·심장사상충·구충 등)과 다음 예정일을 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 예방 일정·주기, 다음 예방이 언제인지 묻는 말.
+      예) "다음 심장사상충 언제야?", "구충제 주기 어떻게 돼?"
+    쓰지 않을 때: 처방약은 list_prescriptions. 지난 병원 기록은 list_checkups.
+    인자: 반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 받은 기록만 쓴다.
+
+list_observation_items:
+  hooks: [pet]
+  description: |
+    관찰 항목(혹·상처 등 지켜보는 부위, 처음·마지막 관찰과 크기 변화)을 읽어 와 답한다.
+    아무것도 저장하지 않는다.
+
+    쓸 때: 지켜보는 관찰 항목이나 크기 변화를 묻는 말.
+      예) "관찰 중인 거 뭐 있어?", "등에 난 혹 크기 변했어?"
+    쓰지 않을 때: 건강 지표(체중 등)는 get_health_indicators.
+    인자: 관찰 중인 것만 물으면 obsrv_stts_cd는 관찰중. 말하지 않았으면 비운다.
+    말하는 법: 받은 기록만 쓴다. 진단하지 않고, 크기가 커지면 수의사 상담을 권한다.
+  params:
+    obsrv_stts_cd:
+      java: obsrvSttsCd
+      description: 관찰 상태
 
 decline:
   builtin: true

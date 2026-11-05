@@ -1,4 +1,5 @@
 import calendar
+import json
 import re
 from dataclasses import dataclass, fields
 from datetime import date, datetime, timedelta, timezone
@@ -546,3 +547,27 @@ def clean_ai_fields(raw: dict) -> RegisterFields:
         cycle_days=days if isinstance(days, int) and 1 <= days <= 3650 else None,
         last_cmptn_ymd=valid_ymd(raw.get("last_cmptn_ymd")),
     )
+
+
+# READ 도구 결과 (docs/design/tool-calling.md 5절 개인 데이터 범위 : 날짜·이름·수치만)
+# 6000자 : 미측정 기준(2026-11-06 LJS 결정)
+READ_RESULT_MAX_CHARS = 6000
+READ_TRUNCATED = "\n(결과가 길어 앞부분만 보냄)"
+# Java 공개 API 실패 : 답변 오류 대신 LLM이 화면 확인 안내
+READ_FAILED = "기록을 불러오지 못함. 앱의 해당 화면에서 확인하라고 안내한다."
+
+
+def _drop_free_text(value: object) -> object:
+    # 내용(…Cn) 칸 : 메모·자유 입력 글이라 외부 AI API로 보내지 않음
+    if isinstance(value, dict):
+        return {k: _drop_free_text(v) for k, v in value.items() if not k.endswith("Cn")}
+    if isinstance(value, list):
+        return [_drop_free_text(item) for item in value]
+    return value
+
+
+def read_result_text(data: object) -> str:
+    text = json.dumps(_drop_free_text(data), ensure_ascii=False, default=str)
+    if len(text) <= READ_RESULT_MAX_CHARS:
+        return text
+    return text[:READ_RESULT_MAX_CHARS] + READ_TRUNCATED
