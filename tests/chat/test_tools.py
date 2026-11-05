@@ -57,9 +57,26 @@ def room_of(client, java, pet_sn: int | None = None) -> int:
 # 도구 정의(설계 3-5절)
 
 
-def test_도구는_다섯_개이고_설명과_인자_스키마를_모델에서_뽑는다():
+def test_도구는_builtin_등록_READ이고_설명과_인자_스키마를_모델에서_뽑는다():
     defs = {d["name"]: d for d in tools.tool_definitions()}
-    assert set(defs) == {"navigate", "search_guide", "draft_schedule", "draft_care_item", "decline"}
+    assert set(defs) == {
+        "navigate",
+        "search_guide",
+        "draft_schedule",
+        "draft_care_item",
+        "decline",
+    } | {
+        "get_health_indicators",
+        "list_care_completions",
+        "list_care_items",
+        "list_care_schedules",
+        "list_checkups",
+        "list_daily_health_records",
+        "list_inspection_values",
+        "list_observation_items",
+        "list_prescriptions",
+        "list_repeat_preventions",
+    }
     for d in defs.values():
         assert "쓸 때:" in d["description"] and "말하는 법:" in d["description"]
         assert d["input_schema"]["type"] == "object"
@@ -81,7 +98,10 @@ def test_search_guide_인자는_안내서_목차_번호만():
 
 def test_도구_system에는_답변_규칙_화면_목록_안내서_목차가_들어간다():
     system = tool_system()
-    assert clients.ANSWER_SYSTEM in system
+    assert (
+        clients.ANSWER_SYSTEM.replace(clients.PRIVATE_DATA_RULE, clients.TOOL_DATA_RULE) in system
+    )
+    assert clients.PRIVATE_DATA_RULE not in system
     assert tools.screen_list() in system
     assert "6-1" in system
 

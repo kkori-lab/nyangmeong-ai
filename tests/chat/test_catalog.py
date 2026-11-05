@@ -21,6 +21,27 @@ from tests.chat.test_tools import room_of, use_agent
 
 BUILTIN = {"navigate", "search_guide", "decline"}
 REGISTER = {"draft_schedule", "draft_care_item"}
+# 필수 번호 칸을 LLM이 알 수 없는 READ 제외
+# (get_checkup·list_etc_inspections·list_observation_cycles)
+READ = {
+    "get_health_indicators",
+    "list_care_completions",
+    "list_care_items",
+    "list_care_schedules",
+    "list_checkups",
+    "list_daily_health_records",
+    "list_inspection_values",
+    "list_observation_items",
+    "list_prescriptions",
+    "list_repeat_preventions",
+}
+# 스냅샷(코드 값 없음)으로도 싣는 READ : 코드 칸 없음
+READ_WITHOUT_CODES = {
+    "get_health_indicators",
+    "list_care_completions",
+    "list_care_items",
+    "list_repeat_preventions",
+}
 
 
 def build(raw: dict) -> catalog.Catalog:
@@ -39,13 +60,14 @@ def tool_of(raw: dict, name: str) -> dict:
 
 
 def test_스냅샷의_CARD_도구마다_설명이_있고_설명의_Java_도구는_스냅샷에_있어야_한다():
-    # ① READ is listed by Java but not loaded until its prompt exists (design 8-4)
+    # ① READ without a fillable required id has no prompt (design 8-4)
     prompts = catalog.tool_prompts()
     snapshot = catalog.read_snapshot().tools
     cards = {tool.name for tool in snapshot if tool.kind == "CARD"}
     java_prompts = {name for name, prompt in prompts.items() if not prompt.builtin}
 
-    assert cards == java_prompts == REGISTER
+    assert cards == REGISTER
+    assert java_prompts == REGISTER | READ
     assert java_prompts <= {tool.name for tool in snapshot}
     assert {name for name, prompt in prompts.items() if prompt.builtin} == BUILTIN
 
@@ -233,7 +255,7 @@ def test_설명이_없는_Java_도구는_싣지_않고_경고해야_한다(caplo
     with caplog.at_level(logging.WARNING, logger="app.chat.catalog"):
         built = build(raw)
 
-    assert set(built.entries) == REGISTER
+    assert set(built.entries) == REGISTER | READ
     assert "draft_expense 설명 없음" in caplog.text
 
 
@@ -291,7 +313,7 @@ def test_Java_목록을_받으면_등록_도구를_실어야_한다():
     assert installed is not None
 
     assert installed.source == "java"
-    assert set(installed.entries) == REGISTER
+    assert set(installed.entries) == REGISTER | READ
 
 
 def test_Java가_실패하면_스냅샷으로_뜨고_코드_칸_도구는_빼야_한다(caplog):
@@ -301,8 +323,8 @@ def test_Java가_실패하면_스냅샷으로_뜨고_코드_칸_도구는_빼야
     tools.use_catalog(installed)
 
     assert installed.source == "snapshot"
-    assert installed.entries == {}
-    assert {d["name"] for d in tools.tool_definitions()} == BUILTIN
+    assert set(installed.entries) == READ_WITHOUT_CODES
+    assert {d["name"] for d in tools.tool_definitions()} == BUILTIN | READ_WITHOUT_CODES
     assert "Java 받기 실패" in caplog.text
     assert "공통코드 값 없음" in caplog.text
 
@@ -322,7 +344,7 @@ def test_structureVersion이_스냅샷과_다르면_경고하고_Java_응답을_
 
     assert installed is not None
     assert installed.source == "java"
-    assert set(installed.entries) == REGISTER
+    assert set(installed.entries) == REGISTER | READ
     assert "structureVersion 다름" in caplog.text
 
 
@@ -355,7 +377,7 @@ def test_기동_때_켜져_있고_Java가_없으면_builtin_도구만_실어야_
 
     get_settings.cache_clear()
     active = tools.active_catalog()
-    assert names == BUILTIN
+    assert names == BUILTIN | READ_WITHOUT_CODES
     assert active is not None and active.source == "snapshot"
 
 
