@@ -1,7 +1,7 @@
 # 서비스 안내서 검토 메모
 
 `data/guide/*.yaml`(AI 매니저 사용법 안내서)에서 사람만 보는 내용을 옮겼다. AI 프롬프트에는 들어가지 않는다.
-안내서 초안 draft-0.1(2026-11-04) 기준.
+안내서 초안 draft-0.1(2026-11-04) 기준, 2026-11-05 프론트 대조 반영.
 
 ## 출처
 
@@ -24,6 +24,61 @@
 
 - routing.yaml에 1:1 문의(SCR-CSC-003) 행이 없다. "문의" 키워드는 num 7 공지사항 목록으로 가고, 1:1 문의 사용법은 num 7 tasks에 넣었다
 - 프론트 src/features/ai/shared/screenPaths.js가 SCR-MYP-004(num 27 공동양육 관리)를 /mypage/caregivers로 보내는데 그 주소는 라우트에 없다. 실제 화면은 /mypage/pets 카드 아래 가족 영역
+
+## 프론트 대조 (2026-11-05, 프론트 develop de4b256)
+
+안내서 화면 34개와 공통 task(C-1~C-6)의 `path`·진입 경로·[버튼 이름]을 프론트 코드(라우트·메뉴·화면 JSX)와 대조했다. 결과는 맞음 11 · 고침 22 · 프론트 문제 1이고, 안내서 32곳을 고쳤다. 공통 task는 맞음이라 따로 셌다. 청크 id·num·routing.yaml은 바꾸지 않았다.
+
+- 공통으로 고친 것: 폭 1100px 이하에는 헤더 프로필 아이콘이 없다. 모바일 진입은 "프로필 >" 대신 [전체 메뉴] drawer(맨 위 내 이름 → 마이페이지, 고객센터·설정 링크) 기준으로 적었다
+- 플레이스 7개 화면 `login_required` true: 프론트가 플레이스를 회원만 열게 바꿨다(프론트 커밋 96707a9). 의도한 정책인지는 확인 필요(아래 G)
+- 이미 연결돼 not_ready에서 뺀 것: 반려동물 수정 창 [건강 일지에서 기록하기], 포인트 [건강 일지], 가계부 영수증 인식(실제 `/ai/receipts`), 회원정보 닉네임·휴대폰·프로필 사진 저장
+
+| 파일 | num | 화면 | 결과 | 고친 것·남은 것 |
+| --- | --- | --- | --- | --- |
+| common.yaml | (C-1~C-6) | 공통 레이아웃(AI 버튼·알림·로그아웃·모바일 메뉴·헤더 메뉴) | 맞음 |  |
+| common.yaml | 9 | 설정 | 고침 | 9-1 첫 단계가 PC 전용(모바일은 프로필 아이콘이 없고 drawer의 설정) |
+| common.yaml | 10 | 채팅 | 맞음 |  |
+| community.yaml | 4 | 펫이야기 목록 | 맞음 |  |
+| community.yaml | 22 | 펫이야기 글 상세 | 맞음 |  |
+| community.yaml | 23 | 실종센터 | 맞음 |  |
+| community.yaml | 24 | 펫뉴스 | 맞음 |  |
+| community.yaml | 25 | 우리동네 펫돌봄 | 맞음 |  |
+| health.yaml | 1 | 종합 건강기록 | 고침 | 1-3 [케어 캘린더에서 일정 등록하기] 링크는 예방·검진 기록이 하나도 없을 때만 보임 |
+| health.yaml | 11 | 케어 캘린더 | 고침 | 11-3 일정 종류 선택지가 [병원][미용·목욕][케어·투약][기타] 4개 |
+| health.yaml | 12 | 케어 캘린더 토탈 케어리스트 | 고침 | entry.other "메인 화면의 케어 카드에서 주소"(뜻 불명) → 메인 "데일리 케어미션" 카드의 [토탈 케어리스트] 링크 · 프론트 문제 C |
+| health.yaml | 13 | 건강 일지 | 맞음 |  |
+| health.yaml | 14 | 건강 일지 검진기록 | 고침 | 14-2의 [촬영하기]는 폭 1100px 이하에서만 보임 |
+| health.yaml | 15 | 종합 건강기록 처방 및 투약 이력 | 맞음 |  |
+| health.yaml | 16 | 종합 건강기록 검사 결과 | 맞음 |  |
+| main.yaml | 8 | 메인 | 프론트 문제 | 8-4 [토탈 케어리스트] 링크 해시가 케어리스트 탭을 못 엶(C) |
+| mypage.yaml | 5 | 마이페이지 홈 | 고침 | mobile 진입을 [전체 메뉴] 맨 위 내 이름으로 |
+| mypage.yaml | 6 | 픽셀 캐릭터 관리 | 고침 | mobile 진입의 "프로필 >" |
+| mypage.yaml | 26 | 반려동물 등록·수정 | 고침 | [건강 일지에서 기록하기]는 이미 `/health/diary`로 이동해 not_ready 삭제, 포인트 화면 [반려동물 등록하기]는 그 화면 위에 등록 창이 열림, mobile 진입의 "프로필 >" |
+| mypage.yaml | 27 | 공동양육 관리 | 고침 | mobile 진입의 "프로필 >" · 프론트 문제 A(AI 이동용 `/mypage/caregivers` 라우트 없음) |
+| mypage.yaml | 28 | 픽셀 캐릭터 상세 | 맞음 |  |
+| mypage.yaml | 29 | 케어미션 · 포인트 | 고침 | [건강 일지] 버튼은 이미 `/health/diary`로 이동해 not_ready 비우고 status 정상, mobile 진입의 "프로필 >" |
+| mypage.yaml | 30 | 가계부 | 고침 | 영수증 인식은 실제 API라 not_ready 비우고 status 정상, mobile 진입의 "프로필 >" |
+| mypage.yaml | 31 | 가계부 전체 내역 | 고침 | mobile 진입의 "프로필 >" |
+| mypage.yaml | 32 | 회원정보 수정 | 고침 | 닉네임·휴대폰·프로필 사진은 이미 실제 저장이라 not_ready에 회원 탈퇴만 남김(status 일부 준비 중), mobile 진입은 761~1100px ▾ 메뉴뿐 · 프론트 문제 D |
+| place.yaml | 2 | 플레이스 병원 화면 | 고침 | `login_required` true(프론트 커밋 96707a9) |
+| place.yaml | 3 | 플레이스 | 고침 | `login_required` true |
+| place.yaml | 17 | 플레이스 미용 화면 | 고침 | `login_required` true |
+| place.yaml | 18 | 플레이스 용품 화면 | 고침 | `login_required` true |
+| place.yaml | 19 | 플레이스 동반 화면 | 고침 | `login_required` true |
+| place.yaml | 20 | 플레이스 호텔 화면 | 고침 | `login_required` true |
+| place.yaml | 21 | 동물병원 요약 카드 | 고침 | `login_required` true |
+| support.yaml | 7 | 공지사항 목록 | 고침 | mobile 진입(프로필 아이콘 없음, drawer 고객센터) |
+| support.yaml | 33 | FAQ 목록 | 고침 | mobile 진입의 "프로필 >" |
+| support.yaml | 34 | 공지 상세 | 맞음 |  |
+
+프론트에 알릴 것(안내서는 지금 화면 그대로 적었다)
+
+- A. SCR-MYP-004(num 27 공동양육 관리): `screenPaths.js`가 `/mypage/caregivers`로 보내는데 라우트·캐치올이 없어 빈 화면. 리다이렉트나 `PATHS.MYPAGE_PETS`로
+- B. `/mypage/withdraw` 라우트 없음. [회원 탈퇴]는 준비 중 토스트(안내서 not_ready에 있음)
+- C. 메인 [토탈 케어리스트]가 `/health/calendar#c-care`로 가는데 탭 해시는 `#hlt003-care`라 캘린더 탭이 열림
+- D. 폭 760px 이하에서 회원정보 수정(SCR-MYP-040)으로 가는 메뉴가 없음(하단 탭·drawer 모두)
+- E. routing.yaml num 12~16은 탭 해시 없이 이동해 기본 탭이 열림. 프론트가 화면별 해시를 붙일 수 있음(routing.yaml 변경 불필요)
+- G. 플레이스 로그인 정책: 비로그인도 열려야 한다면 안내서가 아니라 프론트를 고친다
 
 ## 안내서에 넣지 않은 routing.yaml 행
 
