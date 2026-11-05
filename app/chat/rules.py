@@ -110,6 +110,112 @@ def find_route(scr_id: str, param: str | None) -> RouteRow | None:
     return None
 
 
+GUIDE_DIR = DATA_DIR / "guide"
+GUIDE_TOP_K = 3
+# docs/design/service-guide-search.md 2절 : task 검색어 1.0, 화면 검색어 0.3
+TASK_TERM_WEIGHT = 1.0
+SCREEN_TERM_WEIGHT = 0.3
+ENTRY_LABELS = {"pc": "PC", "mobile": "모바일", "other": "그 밖"}
+
+
+@dataclass(frozen=True)
+class GuideChunk:
+    """[안내서 청크]
+    - task 하나 -> 답변 근거 글(text)과 M1 검색어
+    - num은 routing.yaml 행 번호, 공통 task는 None"""
+
+    id: str
+    num: int | None
+    screen: str | None
+    title: str
+    text: str
+    task_terms: tuple[str, ...]
+    screen_terms: tuple[str, ...]
+
+
+def _guide_text(chunk_id: str, task: dict, screen: dict | None) -> str:
+    lines = [f"[{chunk_id}] {screen['name'] if screen else '공통'} · {task['task']}"]
+    if screen:
+        lines.append(f"화면 설명: {screen['summary']}")
+        for key, label in ENTRY_LABELS.items():
+            for entry in (screen.get("entry") or {}).get(key) or ():
+                lines.append(f"들어가는 길({label}): {entry}")
+        if screen.get("status") not in (None, "정상"):
+            ready = ", ".join(screen.get("not_ready") or ())
+            suffix = f" (준비 중: {ready})" if ready else ""
+            lines.append(f"준비 상태: {screen['status']}{suffix}")
+    lines += [f"{i}. {step}" for i, step in enumerate(task["steps"], 1)]
+    lines += [f"- {note}" for note in task.get("notes") or ()]
+    return "\n".join(lines)
+
+
+def _guide_chunk(task: dict, screen: dict | None, keywords: dict) -> GuideChunk:
+    screen_terms = (screen["name"], *keywords.get(screen["num"], ())) if screen else ()
+    return GuideChunk(
+        id=task["id"],
+        num=screen["num"] if screen else None,
+        screen=screen["name"] if screen else None,
+        title=task["task"],
+        text=_guide_text(task["id"], task, screen),
+        task_terms=(task["task"], *(task.get("faq_keywords") or ())),
+        screen_terms=screen_terms,
+    )
+
+
+@lru_cache
+def guide_chunks() -> tuple[GuideChunk, ...]:
+    # FN-AIM-002-02 : 사용법 안내서(data/guide/*.yaml). 순서 = 공통 task, 화면 num 순
+    keywords = {row.no: row.keywords for row in routing_table()}
+    common: list[dict] = []
+    screens: list[dict] = []
+    for path in sorted(GUIDE_DIR.glob("*.yaml")):
+        data = _load(f"guide/{path.name}")
+        common += data.get("common") or ()
+        screens += data.get("screens") or ()
+    chunks = [_guide_chunk(task, None, keywords) for task in common]
+    for screen in sorted(screens, key=lambda s: s["num"]):
+        chunks += [_guide_chunk(task, screen, keywords) for task in screen["tasks"]]
+    return tuple(chunks)
+
+
+def find_guide(chunk_id: str | None) -> GuideChunk | None:
+    return next((chunk for chunk in guide_chunks() if chunk.id == chunk_id), None)
+
+
+def _guide_key(text: str) -> str:
+    # 라우팅과 같은 공백 제거 + 영문 대소문자 무시("ai 버튼" = "AI 버튼")
+    return _compact(text).lower()
+
+
+@lru_cache
+def _guide_index() -> dict[str, tuple[tuple[int, float], ...]]:
+    # 검색어 -> (청크 순번, 가중치). 2글자 미만 검색어 제외
+    index: dict[str, list[tuple[int, float]]] = {}
+    for pos, chunk in enumerate(guide_chunks()):
+        for terms, weight in (
+            (chunk.task_terms, TASK_TERM_WEIGHT),
+            (chunk.screen_terms, SCREEN_TERM_WEIGHT),
+        ):
+            for term in {_guide_key(t) for t in terms}:
+                if len(term) >= 2:
+                    index.setdefault(term, []).append((pos, weight))
+    return {term: tuple(posts) for term, posts in index.items()}
+
+
+def search_guide(text: str) -> list[str]:
+    # FN-AIM-002-02 : M1 키워드 색인. 입력에 든 검색어마다 글자 수 × 가중치, 상위 3개
+    # 같은 점수면 안내서 앞쪽 청크. 점수 0이면 빈 목록(2단계 LLM 목차 선택으로)
+    key = _guide_key(text)
+    scores: dict[int, float] = {}
+    for term, posts in _guide_index().items():
+        if term in key:
+            for pos, weight in posts:
+                scores[pos] = scores.get(pos, 0.0) + len(term) * weight
+    ranked = sorted(scores, key=lambda pos: (-scores[pos], pos))[:GUIDE_TOP_K]
+    chunks = guide_chunks()
+    return [chunks[pos].id for pos in ranked]
+
+
 # 서버 서머타임 없음 : 고정 오프셋 사용 (Windows에는 tzdata 없음)
 KST = timezone(timedelta(hours=9))
 WEEKDAYS = "월화수목금토일"
