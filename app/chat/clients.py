@@ -1,6 +1,6 @@
 import logging
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
@@ -469,9 +469,14 @@ class ToolDecision:
     content: tuple[dict, ...] = ()
 
 
+# 결과 답변 중 LLM이 고른 두 번째 도구 실행 : 결과 글, 읽기 도구가 아니면 None
+FollowRead = Callable[[tools.ToolCall], Awaitable[str | None]]
+
+
 class ToolAgent(Protocol):
     # docs/design/tool-calling.md 4절 : 분류·목차 선택·등록 칸 추출을 도구 고르기 한 번으로
     # decide 장애면 ClassifyError, 글 스트림 장애면 AnswerError
+    # answer의 follow : 있으면 결과를 본 LLM이 읽기 도구를 한 번 더 고름(한 턴 READ 최대 2번)
     async def decide(
         self, messages: list[dict], max_tokens: int, today: date, hint: rules.RouteRow | None = None
     ) -> ToolDecision: ...
@@ -483,6 +488,7 @@ class ToolAgent(Protocol):
         result: str,
         max_tokens: int,
         today: date,
+        follow: FollowRead | None = None,
     ) -> AsyncIterator[str]: ...
 
 
@@ -493,6 +499,8 @@ TOOL_RULES = (
     "- 서비스 범위 안의 반려동물 건강·생활 정보 질문은 도구 없이 바로 답한다.\n"
     "- 두 도구가 다 맞아 보이면 도구 없이 무엇을 원하는지 짧게 되묻는다.\n"
     "- 도구 인자는 회원이 말한 것만 채우고 모르는 칸은 비운다.\n"
+    "- 읽기 도구 결과를 받은 뒤 상세가 더 필요하면 읽기 도구를 한 번 더 부를 수 있다. "
+    "번호 칸(…_sn)은 받은 결과에 나온 번호만 쓴다.\n"
 )
 
 
@@ -516,7 +524,7 @@ def _tool_hint(hint: rules.RouteRow | None) -> str:
         f"이 입력은 키워드로 '{hint.name}' 화면({hint.scr_id})에 걸렸다. "
         "키워드가 걸린 것만으로 범위 안이 아니다. 범위 밖이면 decline, "
         "그 화면으로 가려는 요청이나 그 화면에 있는 내 기록을 묻는 질문이면 navigate"
-        "(건강 기록·일정·검진·약의 내용을 묻는 질문에 맞는 읽기 도구가 있으면 그 도구), "
+        "(건강 기록·일정·검진·약·지출의 내용을 묻는 질문에 맞는 읽기 도구가 있으면 그 도구), "
         "그 화면 기능의 위치·사용법을 묻는 질문이면 search_guide."
     )
 
@@ -531,6 +539,12 @@ def tool_system_blocks(today: date, hint: rules.RouteRow | None = None) -> list[
     if note:
         blocks.append({"type": "text", "text": note})
     return blocks
+
+
+# 도구는 한 번에 하나 : 답 없는 질문이 이력에 둘이면 tool_use를 여럿 냄(2026-11-06 방 143 재현)
+# none에는 붙일 수 없음(400 Extra inputs)
+TOOL_CHOICE_AUTO = {"type": "auto", "disable_parallel_tool_use": True}
+TOOL_CHOICE_NONE = {"type": "none"}
 
 
 def _stream_failure(error: Exception) -> str:
@@ -576,7 +590,7 @@ class AnthropicToolAgent:
     ) -> ToolDecision:
         started = time.monotonic()
         request = self._request(messages, max_tokens, tool_system_blocks(today, hint))
-        request["tool_choice"] = {"type": "auto"}
+        request["tool_choice"] = TOOL_CHOICE_AUTO
         events = self._events(request)
         final = None
         try:
@@ -626,27 +640,58 @@ class AnthropicToolAgent:
         finally:
             await events.aclose()
 
-    def answer(
+    async def answer(
         self,
         messages: list[dict],
         decision: ToolDecision,
         result: str,
         max_tokens: int,
         today: date,
+        follow: FollowRead | None = None,
     ) -> AsyncIterator[str]:
-        # 서버 도구 결과를 돌려준 뒤 같은 대화로 답변 : 도구 반복 없이 1번(상한 2번 안)
-        use_id = decision.call.use_id if decision.call else ""
-        follow = [
-            *messages,
-            {"role": "assistant", "content": list(decision.content)},
-            {
-                "role": "user",
-                "content": [{"type": "tool_result", "tool_use_id": use_id, "content": result}],
-            },
-        ]
-        request = self._request(follow, max_tokens, tool_system_blocks(today))
-        request["tool_choice"] = {"type": "none"}
-        return self._texts(self._events(request), time.monotonic(), "도구 결과 답변")
+        # 서버 도구 결과를 돌려준 뒤 같은 대화로 답변
+        # follow 있음 : 첫 블록이 글이면 그대로, 읽기 도구면 한 번 더 실행 후 도구 없이(LLM 3번)
+        follow_messages = _with_result(messages, decision.content, decision.call, result)
+        request = self._request(follow_messages, max_tokens, tool_system_blocks(today))
+        request["tool_choice"] = TOOL_CHOICE_AUTO if follow is not None else TOOL_CHOICE_NONE
+        started = time.monotonic()
+        events = self._events(request)
+        if follow is None:
+            async for text in self._texts(events, started, "도구 결과 답변"):
+                yield text
+            return
+        final = None
+        try:
+            async for event in events:
+                if isinstance(event, Message):
+                    final = event
+                elif event.type == "content_block_start" and event.content_block.type == "text":
+                    async for text in self._texts(events, started, "도구 결과 답변"):
+                        yield text
+                    return
+        except (anthropic.APIError, httpx2.HTTPError) as error:
+            reason = _stream_failure(error)
+            _log_failure("도구 결과 답변", started, reason)
+            raise AnswerError(reason) from None
+        finally:
+            await events.aclose()
+        if final is None or final.stop_reason == "refusal":
+            reason = (final.stop_reason if final else None) or "no_output"
+            _log_failure("도구 결과 답변", started, reason)
+            raise AnswerError(reason)
+        self._log(final, "도구 결과 답변", started)
+        use = next((block for block in final.content if block.type == "tool_use"), None)
+        if use is None:
+            raise AnswerError("no_output")
+        call = tools.parse(use.name, use.input if isinstance(use.input, dict) else {}, use.id)
+        logger.info("LLM 두 번째 도구: %s 인자 %s", call.name, "통과" if call.args else "거부")
+        second = await follow(call)
+        content = tuple(block.model_dump(exclude_none=True) for block in final.content)
+        last = _with_result(follow_messages, content, call, second or rules.READ_NOT_RUN)
+        request = self._request(last, max_tokens, tool_system_blocks(today))
+        request["tool_choice"] = TOOL_CHOICE_NONE
+        async for text in self._texts(self._events(request), time.monotonic(), "도구 결과 답변"):
+            yield text
 
     def _log(self, final: Message, task: str, started: float, length: int | None = None) -> None:
         usage = final.usage
@@ -663,6 +708,27 @@ class AnthropicToolAgent:
             final.stop_reason,
             (time.monotonic() - started) * 1000,
         )
+
+
+def _with_result(
+    messages: list[dict], content: tuple[dict, ...], call: tools.ToolCall | None, result: str
+) -> list[dict]:
+    # tool_use마다 tool_result 필수(없으면 Anthropic 400) : 실행한 도구만 결과, 나머지는 실행 안 함
+    use_id = call.use_id if call is not None else ""
+    ids = [block["id"] for block in content if block.get("type") == "tool_use"] or [use_id]
+    results = [
+        {
+            "type": "tool_result",
+            "tool_use_id": block_id,
+            "content": result if block_id == use_id else rules.READ_NOT_RUN,
+        }
+        for block_id in ids
+    ]
+    return [
+        *messages,
+        {"role": "assistant", "content": list(content)},
+        {"role": "user", "content": results},
+    ]
 
 
 def get_tool_agent(settings: Annotated[Settings, Depends(get_settings)]) -> ToolAgent | None:

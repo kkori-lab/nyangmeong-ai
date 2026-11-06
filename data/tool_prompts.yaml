@@ -206,6 +206,9 @@ list_care_completions:
     to_ymd:
       java: toYmd
       description: 끝 날짜 YYYY-MM-DD
+    care_artcl_sn:
+      java: careArtclSn
+      description: 케어 항목 번호. list_care_items 결과의 careArtclSn만, 모르면 비운다
 
 list_checkups:
   hooks: [pet]
@@ -245,6 +248,9 @@ list_inspection_values:
     insp_artcl_cd:
       java: inspArtclCd
       description: 혈액검사 항목
+    ckup_rcd_sn:
+      java: ckupRcdSn
+      description: 검진 기록 번호. list_checkups 결과의 ckupRcdSn만, 모르면 비운다
 
 list_prescriptions:
   hooks: [pet]
@@ -260,6 +266,9 @@ list_prescriptions:
     prsc_stts_cd:
       java: prscSttsCd
       description: 처방 상태
+    ckup_rcd_sn:
+      java: ckupRcdSn
+      description: 검진 기록 번호. list_checkups 결과의 ckupRcdSn만, 모르면 비운다
 
 list_repeat_preventions:
   hooks: [pet]
@@ -271,6 +280,10 @@ list_repeat_preventions:
     쓰지 않을 때: 처방약은 list_prescriptions. 지난 병원 기록은 list_checkups.
     인자: 반려동물은 고르지 않는다(서버가 정한다).
     말하는 법: 받은 기록만 쓴다.
+  params:
+    ckup_rcd_sn:
+      java: ckupRcdSn
+      description: 검진 기록 번호. list_checkups 결과의 ckupRcdSn만, 모르면 비운다
 
 list_observation_items:
   hooks: [pet]
@@ -287,6 +300,157 @@ list_observation_items:
     obsrv_stts_cd:
       java: obsrvSttsCd
       description: 관찰 상태
+
+get_checkup:
+  hooks: [pet]
+  description: |
+    검진 기록 한 건(날짜·병원·검진유형·영수증 번호)을 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: list_checkups 결과에서 고른 검진 한 건을 더 자세히 묻는 말.
+      예) "마지막 검진 자세히 알려 줘"
+    쓰지 않을 때: 검진 목록은 list_checkups. 그 검진의 혈액 수치는 list_inspection_values.
+    인자: ckup_rcd_sn은 list_checkups 결과의 ckupRcdSn만 쓴다. 결과가 없으면 list_checkups를 먼저 부른다.
+    말하는 법: 받은 기록만 쓴다. 진료 내용·메모는 받지 않으므로 지어내지 않는다.
+  params:
+    ckup_rcd_sn:
+      java: ckupRcdSn
+      description: 검진 기록 번호(list_checkups 결과의 ckupRcdSn)
+
+list_etc_inspections:
+  hooks: [pet]
+  description: |
+    검진 한 건의 기타 검사(혈액검사 밖의 검사 이름)를 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 그 검진 때 어떤 검사를 받았는지 묻는 말.
+      예) "지난 검진 때 엑스레이도 찍었어?", "그때 받은 검사 뭐야?"
+    쓰지 않을 때: 혈액검사 수치는 list_inspection_values.
+    인자: ckup_rcd_sn은 list_checkups 결과의 ckupRcdSn만 쓴다. 결과가 없으면 list_checkups를 먼저 부른다.
+    말하는 법: 받은 검사 이름만 쓴다. 검사 결과 글은 받지 않으므로 지어내지 않는다.
+  params:
+    ckup_rcd_sn:
+      java: ckupRcdSn
+      description: 검진 기록 번호(list_checkups 결과의 ckupRcdSn)
+
+list_observation_cycles:
+  hooks: [pet]
+  description: |
+    관찰 항목 하나의 회차별 기록(날짜·크기·변화)을 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 관찰 항목 하나가 회차마다 어떻게 변했는지 묻는 말.
+      예) "등에 난 혹 회차별로 크기 어땠어?"
+    쓰지 않을 때: 관찰 항목 목록·처음과 마지막 비교는 list_observation_items.
+    인자: obsrv_artcl_sn은 list_observation_items 결과의 obsrvArtclSn만 쓴다. 결과가 없으면 list_observation_items를 먼저 부른다.
+    말하는 법: 받은 기록만 쓴다. 진단하지 않고, 크기가 커지면 수의사 상담을 권한다.
+  params:
+    obsrv_artcl_sn:
+      java: obsrvArtclSn
+      description: 관찰 항목 번호(list_observation_items 결과의 obsrvArtclSn)
+    obsrv_cycl_sn:
+      java: obsrvCyclSn
+      description: 관찰 회차 번호. 앞 결과의 obsrvCyclSn만, 모르면 비운다
+
+list_expenses:
+  hooks: [pet_filter]
+  description: |
+    가계부 지출 목록(날짜·카테고리·반려동물·상세·사용처·금액·영수증 번호)을 읽어 와 답한다.
+    아무것도 저장하지 않는다.
+
+    쓸 때: 무엇에 언제 얼마 썼는지 하나하나 묻는 말.
+      예) "지난주에 뭐 샀어?", "사료 마지막으로 산 게 언제야?", "이번 달 병원비 내역 보여 줘"
+    쓰지 않을 때: 합계·건수만 물으면 get_expense_total. 한 달 통계·한도·지난달 비교는 get_expense_statistics.
+    인자: 기간은 시스템의 오늘 날짜 기준으로 계산한다. 공용 지출만 물으면 common. 반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 받은 기록만 쓴다. 결과가 잘렸으면 앞부분만 받았다고 말한다.
+  params:
+    start_ymd:
+      java: startYmd
+      description: 시작 날짜 YYYY-MM-DD
+    end_ymd:
+      java: endYmd
+      description: 끝 날짜 YYYY-MM-DD
+    common:
+      java: common
+      description: 공용 지출(반려동물을 고르지 않은 지출)만
+    expnd_clsf_cd:
+      java: expndClsfCd
+      description: 지출 카테고리
+    page:
+      java: page
+      description: 페이지 번호
+    size:
+      java: size
+      description: 한 페이지 기록 수
+
+get_expense_total:
+  hooks: [pet_filter]
+  description: |
+    조건에 맞는 지출 건수와 합계 금액을 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 기간·카테고리별로 모두 얼마 썼는지, 몇 번 썼는지 묻는 말.
+      예) "이번 달 가계부 얼마 썼어?", "올해 병원비 다 해서 얼마야?"
+    쓰지 않을 때: 하나하나의 내역은 list_expenses. 한도·지난달 비교는 get_expense_statistics.
+    인자: 기간은 시스템의 오늘 날짜 기준으로 계산한다. 반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 받은 건수·합계만 쓴다.
+  params:
+    start_ymd:
+      java: startYmd
+      description: 시작 날짜 YYYY-MM-DD
+    end_ymd:
+      java: endYmd
+      description: 끝 날짜 YYYY-MM-DD
+    common:
+      java: common
+      description: 공용 지출(반려동물을 고르지 않은 지출)만
+    expnd_clsf_cd:
+      java: expndClsfCd
+      description: 지출 카테고리
+
+get_expense_statistics:
+  description: |
+    한 달 지출 통계(합계·월 한도·지난달 합계·날짜별·카테고리별·반려동물별·큰 지출)를 읽어 와 답한다.
+    아무것도 저장하지 않는다.
+
+    쓸 때: 한 달 단위로 한도를 넘었는지, 지난달보다 늘었는지, 어디에 많이 썼는지 묻는 말.
+      예) "이번 달 한도 넘었어?", "지난달보다 많이 썼어?", "이번 달 제일 많이 쓴 데가 어디야?"
+    쓰지 않을 때: 기간 합계만은 get_expense_total. 내역은 list_expenses.
+    인자: year_month는 시스템의 오늘 날짜 기준 YYYY-MM. 미래 달은 고르지 않는다.
+    말하는 법: 받은 숫자만 쓴다. 소비를 평가하거나 꾸짖지 않는다.
+  params:
+    year_month:
+      java: yearMonth
+      description: 연월 YYYY-MM
+
+list_expense_months:
+  description: |
+    지출 기록이 있는 연월 목록을 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 가계부를 언제부터 썼는지, 기록이 있는 달을 묻는 말.
+      예) "가계부 언제부터 기록했어?", "기록 있는 달 알려 줘"
+    쓰지 않을 때: 금액은 get_expense_total·get_expense_statistics.
+    말하는 법: 받은 연월만 쓴다.
+
+list_expense_pets:
+  description: |
+    가계부에 지출이 걸린 반려동물 목록(연동 해제·삭제된 반려동물 포함)을 읽어 와 답한다.
+    아무것도 저장하지 않는다.
+
+    쓸 때: 가계부에서 어떤 반려동물로 나눠 볼 수 있는지 묻는 말.
+      예) "가계부에 누구누구 있어?"
+    쓰지 않을 때: 반려동물별 금액은 get_expense_statistics.
+    말하는 법: 받은 이름만 쓴다.
+
+get_receipt:
+  description: |
+    영수증 한 장의 분석 결과(병원·날짜·금액·항목·약)를 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: list_expenses·get_checkup 결과의 영수증을 더 자세히 묻는 말.
+      예) "그 병원비 영수증에 뭐 들어 있었어?"
+    쓰지 않을 때: 지출 내역은 list_expenses.
+    인자: recpt_sn은 앞 결과의 recptSn만 쓴다. 결과가 없으면 list_expenses를 먼저 부른다.
+    말하는 법: 받은 항목·금액만 쓴다. 진단하지 않는다.
+  params:
+    recpt_sn:
+      java: recptSn
+      description: 영수증 번호(앞 결과의 recptSn)
 
 decline:
   builtin: true
