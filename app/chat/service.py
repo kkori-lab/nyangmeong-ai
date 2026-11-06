@@ -260,6 +260,67 @@ class ReadDeps:
     room_pet: int | None = None
 
 
+class _ReadPets:
+    """한 턴 READ의 반려동물 : 목록은 처음 필요할 때 한 번만 받는다"""
+
+    def __init__(self, text: str, read: ReadDeps) -> None:
+        self.compact = re.sub(r"\s+", "", text)
+        self.read = read
+        self._pets: list[PetInfo] | None = None
+
+    async def pets(self) -> list[PetInfo]:
+        if self._pets is None:
+            try:
+                self._pets = await self.read.contexts.get_pets()
+            except (AppError, BackendError):
+                raise AnswerError("read_pets") from None
+        return self._pets
+
+    def named(self, pets: list[PetInfo]) -> list[PetInfo]:
+        return [p for p in pets if p.pet_nm in self.compact]
+
+
+@dataclass
+class _ReadOutcome:
+    # ask : Java 미호출 되물음 문구, result : tool_result 글
+    ask: str | None = None
+    result: str = ""
+
+
+async def _read_once(
+    entry: "catalog.CatalogEntry",
+    call: tools.ToolCall | None,
+    pets: _ReadPets,
+    seen: dict[str, set[int]],
+) -> _ReadOutcome:
+    pet_sn = None
+    if "pet" in entry.hooks:
+        # FN-AIM-012-04 규칙 : 못 정하면 Java 미호출·이름 되물음
+        found = await pets.pets()
+        pet = _pick_pet(found, pets.named(found), None, pets.read.room_pet)
+        if pet is None:
+            names = ", ".join(p.pet_nm for p in found)
+            return _ReadOutcome(ask=READ_PET_ASK.format(names=names) if found else READ_NO_PET)
+        pet_sn = pet.pet_sn
+    elif "pet_filter" in entry.hooks:
+        # 가계부 : 문장 속 이름이 하나면 그 반려동물, 아니면 전체(공용 지출 포함, 2026-11-06 결정)
+        named = pets.named(await pets.pets())
+        pet_sn = named[0].pet_sn if len(named) == 1 else None
+    args = call.args if call is not None else None
+    values = args.model_dump(exclude_none=True) if args is not None else {}
+    request = catalog.read_request(entry, values, pet_sn, seen)
+    if request is None:
+        logger.info("READ 도구 필수 칸 없음: %s", entry.name)
+        return _ReadOutcome(result=rules.READ_FAILED)
+    try:
+        data = await pets.read.reader.read(*request)
+    except (AppError, BackendError) as error:
+        logger.info("READ 도구 Java 실패: %s %s", entry.name, type(error).__name__)
+        return _ReadOutcome(result=rules.READ_FAILED)
+    catalog.seen_ids(data, seen)
+    return _ReadOutcome(result=rules.read_result_text(data))
+
+
 async def _read_answer(
     text: str,
     context: list[dict],
@@ -270,28 +331,24 @@ async def _read_answer(
     today: date,
     read: ReadDeps,
 ) -> AsyncIterator[str]:
-    try:
-        pets = await read.contexts.get_pets()
-    except (AppError, BackendError):
-        raise AnswerError("read_pets") from None
-    compact = re.sub(r"\s+", "", text)
-    pet = _pick_pet(pets, [p for p in pets if p.pet_nm in compact], None, read.room_pet)
-    if pet is None:
-        names = ", ".join(p.pet_nm for p in pets)
-        yield READ_PET_ASK.format(names=names) if pets else READ_NO_PET
+    pets = _ReadPets(text, read)
+    # 번호 칸은 이 턴 READ 결과에 나온 값만 (catalog.read_request)
+    seen: dict[str, set[int]] = {}
+    first = await _read_once(entry, decision.call, pets, seen)
+    if first.ask is not None:
+        yield first.ask
         return
-    args = decision.call.args if decision.call is not None else None
-    values = args.model_dump(exclude_none=True) if args is not None else {}
-    request = catalog.read_request(entry, values, pet.pet_sn)
-    result = rules.READ_FAILED
-    if request is not None:
-        try:
-            result = rules.read_result_text(await read.reader.read(*request))
-        except (AppError, BackendError) as error:
-            logger.info("READ 도구 Java 실패: %s %s", entry.name, type(error).__name__)
-    else:
-        logger.info("READ 도구 경로 칸 없음: %s", entry.name)
-    answer = agent.answer(context, decision, result, max_tokens, today)
+
+    async def follow(call: tools.ToolCall) -> str | None:
+        # 한 턴 READ 최대 2번 : 두 번째는 읽기 도구만, 반려동물을 못 정하면 불러오지 못함
+        second = tools.read_entry(call.name)
+        if second is None or call.args is None:
+            logger.info("두 번째 도구 실행 안 함: %s", call.name)
+            return None
+        outcome = await _read_once(second, call, pets, seen)
+        return rules.READ_FAILED if outcome.ask is not None else outcome.result
+
+    answer = agent.answer(context, decision, first.result, max_tokens, today, follow)
     try:
         async for chunk in answer:
             yield chunk

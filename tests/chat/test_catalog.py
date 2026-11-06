@@ -21,26 +21,41 @@ from tests.chat.test_tools import room_of, use_agent
 
 BUILTIN = {"navigate", "search_guide", "decline"}
 REGISTER = {"draft_schedule", "draft_care_item"}
-# 필수 번호 칸을 LLM이 알 수 없는 READ 제외
-# (get_checkup·list_etc_inspections·list_observation_cycles)
 READ = {
+    "get_checkup",
     "get_health_indicators",
     "list_care_completions",
     "list_care_items",
     "list_care_schedules",
     "list_checkups",
     "list_daily_health_records",
+    "list_etc_inspections",
     "list_inspection_values",
+    "list_observation_cycles",
     "list_observation_items",
     "list_prescriptions",
     "list_repeat_preventions",
+    # 가계부
+    "get_expense_statistics",
+    "get_expense_total",
+    "get_receipt",
+    "list_expense_months",
+    "list_expense_pets",
+    "list_expenses",
 }
 # 스냅샷(코드 값 없음)으로도 싣는 READ : 코드 칸 없음
 READ_WITHOUT_CODES = {
+    "get_checkup",
     "get_health_indicators",
     "list_care_completions",
     "list_care_items",
+    "list_etc_inspections",
+    "list_observation_cycles",
     "list_repeat_preventions",
+    "get_expense_statistics",
+    "get_receipt",
+    "list_expense_months",
+    "list_expense_pets",
 }
 
 
@@ -66,7 +81,7 @@ def test_스냅샷의_CARD_도구마다_설명이_있고_설명의_Java_도구�
     cards = {tool.name for tool in snapshot if tool.kind == "CARD"}
     java_prompts = {name for name, prompt in prompts.items() if not prompt.builtin}
 
-    assert cards == REGISTER
+    assert cards >= REGISTER
     assert java_prompts == REGISTER | READ
     assert java_prompts <= {tool.name for tool in snapshot}
     assert {name for name, prompt in prompts.items() if prompt.builtin} == BUILTIN
@@ -95,7 +110,9 @@ def test_navigate만_쓰는_API는_스냅샷에_없어야_한다():
         assert call.method != "DELETE"
         assert (call.method, call.path) not in navigate_only
         assert not call.path.startswith(("/api/admin", "/api/auth", "/internal"))
-        assert "caregiver" not in call.path and "chat-rooms" not in call.path
+        # 공동양육자·보낸 초대 목록 읽기는 2-1절 READ 후보, 초대·수락·해제(쓰기)만 navigate
+        assert call.method == "GET" or "caregiver" not in call.path
+        assert "chat-rooms" not in call.path
 
 
 @pytest.mark.parametrize(

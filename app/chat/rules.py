@@ -555,6 +555,8 @@ READ_RESULT_MAX_CHARS = 6000
 READ_TRUNCATED = "\n(결과가 길어 앞부분만 보냄)"
 # Java 공개 API 실패 : 답변 오류 대신 LLM이 화면 확인 안내
 READ_FAILED = "기록을 불러오지 못함. 앱의 해당 화면에서 확인하라고 안내한다."
+# 결과를 받은 뒤 읽기 도구가 아닌 도구를 고름 : 실행하지 않고 받은 결과로 답하게
+READ_NOT_RUN = "이 도구는 실행하지 않음. 앞서 받은 결과만으로 답한다."
 
 
 def _drop_free_text(value: object) -> object:

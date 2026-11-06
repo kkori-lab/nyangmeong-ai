@@ -8,6 +8,7 @@
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from functools import lru_cache
@@ -26,6 +27,9 @@ logger = logging.getLogger(__name__)
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 CATALOG_PATH = "/internal/ai/tools"
+PET_SN = "petSn"
+YEAR_MONTH = "yearMonth"
+_YEAR_MONTH = re.compile(r"\d{4}-(0[1-9]|1[0-2])")
 
 
 # Java 응답(설계 3-2절). 외부 입력이라 모양을 검증한다
@@ -118,6 +122,8 @@ HOOKS: dict[str, Hook] = {
     "pet": Hook(makes=frozenset({"petSn"})),
     "date": Hook(makes=frozenset({"schdlDt", "hrInptYn"}), roles=frozenset({"ymd", "tm"})),
     "same_name_warning": Hook(),
+    # 가계부 READ : 문장 속 이름이 하나면 petSn 조건, 아니면 전체(공용 지출 포함)
+    "pet_filter": Hook(),
 }
 
 # LLM 칸 타입 : 날짜·시간은 글자로 받아 다시 검증
@@ -354,23 +360,60 @@ def _compose_datetime(ymd, tm) -> dict:
     return {"schdlDt": datetime.combine(day, clock).isoformat(), "hrInptYn": tm is not None}
 
 
-def read_request(entry: CatalogEntry, values: dict, pet_sn: int) -> tuple[str, dict] | None:
-    """READ 도구 인자 -> Java 경로·query (경로 칸이 비면 None)"""
-    java = to_java(entry, values) | {"petSn": pet_sn}
+def is_id(name: str) -> bool:
+    # 번호 칸(…Sn). petSn은 서버 규칙(pet hook·문장 속 이름)으로 정한다
+    return name.endswith("Sn") and name != PET_SN
+
+
+def seen_ids(data: object, seen: dict[str, set[int]] | None = None) -> dict[str, set[int]]:
+    """READ 결과에 나온 번호 칸 값 (칸 이름 -> 값들, 중첩까지)"""
+    seen = {} if seen is None else seen
+    if isinstance(data, dict):
+        for key, value in data.items():
+            if is_id(key) and isinstance(value, int) and not isinstance(value, bool):
+                seen.setdefault(key, set()).add(value)
+            else:
+                seen_ids(value, seen)
+    elif isinstance(data, list):
+        for value in data:
+            seen_ids(value, seen)
+    return seen
+
+
+def read_request(
+    entry: CatalogEntry,
+    values: dict,
+    pet_sn: int | None,
+    seen: dict[str, set[int]] | None = None,
+) -> tuple[str, dict] | None:
+    """READ 도구 인자 -> Java 경로·query (필수 칸이 비면 None)
+    - 번호 칸은 같은 턴 앞 READ 결과(seen)에 나온 값만 : LLM이 지어낸 번호면 그 칸을 비움"""
+    java = to_java(entry, values)
+    if pet_sn is not None and PET_SN in entry.params:
+        java[PET_SN] = pet_sn
+    seen = seen or {}
     for name, value in list(java.items()):
-        if entry.params.get(name) is not None and entry.params[name].type == "date":
+        param = entry.params.get(name)
+        if param is None:
+            continue
+        if is_id(name):
+            if value not in seen.get(name, set()):
+                del java[name]
+        elif param.type == "date":
             # LLM 날짜 글자 재검증 : 틀리면 그 조건만 비움
             try:
                 java[name] = date.fromisoformat(str(value)).isoformat()
             except ValueError:
                 del java[name]
+        elif name == YEAR_MONTH and not _YEAR_MONTH.fullmatch(str(value)):
+            # Java YearMonth.parse 형식(YYYY-MM)
+            del java[name]
+    if any(param.required and java.get(name) is None for name, param in entry.params.items()):
+        return None
     path = entry.call.path
     for name, param in entry.params.items():
-        if param.loc != "path":
-            continue
-        if java.get(name) is None:
-            return None
-        path = path.replace(f"{{{name}}}", str(java[name]))
+        if param.loc == "path":
+            path = path.replace(f"{{{name}}}", str(java[name]))
     query = {
         name: str(value).lower() if isinstance(value, bool) else value
         for name, value in java.items()
