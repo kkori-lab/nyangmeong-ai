@@ -5,11 +5,7 @@ from fastapi.responses import JSONResponse
 
 from app.character import service
 from app.character.clients import CharacterClient, get_character_client
-from app.character.repository import (
-    CharacterJobRepository,
-    get_character_job_repository,
-    get_server_character_repository,
-)
+from app.character.repository import CharacterJobRepository, get_character_job_repository
 from app.character.schemas import (
     ITEM_NM_MAX,
     CharacterCreateResponse,
@@ -77,6 +73,29 @@ async def preview_character(
     return response.error("ITEM_BAKING", 409, message, request.url.path)
 
 
+# 착용 확정은 Java PUT /pixel-characters/{pixelCharSn}/equipped-items가 먼저, React가 성공 뒤 호출
+@router.post("/characters/{pixel_char_sn}/equipped-image", dependencies=[Depends(require_member)])
+async def save_equipped_image(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    pixel_char_sn: int,
+    body: CharacterPreviewRequest,
+    client: Annotated[CharacterClient | None, Depends(get_character_client)],
+    repo: Annotated[CharacterJobRepository, Depends(get_character_job_repository)],
+    queue: Annotated[BakeQueue, Depends(get_bake_queue)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> JSONResponse:
+    enabled = settings.character_bake_enabled
+    saved = await service.save_equipped_image(
+        client, repo, queue, pixel_char_sn, body.item_sns, enabled
+    )
+    if saved:
+        return response.success(None)
+    background_tasks.add_task(queue.drain)
+    message = "아이템을 준비하고 있습니다. 잠시 후 다시 시도해 주세요."
+    return response.error("ITEM_BAKING", 409, message, request.url.path)
+
+
 @router.post("/items/bake-hints", dependencies=[Depends(require_admin)])
 async def create_bake_hint(
     image: UploadFile,
@@ -102,17 +121,22 @@ async def trial_preview(
     return Response(image, media_type="image/png")
 
 
+# 한 묶음을 다 굽고 답함 : 관리자 프론트가 lastYn까지 다시 부름 (쿠키 30분 만료 대책)
 @router.post("/items/{item_sn}/bake", dependencies=[Depends(require_admin)])
 async def bake_item(
-    background_tasks: BackgroundTasks,
     item_sn: int,
     client: Annotated[CharacterClient | None, Depends(get_character_client)],
     repo: Annotated[CharacterJobRepository, Depends(get_character_job_repository)],
-    server_repo: Annotated[CharacterJobRepository, Depends(get_server_character_repository)],
     queue: Annotated[BakeQueue, Depends(get_bake_queue)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> JSONResponse:
     enabled = settings.character_bake_enabled
-    count = await service.enqueue_item_bake(client, repo, server_repo, queue, item_sn, enabled)
-    background_tasks.add_task(queue.drain)
-    return response.success(ItemBakeResponse(item_sn=item_sn, target_cnt=count), 202)
+    result = await service.bake_item_batch(client, repo, queue, item_sn, enabled)
+    return response.success(
+        ItemBakeResponse(
+            item_sn=item_sn,
+            baked_cnt=result.baked_cnt,
+            failed_cnt=result.failed_cnt,
+            last_yn=result.last,
+        )
+    )

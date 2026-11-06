@@ -1,4 +1,5 @@
 import calendar
+import json
 import re
 from dataclasses import dataclass, fields
 from datetime import date, datetime, timedelta, timezone
@@ -108,6 +109,121 @@ def find_route(scr_id: str, param: str | None) -> RouteRow | None:
         if row.routable and row.scr_id == scr_id and row.param == param:
             return row
     return None
+
+
+GUIDE_DIR = DATA_DIR / "guide"
+GUIDE_TOP_K = 3
+# docs/design/service-guide-search.md 2절 : task 검색어 1.0, 화면 검색어 0.3
+TASK_TERM_WEIGHT = 1.0
+SCREEN_TERM_WEIGHT = 0.3
+ENTRY_LABELS = {"pc": "PC", "mobile": "모바일", "other": "그 밖"}
+
+
+@dataclass(frozen=True)
+class GuideChunk:
+    """[안내서 청크]
+    - task 하나 -> 답변 근거 글(text)과 M1 검색어
+    - num은 routing.yaml 행 번호, 공통 task는 None"""
+
+    id: str
+    num: int | None
+    screen: str | None
+    title: str
+    text: str
+    task_terms: tuple[str, ...]
+    screen_terms: tuple[str, ...]
+
+
+def _guide_text(chunk_id: str, task: dict, screen: dict | None) -> str:
+    lines = [f"[{chunk_id}] {screen['name'] if screen else '공통'} · {task['task']}"]
+    if screen:
+        lines.append(f"화면 설명: {screen['summary']}")
+        for key, label in ENTRY_LABELS.items():
+            for entry in (screen.get("entry") or {}).get(key) or ():
+                lines.append(f"들어가는 길({label}): {entry}")
+        if screen.get("status") not in (None, "정상"):
+            ready = ", ".join(screen.get("not_ready") or ())
+            suffix = f" (준비 중: {ready})" if ready else ""
+            lines.append(f"준비 상태: {screen['status']}{suffix}")
+    lines += [f"{i}. {step}" for i, step in enumerate(task["steps"], 1)]
+    lines += [f"- {note}" for note in task.get("notes") or ()]
+    return "\n".join(lines)
+
+
+def _guide_chunk(task: dict, screen: dict | None, keywords: dict) -> GuideChunk:
+    screen_terms = (screen["name"], *keywords.get(screen["num"], ())) if screen else ()
+    return GuideChunk(
+        id=task["id"],
+        num=screen["num"] if screen else None,
+        screen=screen["name"] if screen else None,
+        title=task["task"],
+        text=_guide_text(task["id"], task, screen),
+        task_terms=(task["task"], *(task.get("faq_keywords") or ())),
+        screen_terms=screen_terms,
+    )
+
+
+@lru_cache
+def guide_chunks() -> tuple[GuideChunk, ...]:
+    # FN-AIM-002-02 : 사용법 안내서(data/guide/*.yaml). 순서 = 공통 task, 화면 num 순
+    keywords = {row.no: row.keywords for row in routing_table()}
+    common: list[dict] = []
+    screens: list[dict] = []
+    for path in sorted(GUIDE_DIR.glob("*.yaml")):
+        data = _load(f"guide/{path.name}")
+        common += data.get("common") or ()
+        screens += data.get("screens") or ()
+    chunks = [_guide_chunk(task, None, keywords) for task in common]
+    for screen in sorted(screens, key=lambda s: s["num"]):
+        chunks += [_guide_chunk(task, screen, keywords) for task in screen["tasks"]]
+    return tuple(chunks)
+
+
+def find_guide(chunk_id: str | None) -> GuideChunk | None:
+    return next((chunk for chunk in guide_chunks() if chunk.id == chunk_id), None)
+
+
+def _guide_key(text: str) -> str:
+    # 라우팅과 같은 공백 제거 + 영문 대소문자 무시("ai 버튼" = "AI 버튼")
+    return _compact(text).lower()
+
+
+@lru_cache
+def _guide_index() -> dict[str, tuple[tuple[int, float], ...]]:
+    # 검색어 -> (청크 순번, 가중치). 2글자 미만 검색어 제외
+    index: dict[str, list[tuple[int, float]]] = {}
+    for pos, chunk in enumerate(guide_chunks()):
+        for terms, weight in (
+            (chunk.task_terms, TASK_TERM_WEIGHT),
+            (chunk.screen_terms, SCREEN_TERM_WEIGHT),
+        ):
+            for term in {_guide_key(t) for t in terms}:
+                if len(term) >= 2:
+                    index.setdefault(term, []).append((pos, weight))
+    return {term: tuple(posts) for term, posts in index.items()}
+
+
+def search_guide(text: str) -> list[str]:
+    # FN-AIM-002-02 : M1 키워드 색인. 입력에 든 검색어마다 글자 수 × 가중치, 상위 3개
+    # 같은 점수면 안내서 앞쪽 청크. 점수 0이면 빈 목록(2단계 LLM 목차 선택으로)
+    key = _guide_key(text)
+    scores: dict[int, float] = {}
+    for term, posts in _guide_index().items():
+        if term in key:
+            for pos, weight in posts:
+                scores[pos] = scores.get(pos, 0.0) + len(term) * weight
+    ranked = sorted(scores, key=lambda pos: (-scores[pos], pos))[:GUIDE_TOP_K]
+    chunks = guide_chunks()
+    return [chunks[pos].id for pos in ranked]
+
+
+def merge_guide(picked_id: str | None, text: str) -> list[str]:
+    # FN-AIM-002-02 : LLM이 목차에서 고른 청크를 앞에, M1 결과를 중복 없이 뒤에(최대 3개)
+    # M1이 엉뚱한 청크를 잡아도 목차 선택을 버리지 않는다. 없는 번호는 버린다
+    picked = find_guide(picked_id)
+    ids = [picked.id] if picked else []
+    ids += [chunk_id for chunk_id in search_guide(text) if chunk_id not in ids]
+    return ids[:GUIDE_TOP_K]
 
 
 # 서버 서머타임 없음 : 고정 오프셋 사용 (Windows에는 tzdata 없음)
@@ -431,3 +547,29 @@ def clean_ai_fields(raw: dict) -> RegisterFields:
         cycle_days=days if isinstance(days, int) and 1 <= days <= 3650 else None,
         last_cmptn_ymd=valid_ymd(raw.get("last_cmptn_ymd")),
     )
+
+
+# READ 도구 결과 (docs/design/tool-calling.md 5절 개인 데이터 범위 : 날짜·이름·수치만)
+# 6000자 : 미측정 기준(2026-11-06 LJS 결정)
+READ_RESULT_MAX_CHARS = 6000
+READ_TRUNCATED = "\n(결과가 길어 앞부분만 보냄)"
+# Java 공개 API 실패 : 답변 오류 대신 LLM이 화면 확인 안내
+READ_FAILED = "기록을 불러오지 못함. 앱의 해당 화면에서 확인하라고 안내한다."
+# 결과를 받은 뒤 읽기 도구가 아닌 도구를 고름 : 실행하지 않고 받은 결과로 답하게
+READ_NOT_RUN = "이 도구는 실행하지 않음. 앞서 받은 결과만으로 답한다."
+
+
+def _drop_free_text(value: object) -> object:
+    # 내용(…Cn) 칸 : 메모·자유 입력 글이라 외부 AI API로 보내지 않음
+    if isinstance(value, dict):
+        return {k: _drop_free_text(v) for k, v in value.items() if not k.endswith("Cn")}
+    if isinstance(value, list):
+        return [_drop_free_text(item) for item in value]
+    return value
+
+
+def read_result_text(data: object) -> str:
+    text = json.dumps(_drop_free_text(data), ensure_ascii=False, default=str)
+    if len(text) <= READ_RESULT_MAX_CHARS:
+        return text
+    return text[:READ_RESULT_MAX_CHARS] + READ_TRUNCATED

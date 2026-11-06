@@ -13,7 +13,7 @@ Python ↔ Java ↔ React 계약 초안이다. **코드 없음, 팀 확인 전.*
 | 합성 | 서버가 한다. 프론트는 겹치지 않는다 |
 | 굽는 시점 | 캐릭터 생성 직후 전 아이템을 미리 굽는다. 사자마자 바로 장착. `CHARACTER_BAKE_ENABLED` 기본 꺼짐: 비용 결정·Java 시트 저장 연결 뒤 켠다. 꺼져 있으면 이미지 API를 부르지 않고 미리보기는 맨몸 외 409 |
 | 지원 부위 | 머리·얼굴·목·의상·가방 5부위, 아이템 26개. 신발은 넣지 않는다(2026-11-02) |
-| 표시 컷 | 서기 정면 1컷, 512×512, 얼굴 영역 `(128, 64, 256, 256)` 규격 유지 |
+| 표시 컷 | 서기 정면 1컷, 512×512, 얼굴 영역 `(96, 32, 320, 320)` 규격 유지(2026-11-04 변경, 백엔드 `CharacterSpec.FACE`와 같음. 옛 값 `(128, 64, 256, 256)`) |
 | 캔버스 배치 | 4번 "V4a56" |
 | 착장 합성 방식 | 머리 착용 그림(없으면 맨몸)을 바탕으로 의상 → 가방 → 목 → 얼굴 레이어를 얹는다(5번) |
 
@@ -32,7 +32,10 @@ Python ↔ Java ↔ React 계약 초안이다. **코드 없음, 팀 확인 전.*
          아이템마다: 맨몸 시트 + 아이템 지시 → 착용 시트 → Java에 저장·상태 보고
 ③ 합성  React ─POST /ai/characters/{pixelCharSn}/preview (장비)─▶ Python
          Python ─시트 조회─▶ Java → 합성 → 512 PNG 응답(저장 안 함)
-         확정은 기존 Java `PUT /pixel-characters/{pixelCharSn}/equipped-items`
+         확정은 기존 Java `PUT /pixel-characters/{pixelCharSn}/equipped-items` (대표 이미지 삭제 → 맨몸)
+④ 저장  확정 성공 뒤 React ─POST /ai/characters/{pixelCharSn}/equipped-image (같은 장비)─▶ Python
+         Python ─시트 조회─▶ Java → 합성 → PUT /internal/ai/characters/{pixelCharSn}/equipped-image
+         Java: 지금 착용 목록과 같으면 대표 이미지로 저장 → GET /pets/{petSn}/character-image
 ```
 
 ## 2. API 초안
@@ -43,6 +46,7 @@ Python ↔ Java ↔ React 계약 초안이다. **코드 없음, 팀 확인 전.*
 | --- | --- | --- | --- |
 | POST | `/ai/characters` (있음) | 사진·petSn 받아 생성 작업 시작. 바뀌는 것은 생성기 구현과 성공 보고 내용뿐 | 202, `charCrtJobSn` |
 | POST | `/ai/characters/{pixelCharSn}/preview` (새로) | 아이템(`itemSns`, 상점에서는 안 산 아이템도 입혀 보므로 보유 번호가 아님)대로 합성한 512 PNG | `image/png`. 아직 안 구운 아이템이 있으면 그 아이템을 큐 맨 앞으로 올리고 409 `ITEM_BAKING` |
+| POST | `/ai/characters/{pixelCharSn}/equipped-image` (새로) | [장착] 확정 뒤 같은 `itemSns`로 합성해 Java에 대표 이미지로 저장 | 200. 오류는 `/preview`와 같고 저장하지 않는다 |
 
 ### Python → Java (새로 필요, 백엔드 몫)
 
@@ -53,6 +57,7 @@ Python ↔ Java ↔ React 계약 초안이다. **코드 없음, 팀 확인 전.*
 | 아이템 착용 시트 저장·굽기 상태 보고 | 캐릭터 × 아이템 단위 |
 | 굽기 대상 아이템 목록 조회 | `ITEM` 중 판매 중 + 엔진이 아는 아이템 |
 | 합성용 시트 조회 | 맨몸 시트 + 요청 장비의 착용 시트 |
+| 대표 이미지 저장 | `PUT /internal/ai/characters/{pixelCharSn}/equipped-image`, 지금 착용 목록과 같을 때만 |
 | 반려동물 정보 | 작업 생성이 이미 `petSeCd`·`vrtyNm`·`colrNm`·`chrcCn`을 돌려준다(`CharacterRequest`). 엔진이 쓰는 성별(`PET_GNDR_CD`)만 없다 — 추가 여부 결정 |
 | 사진 원본 조회 | 굽기는 맨몸 시트로 하므로 생성 뒤에는 필요 없다(생성 때는 요청에 사진이 온다) |
 
@@ -88,7 +93,7 @@ Python 큐는 메모리에 있으므로 재시작하면 사라진다. 끊긴 굽
 | 상수 | 값 | 뜻 |
 | --- | --- | --- |
 | `EYE_GAP` | 0.30 × 256 ≈ 77px | 눈 사이 거리 |
-| `EYE_Y` | 64 + 0.56 × 256 ≈ 207 | 눈 높이 = 얼굴 영역의 56%(가운데보다 조금 아래) |
+| `EYE_X`, `EYE_Y` | 256, 207.36 | 눈 기준점. 옛 얼굴 영역 `(128, 64, 256, 256)`의 가운데·56% 지점(64 + 0.56 × 256)을 숫자로 고정했다. 얼굴 영역을 넓혀도 지금까지 만든 캐릭터와 새 캐릭터의 눈 높이가 같다. 새 영역에서는 위에서 약 55% |
 
 시제품 실측(늘어진 귀 강아지 1마리, 앉기·서기 정면 × 맨몸+3착장 = 8컷): 배율 ×0.816, 512 밖으로 잘림 0/8,
 얼굴 원형 자르기에 모자 전체와 턱까지 들어옴(사람 판정 "딱 이 정도"). **상수는 한 마리 기준이다** — 7번.

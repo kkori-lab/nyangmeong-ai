@@ -4,6 +4,7 @@ import time
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from typing import Literal
 
 from app.character import bake, compose, engine
 from app.character.clients import CharacterApiError, CharacterClient, CharacterRequest
@@ -24,6 +25,11 @@ logger = logging.getLogger(__name__)
 # OpenAI 동시 호출 상한
 BAKE_CONCURRENCY = 13
 BAKE_ATTEMPTS = 2
+# 전체 굽기 한 번 호출의 캐릭터 수 : 한 번 굽는 시간 안에 끝나 쿠키(30분) 만료 밖
+BAKE_BATCH = BAKE_CONCURRENCY
+
+# 굽기 결과 : 시트 저장·실패 표시, None은 둘 다 못 함 (Java 목록에 남음)
+BakeOutcome = Literal["baked", "failed"] | None
 
 
 @dataclass(frozen=True)
@@ -52,6 +58,9 @@ class BakeQueue:
         self._tasks: deque[BakeTask] = deque()
         self._running: set[tuple[int, int]] = set()
         self._workers = 0
+        # 결과를 기다리는 호출 : 같은 키가 굽는 중이면 그 결과를 함께 받음
+        self._waiters: dict[tuple[int, int], list[asyncio.Future[BakeOutcome]]] = {}
+        self._drains: set[asyncio.Task[None]] = set()
 
     def add(self, task: BakeTask) -> None:
         if task.key not in self._running and all(t.key != task.key for t in self._tasks):
@@ -63,6 +72,20 @@ class BakeQueue:
         self._tasks = deque(t for t in self._tasks if t.key != task.key)
         self._tasks.appendleft(task)
 
+    async def run(self, tasks: Sequence[BakeTask]) -> list[BakeOutcome]:
+        """큐 뒤에 넣고 끝날 때까지 기다림 -> 작업별 결과"""
+        loop = asyncio.get_running_loop()
+        waits: list[asyncio.Future[BakeOutcome]] = []
+        for task in tasks:
+            self.add(task)
+            future: asyncio.Future[BakeOutcome] = loop.create_future()
+            self._waiters.setdefault(task.key, []).append(future)
+            waits.append(future)
+        drain = asyncio.create_task(self.drain())
+        self._drains.add(drain)
+        drain.add_done_callback(self._drains.discard)
+        return list(await asyncio.gather(*waits))
+
     async def drain(self) -> None:
         idle = BAKE_CONCURRENCY - self._workers
         await asyncio.gather(*(self._work() for _ in range(idle)))
@@ -73,12 +96,22 @@ class BakeQueue:
             while self._tasks:
                 task = self._tasks.popleft()
                 self._running.add(task.key)
+                outcome: BakeOutcome = None
                 try:
-                    await _bake_one(task)
+                    outcome = await _bake_one(task)
+                except Exception:
+                    logger.exception("굽기 실패: %d, itemSn=%d", task.pixel_char_sn, task.item_sn)
                 finally:
                     self._running.discard(task.key)
+                    self._notify(task.key, outcome)
         finally:
             self._workers -= 1
+
+    def _notify(self, key: tuple[int, int], outcome: BakeOutcome) -> None:
+        for future in self._waiters.pop(key, []):
+            # 요청이 끊겨 취소된 대기는 건너뜀
+            if not future.done():
+                future.set_result(outcome)
 
 
 _queue = BakeQueue()
@@ -160,14 +193,14 @@ async def _tasks(
     ]
 
 
-async def _bake_one(task: BakeTask) -> None:
+async def _bake_one(task: BakeTask) -> BakeOutcome:
     # 저장 실패는 다시 굽지 않음 : 이미 낸 비용
     if task.sheet is None or task.pet_se_cd is None:
         try:
             found = await task.repo.find_sheets(task.pixel_char_sn, [])
         except Exception:
             logger.exception("굽기용 맨몸 시트 조회 실패: %d", task.pixel_char_sn)
-            return
+            return None
         task = replace(task, sheet=found.sheet, pet_se_cd=found.pet_se_cd)
     started = time.perf_counter()
     worn, attempts = await _draw(task)
@@ -183,10 +216,12 @@ async def _bake_one(task: BakeTask) -> None:
     try:
         if worn is None:
             await task.repo.report_bake_failure(task.pixel_char_sn, task.item_sn)
-        else:
-            await task.repo.save_item_sheet(task.pixel_char_sn, task.item_sn, worn)
+            return "failed"
+        await task.repo.save_item_sheet(task.pixel_char_sn, task.item_sn, worn)
+        return "baked"
     except Exception:
         logger.exception("굽기 결과 보고 실패: %d, itemSn=%d", task.pixel_char_sn, task.item_sn)
+        return None
 
 
 async def _draw(task: BakeTask) -> tuple[bytes | None, int]:
@@ -240,6 +275,22 @@ async def preview(
                 )
         return None
     return await _render(found, chosen)
+
+
+async def save_equipped_image(
+    client: CharacterClient | None,
+    repo: CharacterJobRepository,
+    queue: BakeQueue,
+    pixel_char_sn: int,
+    item_sns: Sequence[int],
+    bake_enabled: bool,
+) -> bool:
+    """FN-MYP-010-16·13 : [장착] 확정 뒤 착용 모습을 Java에 저장, 안 구운 아이템이 있으면 False"""
+    image = await preview(client, repo, queue, pixel_char_sn, item_sns, bake_enabled)
+    if image is None:
+        return False
+    await repo.save_equipped_image(pixel_char_sn, item_sns, image)
+    return True
 
 
 def _chosen_items(
@@ -310,15 +361,25 @@ async def trial_preview(
     return await _render(found, {item.item_sn: item}, {item.item_sn: worn})
 
 
-async def enqueue_item_bake(
+@dataclass(frozen=True)
+class ItemBakeResult:
+    baked_cnt: int
+    failed_cnt: int
+    last: bool
+
+
+async def bake_item_batch(
     client: CharacterClient | None,
     repo: CharacterJobRepository,
-    server_repo: CharacterJobRepository,
     queue: BakeQueue,
     item_sn: int,
     bake_enabled: bool,
-) -> int:
-    """FN-ADM-070-02 : 새 아이템을 안 구운 기존 캐릭터 전부 큐 뒤에 넣기 -> 대상 수"""
+) -> ItemBakeResult:
+    """FN-ADM-070-02 : 안 구운 캐릭터 한 묶음을 관리자 쿠키로 굽고 기다림 -> 결과 수
+
+    - 구웠거나 실패 표시한 캐릭터는 Java 목록에서 빠짐 : 매번 첫 페이지만 읽음
+    - 관리자 프론트가 last가 될 때까지 다시 부름 : 요청마다 새 쿠키
+    """
     if not bake_enabled:
         raise AppError("BAKE_DISABLED", 409, "아이템 굽기가 꺼져 있습니다.")
     if client is None:
@@ -327,12 +388,28 @@ async def enqueue_item_bake(
     item = (await repo.list_bake_items()).get(item_sn)
     if item is None:
         raise AppError("INVALID_REQUEST", 400, "구울 수 없는 아이템입니다.")
-    targets = await repo.list_bake_targets(item_sn)
-    for pixel_char_sn in targets:
-        # 회원 미리보기(put_first)가 앞서도록 뒤에 추가
-        queue.add(BakeTask(client, server_repo, pixel_char_sn, item_sn, item, None, None))
-    logger.info("전체 굽기 대상: itemSn=%d, %d개", item_sn, len(targets))
-    return len(targets)
+    page = await repo.list_bake_targets(item_sn)
+    candidates = list(dict.fromkeys(page.pixel_char_sns))
+    targets = candidates[:BAKE_BATCH]
+    # 회원 미리보기(put_first)가 앞서도록 뒤에 추가
+    outcomes = await queue.run(
+        [BakeTask(client, repo, sn, item_sn, item, None, None) for sn in targets]
+    )
+    baked, failed = outcomes.count("baked"), outcomes.count("failed")
+    logger.info(
+        "전체 굽기 묶음: itemSn=%d, 대상 %d개, 저장 %d, 실패 표시 %d",
+        item_sn,
+        len(targets),
+        baked,
+        failed,
+    )
+    if targets and baked + failed == 0:
+        # 하나도 줄지 않음 : 다시 불러도 같은 대상이라 반복을 멈춤
+        logger.error("전체 굽기 묶음이 하나도 처리되지 않았습니다: itemSn=%d", item_sn)
+        raise external_error()
+    done = baked + failed == len(targets)
+    last = page.last and len(candidates) <= BAKE_BATCH and done
+    return ItemBakeResult(baked, failed, last)
 
 
 def _check_region(regn_cd: str) -> None:

@@ -5,17 +5,26 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.character import router as character_router
+from app.chat import catalog, tools
 from app.chat import router as chat_router
 from app.checkup import router as checkup_router
 from app.core import health
 from app.core.backend import create_backend_client
+from app.core.config import get_settings
 from app.core.errors import register_error_handlers
+from app.healthreport import router as healthreport_router
 from app.ocr import router as ocr_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.backend_client = create_backend_client()
+    # 도구 목록(docs/design/tool-catalog.md 4-2절) : CHAT_TOOL_AGENT 켜짐일 때만 기동 때 1회
+    settings = get_settings()
+    client = catalog.JavaToolCatalogClient(app.state.backend_client, settings)
+    installed = await catalog.install(settings, client)
+    if installed is not None:
+        tools.use_catalog(installed)
     yield
     await app.state.backend_client.aclose()
 
@@ -39,6 +48,7 @@ def create_app() -> FastAPI:
     app.include_router(ocr_router.ai_router)
     app.include_router(character_router.router)
     app.include_router(checkup_router.router)
+    app.include_router(healthreport_router.router)
     app.include_router(chat_router.me_router)
     app.include_router(chat_router.router)
     return app

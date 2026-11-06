@@ -129,6 +129,33 @@ def test_save_item_sheet는_쿠키와_함께_PUT으로_보낸다() -> None:
     assert b'name="sheet"' in request.content and b"WORN" in request.content
 
 
+def test_save_equipped_image는_쿠키와_함께_이미지와_착용_목록을_PUT으로_보낸다() -> None:
+    requests: list[httpx2.Request] = []
+    repo = make_repo(lambda _: httpx2.Response(200), requests)
+
+    asyncio.run(repo.save_equipped_image(77, [108, 11], b"WORN"))
+
+    request = requests[0]
+    assert (request.method, str(request.url)) == ("PUT", f"{BASE}/77/equipped-image")
+    assert request.headers["cookie"] == COOKIE
+    assert request.headers["x-requested-with"] == "XMLHttpRequest"
+    assert request.headers["content-type"].startswith("multipart/form-data")
+    assert b'name="image"' in request.content and b"WORN" in request.content
+    assert request.content.count(b'name="itemSns"') == 2
+    assert b"108" in request.content and b"11" in request.content
+
+
+def test_save_equipped_image_맨몸이면_itemSns를_보내지_않는다() -> None:
+    requests: list[httpx2.Request] = []
+    repo = make_repo(lambda _: httpx2.Response(200), requests)
+
+    asyncio.run(repo.save_equipped_image(77, [], b"BARE"))
+
+    request = requests[0]
+    assert b'name="image"' in request.content
+    assert b'name="itemSns"' not in request.content
+
+
 def test_report_bake_failure는_쿠키와_함께_보낸다() -> None:
     requests: list[httpx2.Request] = []
     repo = make_repo(lambda _: httpx2.Response(200), requests)

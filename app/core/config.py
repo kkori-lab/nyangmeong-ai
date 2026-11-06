@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     google_vision_api_key: SecretStr = SecretStr("")
     # FN-HLT-005-04 : 검사결과지 PDF 분석 제한 시간(초) : LLM 한 번
     pdf_analyze_timeout_sec: float = 30.0
+    # FN-MAN-006 : 메인 AI 건강분석 리포트 생성 제한 시간(초) : LLM 한 번
+    health_report_timeout_sec: float = 20.0
 
     # 이미지 생성(OpenAI, 2026-10-28 결정) : 비면 캐릭터 생성 API 502
     openai_api_key: SecretStr = SecretStr("")
@@ -37,6 +39,8 @@ class Settings(BaseSettings):
     # FN-AIM-002-07 : 답변 첫 글자 제한·전체 제한(초)
     answer_first_token_sec: float = 10.0
     answer_total_sec: float = 60.0
+    # tool calling 1단계 실험(docs/design/tool-calling.md) : 켜면 분류·추출 대신 도구 고르기 LLM
+    chat_tool_agent: bool = False
 
 
 @lru_cache

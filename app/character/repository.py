@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Annotated, Any, Protocol
@@ -27,8 +27,6 @@ ITEMS_PATH = "/internal/ai/items"
 REQUESTED_WITH_HEADER = "X-Requested-With"
 # 시트는 1024 PNG : 기본 3초로는 전송이 끊길 수 있음
 SHEET_TIMEOUT_SEC = 15.0
-# 전체 굽기 대상 페이지 상한 : Java가 last를 주지 않을 때 무한 반복 방지
-BAKE_TARGET_MAX_PAGES = 1000
 
 
 class CharacterFailure(StrEnum):
@@ -70,13 +68,17 @@ class CharacterJobRepository(Protocol):
 
     async def list_bake_items(self) -> dict[int, engine.BakeItem]: ...
 
-    async def list_bake_targets(self, item_sn: int) -> list[int]: ...
+    async def list_bake_targets(self, item_sn: int) -> "BakeTargetPage": ...
 
     async def save_item_sheet(self, pixel_char_sn: int, item_sn: int, sheet: bytes) -> None: ...
 
     async def report_bake_failure(self, pixel_char_sn: int, item_sn: int) -> None: ...
 
     async def find_sheets(self, pixel_char_sn: int, item_sns: Iterable[int]) -> CharacterSheets: ...
+
+    async def save_equipped_image(
+        self, pixel_char_sn: int, item_sns: Sequence[int], image: bytes
+    ) -> None: ...
 
 
 class _JobResponse(BaseModel):
@@ -97,7 +99,9 @@ class _BakeItem(BaseModel):
     bake_hint: str = Field(alias="bakeHint", min_length=1)
 
 
-class _BakeTargetPage(BaseModel):
+class BakeTargetPage(BaseModel):
+    """FN-ADM-070-02 : 안 구운 캐릭터 첫 페이지 (Java 100개씩)"""
+
     pixel_char_sns: list[int] = Field(alias="pixelCharSns")
     last: bool
 
@@ -186,21 +190,14 @@ class JavaCharacterJobRepository:
             for item in items
         }
 
-    async def list_bake_targets(self, item_sn: int) -> list[int]:
-        # FN-ADM-070-02 : 아직 안 구운 캐릭터 전 페이지 (관리자 판정은 Java)
-        found: dict[int, None] = {}
-        for page in range(BAKE_TARGET_MAX_PAGES):
-            data = await self._call(
-                "GET", f"{ITEMS_PATH}/{item_sn}/bake-targets", params={"page": page}
-            )
-            try:
-                chunk = _BakeTargetPage.model_validate(data)
-            except ValidationError:
-                raise external_error() from None
-            found.update(dict.fromkeys(chunk.pixel_char_sns))
-            if chunk.last or not chunk.pixel_char_sns:
-                break
-        return list(found)
+    async def list_bake_targets(self, item_sn: int) -> BakeTargetPage:
+        # FN-ADM-070-02 : 아직 안 구운 캐릭터 첫 페이지 (관리자 판정은 Java)
+        # 구운·실패 표시한 캐릭터는 빠지므로 다음 묶음도 첫 페이지
+        data = await self._call("GET", f"{ITEMS_PATH}/{item_sn}/bake-targets", params={"page": 0})
+        try:
+            return BakeTargetPage.model_validate(data)
+        except ValidationError:
+            raise external_error() from None
 
     async def save_item_sheet(self, pixel_char_sn: int, item_sn: int, sheet: bytes) -> None:
         await self._call(
@@ -239,6 +236,19 @@ class JavaCharacterJobRepository:
             frozenset(item.item_sn for item in items if item.bake_failed),
         )
 
+    async def save_equipped_image(
+        self, pixel_char_sn: int, item_sns: Sequence[int], image: bytes
+    ) -> None:
+        # FN-MYP-010-16 : Java 대표 이미지로 저장
+        # 지금 확정 착용 목록과 다르면 409 EQUIPPED_ITEMS_CHANGED (옛 합성 덮어쓰기 방지)
+        await self._call(
+            "PUT",
+            f"{CHARACTERS_PATH}/{pixel_char_sn}/equipped-image",
+            files={"image": _png("image.png", image)},
+            data={"itemSns": [str(sn) for sn in item_sns]},
+            timeout=SHEET_TIMEOUT_SEC,
+        )
+
     async def _fetch_sheet(self, pixel_char_sn: int, atch_file_sn: int | None) -> bytes:
         return await fetch_backend_bytes(
             self._client,
@@ -255,11 +265,3 @@ def get_character_job_repository(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> CharacterJobRepository:
     return JavaCharacterJobRepository(client, settings, request.headers.get("cookie"))
-
-
-def get_server_character_repository(
-    client: Annotated[httpx2.AsyncClient, Depends(get_backend_client)],
-    settings: Annotated[Settings, Depends(get_settings)],
-) -> CharacterJobRepository:
-    """FN-ADM-070-02 : 전체 굽기용 쿠키 없는 호출 (수십 분 걸려 access_token 30분 만료)"""
-    return JavaCharacterJobRepository(client, settings, None)

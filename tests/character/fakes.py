@@ -1,12 +1,17 @@
 import json
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.character.canvas import Layout
 from app.character.engine import BakeItem
-from app.character.repository import CharacterFailure, CharacterJob, CharacterSheets
+from app.character.repository import (
+    BakeTargetPage,
+    CharacterFailure,
+    CharacterJob,
+    CharacterSheets,
+)
 from app.core.backend import BackendError
 
 logger = logging.getLogger(__name__)
@@ -14,6 +19,8 @@ logger = logging.getLogger(__name__)
 # Java ITEM 굽기 지시 시드 원본 (docs/design/item-bake-hints.json)
 SEED = Path(__file__).resolve().parents[2] / "docs" / "design" / "item-bake-hints.json"
 _NOT_FOUND = b'{"code":"PIXEL_CHARACTER_NOT_FOUND"}'
+# Java bake-targets 한 페이지 크기
+BAKE_TARGET_PAGE_SIZE = 100
 _FAKE_ITEM_SNS = {
     5: "round-glasses",
     6: "sunglasses",
@@ -73,6 +80,8 @@ class SavedJob:
     failure: CharacterFailure | None = None
     item_sheets: dict[int, bytes] = field(default_factory=dict)
     failed_items: set[int] = field(default_factory=set)
+    equipped_item_sns: list[int] | None = None
+    equipped_image: bytes | None = None
 
 
 class FakeCharacterJobRepository:
@@ -84,6 +93,8 @@ class FakeCharacterJobRepository:
     def __init__(self) -> None:
         self.jobs: dict[int, SavedJob] = {}
         self._next = 1
+        # 대표 이미지 저장 때 Java 4xx 흉내 (예: 409 EQUIPPED_ITEMS_CHANGED)
+        self.equip_error: BackendError | None = None
 
     async def create_job(self, pet_sn: int) -> CharacterJob:
         job = CharacterJob(self._next, "PETC0002" if pet_sn % 2 == 0 else "PETC0001")
@@ -109,15 +120,19 @@ class FakeCharacterJobRepository:
     async def list_bake_items(self) -> dict[int, BakeItem]:
         return fake_items()
 
-    async def list_bake_targets(self, item_sn: int) -> list[int]:
-        # 맨몸 시트가 있고 그 아이템을 굽지도 실패하지도 않은 캐릭터
-        return [
+    async def list_bake_targets(self, item_sn: int) -> BakeTargetPage:
+        # 맨몸 시트가 있고 그 아이템을 굽지도 실패하지도 않은 캐릭터의 첫 페이지
+        found = [
             sn
-            for sn, saved in self.jobs.items()
+            for sn, saved in sorted(self.jobs.items())
             if saved.layout is not None
             and item_sn not in saved.item_sheets
             and item_sn not in saved.failed_items
         ]
+        return BakeTargetPage(
+            pixelCharSns=found[:BAKE_TARGET_PAGE_SIZE],
+            last=len(found) <= BAKE_TARGET_PAGE_SIZE,
+        )
 
     async def save_item_sheet(self, pixel_char_sn: int, item_sn: int, sheet: bytes) -> None:
         self.jobs[pixel_char_sn].item_sheets[item_sn] = sheet
@@ -139,3 +154,12 @@ class FakeCharacterJobRepository:
             {sn: sheet for sn, sheet in saved.item_sheets.items() if sn in wanted},
             frozenset(saved.failed_items & wanted),
         )
+
+    async def save_equipped_image(
+        self, pixel_char_sn: int, item_sns: Sequence[int], image: bytes
+    ) -> None:
+        if self.equip_error is not None:
+            raise self.equip_error
+        saved = self.jobs[pixel_char_sn]
+        saved.equipped_item_sns, saved.equipped_image = list(item_sns), image
+        logger.info("가짜 Java 대표 이미지 저장: %d, %d바이트", pixel_char_sn, len(image))

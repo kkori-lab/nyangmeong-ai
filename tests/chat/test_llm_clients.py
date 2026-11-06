@@ -161,9 +161,15 @@ def test_키워드_힌트는_시스템_프롬프트_뒤에_붙인다():
     fake = classified("OUT_OF_SCOPE")
     asyncio.run(AnthropicIntentClassifier(fake.client(), MODEL).classify("가계부 방법", row))
 
-    system = fake.requests[0]["system"]
-    assert system.startswith(classify_system())
-    assert f"{row.no}번 화면({row.name})" in system
+    fixed, note = fake.requests[0]["system"]
+    # 힌트가 붙어도 캐시 블록은 그대로(캐시 적중), 힌트 블록에는 캐시 표시 없음
+    assert fixed == {
+        "type": "text",
+        "text": classify_system(),
+        "cache_control": {"type": "ephemeral"},
+    }
+    assert "cache_control" not in note
+    assert f"{row.no}번 화면({row.name})" in note["text"]
 
 
 def test_분류가_ROUTE면_매핑표_번호를_화면_ID와_파라미터로_바꾼다():
@@ -195,7 +201,7 @@ def test_분류_요청은_입력만_보내고_구조화_출력을_쓴다():
     classify(fake, "강아지 포도 먹어도 돼?")
     body = fake.requests[0]
     assert body["messages"] == [{"role": "user", "content": "강아지 포도 먹어도 돼?"}]
-    assert body["system"] == classify_system()
+    assert body["system"][0]["text"] == classify_system()
     assert body["output_config"]["format"]["type"] == "json_schema"
 
 

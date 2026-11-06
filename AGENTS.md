@@ -32,12 +32,13 @@ app/
 ├─ chat/           AI 대화창(SCR-AIM-001·002·004·005·011·012). React가 /ai/** 로 부른다
 ├─ ocr/            영수증 인식·파싱. React가 /ai/** 로 부른다(전환 전). 저장은 Java 내부 API로
 ├─ character/      캐릭터 이미지 생성. React가 /ai/** 로 부른다(전환 전). 작업 상태·저장은 Java 내부 API로
-└─ checkup/        검사결과지 PDF 분석(SCR-HLT-005). React가 /ai/** 로 부른다. 저장하지 않는다
+├─ checkup/        검사결과지 PDF 분석(SCR-HLT-005). React가 /ai/** 로 부른다. 저장하지 않는다
+└─ healthreport/   메인 AI 건강분석 리포트(SCR-MAN-001). React가 /ai/** 로 부른다. 저장은 Java 내부 API로
 tests/             app/ 과 같은 폴더 구조
 scripts/           setup 점검(doctor.py), 검증 명령(check.sh), 하네스 스크립트
 ```
 
-- 기능 패키지(`chat`·`ocr`·`character`·`checkup`)는 `core`만 쓴다. 기능 패키지끼리는 import하지 않는다.
+- 기능 패키지(`chat`·`ocr`·`character`·`checkup`·`healthreport`)는 `core`만 쓴다. 기능 패키지끼리는 import하지 않는다.
 - 기능 패키지 안의 파일 나누기는 `docs/convention/architecture.md`에 있다.
 
 ## 나머지 규칙이 있는 곳
