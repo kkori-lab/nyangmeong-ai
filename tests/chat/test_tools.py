@@ -76,6 +76,15 @@ def test_도구는_builtin_등록_READ이고_설명과_인자_스키마를_모�
         "list_observation_items",
         "list_prescriptions",
         "list_repeat_preventions",
+        "get_checkup",
+        "list_etc_inspections",
+        "list_observation_cycles",
+        "get_expense_statistics",
+        "get_expense_total",
+        "get_receipt",
+        "list_expense_months",
+        "list_expense_pets",
+        "list_expenses",
     }
     for d in defs.values():
         assert "쓸 때:" in d["description"] and "말하는 법:" in d["description"]
@@ -398,7 +407,7 @@ def test_도구_요청은_도구_정의와_캐시한_system과_오늘_날짜를_
 
     body = fake.requests[0]
     assert [t["name"] for t in body["tools"]] == [d["name"] for d in tools.tool_definitions()]
-    assert body["tool_choice"] == {"type": "auto"}
+    assert body["tool_choice"] == {"type": "auto", "disable_parallel_tool_use": True}
     assert body["system"][0]["cache_control"] == {"type": "ephemeral"}
     assert body["system"][1]["text"] == "오늘: 2026-09-29 (화)"
     assert body["messages"] == CONTEXT
