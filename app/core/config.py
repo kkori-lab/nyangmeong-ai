@@ -40,7 +40,8 @@ class Settings(BaseSettings):
     answer_first_token_sec: float = 10.0
     answer_total_sec: float = 60.0
     # tool calling 1단계 실험(docs/design/tool-calling.md) : 켜면 분류·추출 대신 도구 고르기 LLM
-    chat_tool_agent: bool = False
+    # 2026-11-08 결정 : 기본 켬 (끄려면 CHAT_TOOL_AGENT=false)
+    chat_tool_agent: bool = True
 
 
 @lru_cache
