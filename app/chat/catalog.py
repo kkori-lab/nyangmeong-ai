@@ -483,7 +483,7 @@ async def load(client: ToolCatalogClient) -> Catalog:
 
 
 async def install(settings: Settings, client: ToolCatalogClient) -> Catalog | None:
-    # CHAT_TOOL_AGENT 꺼짐(기본)이면 받지 않는다. 다시 받기는 기동 때 1회(9절 결정 남음)
+    # CHAT_TOOL_AGENT 꺼짐이면 받지 않는다. 다시 받기는 기동 때 1회(9절 결정 남음)
     if not settings.chat_tool_agent:
         return None
     catalog = await load(client)

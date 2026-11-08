@@ -200,8 +200,8 @@ def test_설정을_켜고_키가_비면_502():
     assert (raised.value.code, raised.value.http_code) == ("EXTERNAL_API_ERROR", 502)
 
 
-def test_기본_설정은_도구_흐름_꺼짐():
-    assert Settings(_env_file=None).chat_tool_agent is False
+def test_설정이_없으면_도구_흐름이_켜져야_한다():
+    assert Settings(_env_file=None).chat_tool_agent is True
 
 
 # 도구별 SSE(응답 계약 그대로, 설계 6절)

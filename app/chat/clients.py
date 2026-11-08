@@ -732,7 +732,7 @@ def _with_result(
 
 
 def get_tool_agent(settings: Annotated[Settings, Depends(get_settings)]) -> ToolAgent | None:
-    # CHAT_TOOL_AGENT 꺼짐(기본)이면 None : 지금 흐름 그대로, 키 확인도 하지 않음
+    # CHAT_TOOL_AGENT 꺼짐이면 None : 지금 흐름 그대로, 키 확인도 하지 않음
     if not settings.chat_tool_agent:
         return None
     return AnthropicToolAgent(get_anthropic_client(settings), settings.llm_model)
