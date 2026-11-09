@@ -22,7 +22,19 @@ from tests.chat.test_tools import room_of, use_agent
 BUILTIN = {"navigate", "search_guide", "decline"}
 REGISTER = {"draft_schedule", "draft_care_item"}
 # 2단계 쓰기 확인 카드(ACTION)
-ACTION = {"draft_care_completion", "draft_daily_health_record", "draft_expense_limit"}
+ACTION = {
+    "draft_care_completion",
+    "draft_daily_health_record",
+    "draft_expense_limit",
+    # 수정 4개(2단계 ②) : 모두 코드 칸이 있어 스냅샷만이면 안 실림
+    "draft_schedule_update",
+    "draft_care_item_update",
+    "draft_expense_update",
+    "draft_pet_update",
+    # 배열·파일 칸(2단계 ③) : 코드 칸이 있어 스냅샷만이면 안 실림
+    "draft_expense",
+    "draft_observation_cycle",
+}
 # 스냅샷(코드 값 없음)으로도 싣는 ACTION : 코드 칸 없음
 ACTION_WITHOUT_CODES = {"draft_care_completion", "draft_expense_limit"}
 READ = {
@@ -270,14 +282,14 @@ def test_가짜_공통코드는_룰_흐름의_코드와_같아야_한다():
 
 def test_설명이_없는_Java_도구는_싣지_않고_경고해야_한다(caplog):
     raw = fake_catalog_json()
-    extra = copy.deepcopy(tool_of(raw, "draft_care_item")) | {"name": "draft_expense"}
+    extra = copy.deepcopy(tool_of(raw, "draft_care_item")) | {"name": "draft_unknown"}
     raw["tools"].append(extra)
 
     with caplog.at_level(logging.WARNING, logger="app.chat.catalog"):
         built = build(raw)
 
     assert set(built.entries) == REGISTER | READ | ACTION
-    assert "draft_expense 설명 없음" in caplog.text
+    assert "draft_unknown 설명 없음" in caplog.text
 
 
 def test_Java_목록에_없는_설명_도구는_싣지_않고_경고해야_한다(caplog):

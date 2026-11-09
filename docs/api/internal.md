@@ -51,8 +51,8 @@ Java가 만드는 API다(백엔드 저장소 기준). 키 헤더는 없다. 인�
 | tools[].name | String | Y | `@AiTool(name)`. `data/tool_prompts.yaml`과 짝짓는 키(예: `draft_schedule`) | tool-catalog 3-1 |
 | tools[].domain | String | Y | `health` 등 | tool-catalog 3-1 |
 | tools[].kind | String | Y | `READ`·`CARD` | tool-catalog 3-1 |
-| tools[].call | `{method, path}` | Y | 컨트롤러 매핑(예: `POST /api/pets/{petSn}/care-schedules`) | tool-catalog 3-2 |
-| tools[].params.<Java 칸> | `{in, type, required?, group?, codes?, maxLength?, min?, max?}` | Y | `in`: `path`·`query`·`body`. `type`: `string`·`long`·`int`·`decimal`·`boolean`·`date`·`time`·`datetime`·`code`(`datetime`은 `LocalDateTime` 칸 때문에 3-2절에 더함). `code`면 `group`(공통코드 그룹)과 `codes: [{cd, nm}]`(사용 중인 값). `min`·`max`는 `@Min`·`@Max`(예: `cycleDrctInptDayCnt` 1~9999, 백엔드 결정 2026-11-05). 목록·중첩 객체는 1단계에서 쓰지 않는다 | tool-catalog 3-2 |
+| tools[].call | `{method, path, contentType?}` | Y | 컨트롤러 매핑(예: `POST /api/pets/{petSn}/care-schedules`). 파일 칸이 있는 API는 `contentType: multipart/form-data`(관찰 기록 추가) | tool-catalog 3-2 |
+| tools[].params.<Java 칸> | `{in, type, required?, group?, codes?, maxLength?, min?, max?, positive?, pattern?, items?, minItems?, generated?}` | Y | `in`: `path`·`query`·`body`. `type`: `string`·`long`·`int`·`decimal`·`boolean`·`date`·`time`·`datetime`·`code`·`array`·`file`(`datetime`은 `LocalDateTime` 칸 때문에 3-2절에 더함). `code`면 `group`(공통코드 그룹)과 `codes: [{cd, nm}]`(사용 중인 값). `min`·`max`는 `@Min`·`@Max`(예: `cycleDrctInptDayCnt` 1~9999, 백엔드 결정 2026-11-05). `array`면 `items`(항목 칸 이름 → 같은 모양의 규칙, `in` 없음, 중첩 배열 가능: `pets[].drugs[]`)와 `minItems`. `generated: "uuid"`는 클라이언트가 만드는 칸(`idmptDmndId`). Python은 항목 칸 코드 값까지 없으면 그 도구를 싣지 않는다(SCR-AIM-012 2단계 ③, `app/chat/catalog.py`) | tool-catalog 3-2 |
 | tools[].rules[] | `{requiredIf: {field, when, equals}}` | N | 조건부 필수. "병원이 아니면 일정명"처럼 같지 않음 조건은 값마다 한 줄(가짜 응답은 HLTC0058·0059·0060 세 줄) | tool-catalog 3-1 |
 
 ### ReceiptOcrRequest

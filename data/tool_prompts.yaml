@@ -167,6 +167,237 @@ draft_expense_limit:
       java: mmExpndLimAmt
       description: 월 지출 한도 금액(원)
 
+# 배열·파일 칸 확인 카드 (SCR-AIM-012 2단계 ③)
+# - java "lines[].expndAmt" : 배열 lines의 첫 줄 항목 칸. fixed : Java 칸에 늘 넣는 값(불러올 때 검사)
+# - 파일 칸(사진)은 Python이 채우지 않는다. 회원이 카드에서 첨부한다
+# - draft_receipt_save(영수증 저장)는 아직 싣지 않는다 : 저장 전 영수증 번호를 주는 READ가 없음
+
+draft_expense:
+  label: 지출 등록
+  hooks: [line_pet]
+  fixed:
+    expndInptMthCd: MYPC0019
+  description: |
+    가계부에 새 지출 기록 하나를 넣는 확인 카드를 대화창에 띄운다.
+    회원이 카드에서 [확인]을 누르기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 돈을 쓴 것을 가계부에 적어 달라는 말.
+      예) "어제 사료 3만 2천원 샀어 가계부에 적어 줘", "오늘 병원비 5만원 지출로 넣어 줘"
+    쓰지 않을 때: 이미 있는 지출을 고치는 말은 draft_expense_update. 지출을 묻기만 하는 말은
+      list_expenses·get_expense_total. 월 한도를 정하는 말은 draft_expense_limit.
+    인자: 회원이 말하지 않은 칸은 비운다(지어내지 않는다). 날짜는 시스템의 오늘 날짜 기준으로
+      계산하고 말하지 않았으면 오늘. 금액은 원 단위 정수로 바꾼다(3만 2천원 → 32000).
+      어느 반려동물 지출인지는 고르지 않는다(서버가 정하고 회원이 카드에서 바꾼다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    expnd_ymd:
+      java: expndYmd
+      description: 지출 날짜 YYYY-MM-DD. 날짜를 말하지 않았으면 오늘
+    expnd_clsf_cd:
+      java: expndClsfCd
+      description: 지출 카테고리
+    expnd_amt:
+      java: lines[].expndAmt
+      description: 금액(원)
+    dtl_mttr:
+      java: dtlMttr
+      description: 상세 내용(무엇을 샀는지)
+    expnd_plcus_nm:
+      java: expndPlcusNm
+      description: 사용처 이름(가게·병원 이름)
+
+draft_observation_cycle:
+  label: 관찰 기록 추가
+  target: 관찰 항목
+  hooks: [pet, date]
+  description: |
+    지켜보는 관찰 항목(혹·상처 등)에 오늘의 관찰 기록 하나를 더하는 확인 카드를 대화창에 띄운다.
+    회원이 카드에서 사진을 붙이고 [확인]을 누르기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 관찰 중인 부위의 크기·변화를 기록해 달라는 말.
+      예) "초코 등에 난 혹 오늘 1.2cm야 기록해 줘", "다리 상처 좀 작아졌어 관찰 기록 남겨 줘"
+    쓰지 않을 때: 관찰 기록을 묻기만 하는 말은 list_observation_items·list_observation_cycles.
+      체중·식사량 등 일지는 draft_daily_health_record.
+    인자: obsrv_artcl_sn은 이 턴에 받은 list_observation_items 결과의 obsrvArtclSn만 쓴다.
+      결과가 없으면 list_observation_items를 먼저 부른다. 말하지 않은 칸은 비운다.
+      날짜는 시스템의 오늘 날짜 기준으로 계산한다. 크기는 단위 없이 숫자만(cm). 사진은 다루지 않는다.
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    obsrv_artcl_sn:
+      java: obsrvArtclSn
+      description: 관찰 항목 번호. 이 턴 list_observation_items 결과의 obsrvArtclSn만, 모르면 비운다
+    obsrv_ymd:
+      hook: date:ymd
+      description: 관찰 날짜 YYYY-MM-DD. 날짜를 말하지 않았으면 오늘
+    obsrv_tm:
+      hook: date:tm
+      description: 관찰 시간 24시간 HH:MM. 말하지 않았으면 비운다
+    obsrv_sz:
+      java: obsrvSz
+      description: 크기(숫자만, cm)
+    obsrv_chg_cd:
+      java: obsrvChgCd
+      description: 지난 관찰보다의 크기 변화
+    memo_cn:
+      java: memoCn
+      description: 메모
+
+# 수정 확인 카드 (SCR-AIM-012 2단계 ②, PATCH) : 바꿀 칸만 채우고 바꾸지 않은 칸은 비운다
+# - target : 바꿀 대상을 찾지 못했을 때 안내 글의 대상 이름
+# 경로의 번호 칸(schdlSn·careArtclSn·expndSn)은 이 턴 READ 결과에 나온 값만. 못 정하면 카드 없이 안내 글
+
+draft_schedule_update:
+  label: 일정 수정
+  target: 일정
+  hooks: [pet, date]
+  description: |
+    이미 있는 캘린더 일정 하나를 고치는 확인 카드를 대화창에 띄운다.
+    회원이 카드에서 [확인]을 누르기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 일정의 날짜·시간·병원·이름·메모를 바꾸거나 미뤄 달라는 말.
+      예) "다음 병원 일정 모레로 미뤄줘", "미용 예약 3시로 바꿔 줘", "접종 일정 병원 이름 고쳐 줘"
+    쓰지 않을 때: 새 일정을 넣는 말은 draft_schedule. 일정을 묻기만 하는 말은 list_care_schedules.
+    인자: schdl_sn은 이 턴에 받은 list_care_schedules 결과의 schdlSn만 쓴다. 결과가 없으면
+      list_care_schedules를 먼저 부른다. 바꾸지 않는 칸은 비운다. 날짜만 바꾸면 시간은 읽기 결과의
+      원래 시간을 쓰고(원래 시간이 없으면 비움), 시간만 바꾸면 날짜는 원래 날짜를 쓴다.
+      날짜는 시스템의 오늘 날짜 기준으로 계산한다. 반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    schdl_sn:
+      java: schdlSn
+      description: 고칠 일정 번호. 이 턴 list_care_schedules 결과의 schdlSn만, 모르면 비운다
+    schdl_ymd:
+      hook: date:ymd
+      description: 바꿀 날짜 YYYY-MM-DD. 날짜·시간을 바꾸지 않으면 비운다
+    schdl_tm:
+      hook: date:tm
+      description: 바꿀 시간 24시간 HH:MM. 원래 시간도 없고 말하지 않았으면 비운다
+    schdl_knd_cd:
+      java: schdlKndCd
+      description: 바꿀 일정 종류
+    ckup_type_cd:
+      java: ckupTypeCd
+      description: 바꿀 병원 일정의 검진유형
+    hsptl_nm:
+      java: hsptlNm
+      description: 바꿀 병원 이름
+    schdl_nm:
+      java: schdlNm
+      description: 바꿀 일정 이름
+    memo_cn:
+      java: memoCn
+      description: 바꿀 메모
+
+draft_care_item_update:
+  label: 케어 항목 수정
+  target: 케어 항목
+  hooks: [pet]
+  description: |
+    이미 있는 반복 케어 항목 하나의 이름·구역·주기를 고치는 확인 카드를 대화창에 띄운다.
+    회원이 카드에서 [확인]을 누르기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 케어 항목의 이름이나 반복 주기를 바꿔 달라는 말.
+      예) "발톱 깎기 주기 2주로 바꿔 줘", "양치 항목 이름 '치카치카'로 고쳐 줘"
+    쓰지 않을 때: 새 케어 항목을 넣는 말은 draft_care_item. 했다고 체크하는 말은 draft_care_completion.
+    인자: care_artcl_sn은 이 턴에 받은 list_care_items 결과의 careArtclSn만 쓴다. 결과가 없으면
+      list_care_items를 먼저 부른다. 바꾸지 않는 칸은 비운다. 반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    care_artcl_sn:
+      java: careArtclSn
+      description: 고칠 케어 항목 번호. 이 턴 list_care_items 결과의 careArtclSn만, 모르면 비운다
+    care_artcl_nm:
+      java: careArtclNm
+      description: 바꿀 케어 항목 이름
+    care_zone_cd:
+      java: careZoneCd
+      description: 바꿀 케어 구역
+    care_cycle_cd:
+      java: careCycleCd
+      description: 바꿀 반복 주기
+    cycle_days:
+      java: cycleDrctInptDayCnt
+      description: 주기를 직접 입력할 때 반복 일수(숫자만)
+
+draft_expense_update:
+  label: 지출 수정
+  target: 지출 기록
+  description: |
+    이미 있는 가계부 지출 기록 하나를 고치는 확인 카드를 대화창에 띄운다.
+    회원이 카드에서 [확인]을 누르기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 지출의 날짜·카테고리·금액·상세·사용처를 고쳐 달라는 말.
+      예) "어제 사료 산 거 3만 2천원으로 고쳐 줘", "지난주 병원비 카테고리 병원으로 바꿔 줘"
+    쓰지 않을 때: 지출을 묻기만 하는 말은 list_expenses. 월 한도를 바꾸는 말은 draft_expense_limit.
+    인자: expnd_sn은 이 턴에 받은 list_expenses 결과의 expndSn만 쓴다. 결과가 없으면 list_expenses를
+      먼저 부른다. 바꾸지 않는 칸은 비운다. 금액은 원 단위 정수로 바꾼다(3만 2천원 → 32000).
+      어느 반려동물 지출인지는 고르지 않는다(회원이 카드에서 바꾼다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    expnd_sn:
+      java: expndSn
+      description: 고칠 지출 번호. 이 턴 list_expenses 결과의 expndSn만, 모르면 비운다
+    expnd_ymd:
+      java: expndYmd
+      description: 바꿀 지출 날짜 YYYY-MM-DD
+    expnd_clsf_cd:
+      java: expndClsfCd
+      description: 바꿀 지출 카테고리
+    expnd_amt:
+      java: expndAmt
+      description: 바꿀 금액(원)
+    dtl_mttr:
+      java: dtlMttr
+      description: 바꿀 상세 내용
+    expnd_plcus_nm:
+      java: expndPlcusNm
+      description: 바꿀 사용처 이름
+
+draft_pet_update:
+  label: 반려동물 정보 수정
+  target: 반려동물
+  hooks: [pet]
+  description: |
+    반려동물 등록 정보(이름·몸무게·목표 체중·중성화·생일·칩 번호·특징·알레르기·질환)를 고치는
+    확인 카드를 대화창에 띄운다. 회원이 카드에서 [확인]을 누르기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 반려동물 등록 정보를 바꿔 달라는 말.
+      예) "코코 목표 체중 4kg로 바꿔 줘", "초코 중성화했어 정보 바꿔 줘", "알레르기에 닭고기 넣어 줘"
+    쓰지 않을 때: 오늘·어제 체중을 기록하는 말("체중 4.2kg 기록해줘")은 draft_daily_health_record.
+      등록 정보를 묻기만 하는 말은 get_pet.
+    인자: 바꾸지 않는 칸은 비운다(문장 속 반려동물 이름은 pet_nm에 넣지 않는다). 몸무게는 kg 숫자만.
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    pet_nm:
+      java: petNm
+      description: 새 이름. 이름을 바꿔 달라는 말일 때만, 문장 속 반려동물 이름은 넣지 않는다
+    pet_bdwg:
+      java: petBdwg
+      description: 바꿀 등록 몸무게(kg 숫자만)
+    goal_bdwg:
+      java: goalBdwg
+      description: 바꿀 목표 체중(kg 숫자만)
+    nutr_yn:
+      java: nutrYn
+      description: 중성화 여부
+    pet_brdt:
+      java: petBrdt
+      description: 바꿀 생일 YYYY-MM-DD
+    chip_no:
+      java: chipNo
+      description: 바꿀 동물등록 칩 번호(숫자만)
+    chrc_cn:
+      java: chrcCn
+      description: 바꿀 특징
+    algy_cn:
+      java: algyCn
+      description: 바꿀 알레르기 내용
+    dss_cn:
+      java: dssCn
+      description: 바꿀 질환 내용
+
 # 건강 READ 도구 (docs/design/tool-catalog.md 8절 4번) : Python이 바로 실행, 결과로 답한다
 # get_checkup·list_etc_inspections·list_observation_cycles는 싣지 않는다 :
 #   필수 번호 칸(ckupRcdSn·obsrvArtclSn)을 LLM이 알 수 없음(한 턴 READ 1번, 읽기 결과는 이력에 안 남음)
@@ -217,6 +448,7 @@ list_care_schedules:
 
     쓸 때: 예정된 일정이나 지난 일정을 묻는 말.
       예) "이번 달 병원 일정 있어?", "다음 미용 언제야?", "지난주에 뭐 했지?"
+      일정을 바꿔 달라는 말이면 이 도구로 그 일정을 먼저 찾은 뒤 draft_schedule_update.
     쓰지 않을 때: 일정을 새로 넣어 달라는 말은 draft_schedule. 반복하는 케어 항목은 list_care_items.
       캘린더 화면으로 가자는 말은 navigate.
     인자: 기간은 시스템의 오늘 날짜 기준으로 계산한다. 말하지 않은 칸은 비운다.
@@ -246,6 +478,7 @@ list_care_items:
 
     쓸 때: 등록된 케어 항목, 다음에 할 날, 오늘 할 케어를 묻는 말.
       예) "발톱 깎기 다음에 언제야?", "등록된 케어 뭐 있어?", "심장사상충약 언제 먹였지?"
+      케어 항목을 바꿔 달라는 말이면 이 도구로 그 항목을 먼저 찾은 뒤 draft_care_item_update.
     쓰지 않을 때: 케어 항목을 새로 넣어 달라는 말은 draft_care_item.
       완료 기록 목록은 list_care_completions.
     인자: 이름을 말했으면 care_artcl_nm에 그 이름. 말하지 않은 칸은 비운다.
@@ -426,6 +659,7 @@ list_expenses:
 
     쓸 때: 무엇에 언제 얼마 썼는지 하나하나 묻는 말.
       예) "지난주에 뭐 샀어?", "사료 마지막으로 산 게 언제야?", "이번 달 병원비 내역 보여 줘"
+      지출을 고쳐 달라는 말이면 이 도구로 그 기록을 먼저 찾은 뒤 draft_expense_update.
     쓰지 않을 때: 합계·건수만 물으면 get_expense_total. 한 달 통계·한도·지난달 비교는 get_expense_statistics.
     인자: 기간은 시스템의 오늘 날짜 기준으로 계산한다. 공용 지출만 물으면 common. 반려동물은 고르지 않는다(서버가 정한다).
     말하는 법: 받은 기록만 쓴다. 결과가 잘렸으면 앞부분만 받았다고 말한다.

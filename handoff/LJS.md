@@ -1,13 +1,20 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-끝: SCR-AIM-004 답변 종류별 의료 고지 범위 (2026-11-09, 검증 2회차 통과·사람 확인). 고지는 바로 답과 health 도메인 READ가 하나라도 성공한 답에만(`Judged.notice`·`read_domains`), 사용법·가계부 READ·되물음·READ 실패만은 없음. 추가-1 `<…>`·기호뿐인 글은 LLM 없이 FALLBACK(`rules.is_placeholder`, 프롬프트 예시는 실측 7회 중 decline 1회·판단 글 노출로 버림), 추가-2 인사·잡담 바로 답은 고지 없음(`rules.is_small_talk`). 기존 흐름 `judge`는 그대로
+끝: SCR-AIM-012 2단계 쓰기 ③ 배열·파일 칸 (2026-11-09, 검증 통과·사람 확인). 카탈로그가 Java 목록의 `array`(`items`·`minItems`·중첩)·`file`·`generated`·`call.contentType`을 읽음, `draft_expense`(`lines[].expndAmt` 매핑·`fixed` 입력 방법·`line_pet`)·`draft_observation_cycle`(사진은 카드에서 첨부, 관찰 항목 번호를 못 정하면 안내 글) 열음, `action-result` 배열 검사·요약. `draft_receipt_save`는 넘김. 추가-1 돌려받은 카드의 날짜를 날짜 말 없는 메시지가 덮지 않음(`keep_prior_dates`, 프론트 세션 요청)
 
 ## 다음에 할 것
-- 연결 남음: SCR-AIM-012 ① ACTION 카드 폼·[확인] 실행·`action-result` 호출 (프론트 범용 카드, LJS 프론트). 계약 초안 PR로 프론트에 알림. Java 400은 `data: [{field, message}]` 칸만 다시 고치게, `data`가 비면(가계부 서비스 검사, 백엔드 2026-11-06 결정으로 담기로 했으나 일정 미정) 카드 전체 오류로
-- 실제 LLM에서 "코코 오늘 체중 4.2kg 기록해줘"에 `rcd_ymd`를 비워 `missing ["rcdDt"]`가 된 적 있음(2026-11-09 검증, 1/2). 날짜를 말하지 않았으면 서버가 오늘로 채울지 정한다(지금 결정은 "날짜만 오면"만) (LJS)
+- 연결 남음: SCR-AIM-012 ①·②·③ ACTION 카드 폼·[확인] 실행·`action-result` 호출 (프론트 범용 카드, LJS 프론트). 계약은 2026-11-09 프론트 세션에 전달, 프론트는 지금 마일스톤 뒤 `/start`에서 `docs/api/chat.md`를 정본으로. ② 수정 카드: PATCH·경로 칸 2개, `input`은 바꿀 칸만(원래 값은 프론트가 읽음), 바꾼 칸이 없을 때 [확인] 막을지 프론트가 정함. 여러 줄 지출 `expndAmt` PATCH 뜻(SJM). Java 400은 `data: [{field, message}]` 칸만 다시 고치게, `data`가 비면 카드 전체 오류로. ③: `params`의 `array`(`items`·`minItems`)·`file`·`generated: "uuid"`(React가 카드 하나에 한 번), `call.contentType`(multipart), `missing`의 `lines[0].expndAmt` 꼴, 관찰 기록은 사진 첨부 뒤 multipart로 실행·`action-result`에는 파일을 보내지 않음(2026-11-09 프론트 세션에 전달)
+- 음수량·식사량 READ 답변 품질 (LJS, 2026-11-09 로컬 실측): 서버가 만든 반려동물 되물음 글을 LLM이 자기가 지어낸 말로 보고 사과함, 읽기 결과에 정한 반려동물 이름이 없어 "까미의 기록인지 확인할 수 없다"고 함, 지표 단위 없음(683.024), 답변에 "안내서 [13-1]" 노출
+- 배포 서버에서 식사량·음수량 질문에 "일시적으로 답변할 수 없어요" (LJS, 2026-11-09 보고, 원인 미확정): 로컬은 첫 글자 4.9~5.6초로 정상. 후보는 반려동물 조회(`register-context`) 실패 `AnswerError("read_pets")`, 첫 글자 10초 초과(반려동물 조회·Java 읽기·답변 LLM이 모두 그 안), 예상 못 한 예외(`대화 응답 처리 실패` 로그). 앞의 둘은 로그가 없어 구분 불가 — 실패 이유 로그 추가 후보. 서버에서 `journalctl -u ai-backend`·`systemctl cat ai-backend`(`.env` 읽는지)·`.env.local` 유무 확인
+- 지출 등록 후속 (LJS·SJM): `lines[0].petSn`을 비우면 공용 지출로 저장되는지 SJM에 확인. 중복 확인(`/api/expenses/duplicate-check`, 설계 4-4 `duplicate_expense`)은 도구 목록에 없어 안 함 — React가 [확인] 전에 부를지·Python hook으로 할지 정한다
+- `draft_receipt_save` 대기 (LJS): 저장 전 OCR 영수증 번호를 주는 READ가 없어 싣지 않음(카탈로그는 중첩 배열을 읽음). SCR-AIM-013 ⑤ 팀 결정 뒤 마일스톤 대기 절로
+- 프론트(LJS) 알리기: ②·③ 카드분과 추가-1(돌려받은 카드 날짜 유지)이 develop에 병합되면 알림. 사진 의도 판단(SCR-AIM-013 대기 절, 프론트 가짜 `judgeImageIntent`) 계약을 `/start SCR-AIM-013`으로 정해 보냄
+- `docs/api/chat.md` 맞추기 (LJS): AI 메시지 `cnvrsCn`·SSE `delta`는 Markdown(GFM)이라고 적기(2026-11-09 프론트 세션에 렌더링 요청: `react-markdown`+`remark-gfm`, HTML 렌더링 안 함, 답변 표가 글자 그대로 보이던 문제), ActionCard `params`는 값 없는 키가 null로 나옴(문서는 "없는 키는 생략", ①부터, `ActionParam`), `input`의 "datetime 칸에 날짜만 오면…"에 수정 카드는 원래 시간을 쓴다는 것(추가-3) 미반영
+- 공용 하네스 PR: `scripts/tool_eval.py`(추가-1, READ·ACTION 세기·유형 `수정`)는 end-check가 공용 하네스로 분류해 이번 커밋에서 뺌 — PR로 따로
+- 실제 LLM에서 "코코 오늘 체중 4.2kg 기록해줘"에 `rcd_ymd`를 비워 `missing ["rcdDt"]`가 된 적 있음(2026-11-09 검증, 1/2). 날짜를 말하지 않았으면 서버가 오늘로 채울지 정한다(지금 결정은 "날짜만 오면"만) (LJS). 돌려받은 카드가 있으면 LLM의 "오늘"은 버림(추가-1)
 - 기존 흐름 코드 삭제 (LJS, 별도 마일스톤 후보): `judge`·분류 LLM·답변 LLM 단독 호출은 앱에서 안 탐. `test_messages`·`test_register`·`test_intent`·`test_guide` 등이 `conftest.py`의 도구 가짜 미주입(기존 흐름)으로 돌아 테스트를 도구 흐름 기준으로 옮겨야 지울 수 있다. 등록 칸 추출 LLM은 초안 이어 쓰기에 계속 씀
-- 2단계 쓰기 ②~④ (CARD 12개 전부, 2026-11-06 사람 결정). 백엔드 답변(2026-11-06): 출처 코드는 일정 외 테이블 미정 → 출처 없이 진행. 일정 수정 요청엔 `schdlSrcCd` 없음, HLTC0067로 등록하면 케어미션 반영 빠짐(DIRECT만, `CareScheduleService.java:87`) — ④에서 의도인지 확인. 12개 API 경로·칸 변경 없음(스냅샷 bd57d24·e681968)
+- 2단계 쓰기 ④ 기존 등록 카드 2개 전환 남음(②·③ 끝, CARD 12개 전부, 2026-11-06 사람 결정). 백엔드 답변(2026-11-06): 출처 코드는 일정 외 테이블 미정 → 출처 없이 진행. 일정 수정 요청엔 `schdlSrcCd` 없음, HLTC0067로 등록하면 케어미션 반영 빠짐(DIRECT만, `CareScheduleService.java:87`) — ④에서 의도인지 확인. 12개 API 경로·칸 변경 없음(스냅샷 bd57d24·e681968)
 - 배포 서버 tool calling 미동작 원인(2026-11-08): 배포 워크플로우(`.github/workflows/main.yml` 4번)는 서버에 `.env`를 만들고 이미 있으면 건너뛰는데 앱은 `.env.local`만 읽는다(`app/core/config.py:10`). 서비스 파일이 `.env`를 `EnvironmentFile`로 읽는지 미확인. 워크플로우 수정은 backend-90과. Python을 Java보다 먼저 띄우면 도구 목록이 snapshot으로 떨어진다(기동 때 1회). 설정은 2026-11-09 지워 이제 `.env`와 무관하게 켜짐. 서버 접속: Mac 공개키를 `authorized_keys`에 덧붙인다(학원 PC MobaXterm, `>>`)
 - 답 없는 질문이 이력에 둘이면 `disable_parallel_tool_use`로도 첫 도구가 이전 질문용(`get_expense_total`, 실측 3/3). 지금 질문만 보게 할지는 tool_eval 문항으로 정한다 (LJS)
 - 건강 READ 후속 (LJS): `tests/chat/data/tool_eval.jsonl`에 READ·ACTION 문항 추가 후 `uv run python -m scripts.tool_eval` 재측정, 결과 자르기 6000자 미측정, FN-AIM-011-16 "개인 데이터 비전달"과 READ를 기능 ID 추가 때 맞춘다. 백엔드(2026-11-06): 다른 도메인 READ·스냅샷 자동 PR은 그 단계를 열 때 알려 `/start`, 새 도메인 CARD 때 그 서비스 `INVALID_INPUT_VALUE`도 칸 이름을 담게(#175는 일정·케어 항목만)

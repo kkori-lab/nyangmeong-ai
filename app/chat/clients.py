@@ -469,8 +469,14 @@ class ToolDecision:
     content: tuple[dict, ...] = ()
 
 
+class ReadMore(str):
+    """follow 결과 글 : 이 결과 뒤 한 번 더 도구를 고를 수 있음 (READ 2번 뒤 수정 카드, 2단계 ②)"""
+
+
 # 결과 답변 중 LLM이 고른 두 번째 도구 실행 : 결과 글, 읽기 도구가 아니면 None
 FollowRead = Callable[[tools.ToolCall], Awaitable[str | None]]
+# 결과 답변에서 도구를 고르는 최대 횟수 : 두 번째는 follow가 ReadMore를 줄 때만
+FOLLOW_ROUNDS = 2
 
 
 class ToolAgent(Protocol):
@@ -650,45 +656,57 @@ class AnthropicToolAgent:
         follow: FollowRead | None = None,
     ) -> AsyncIterator[str]:
         # 서버 도구 결과를 돌려준 뒤 같은 대화로 답변
-        # follow 있음 : 첫 블록이 글이면 그대로, 읽기 도구면 한 번 더 실행 후 도구 없이(LLM 3번)
-        follow_messages = _with_result(messages, decision.content, decision.call, result)
-        request = self._request(follow_messages, max_tokens, tool_system_blocks(today))
-        request["tool_choice"] = TOOL_CHOICE_AUTO if follow is not None else TOOL_CHOICE_NONE
-        started = time.monotonic()
-        events = self._events(request)
+        # follow 있음 : 첫 블록이 글이면 그대로, 도구면 실행 후 도구 없이(LLM 3번).
+        # follow가 ReadMore를 주면 한 번 더 도구를 고를 수 있음(LLM 최대 4번)
+        current = _with_result(messages, decision.content, decision.call, result)
         if follow is None:
-            async for text in self._texts(events, started, "도구 결과 답변"):
+            request = self._request(current, max_tokens, tool_system_blocks(today))
+            request["tool_choice"] = TOOL_CHOICE_NONE
+            events = self._events(request)
+            async for text in self._texts(events, time.monotonic(), "도구 결과 답변"):
                 yield text
             return
-        final = None
-        try:
-            async for event in events:
-                if isinstance(event, Message):
-                    final = event
-                elif event.type == "content_block_start" and event.content_block.type == "text":
-                    async for text in self._texts(events, started, "도구 결과 답변"):
-                        yield text
-                    return
-        except (anthropic.APIError, httpx2.HTTPError) as error:
-            reason = _stream_failure(error)
-            _log_failure("도구 결과 답변", started, reason)
-            raise AnswerError(reason) from None
-        finally:
-            await events.aclose()
-        if final is None or final.stop_reason == "refusal":
-            reason = (final.stop_reason if final else None) or "no_output"
-            _log_failure("도구 결과 답변", started, reason)
-            raise AnswerError(reason)
-        self._log(final, "도구 결과 답변", started)
-        use = next((block for block in final.content if block.type == "tool_use"), None)
-        if use is None:
-            raise AnswerError("no_output")
-        call = tools.parse(use.name, use.input if isinstance(use.input, dict) else {}, use.id)
-        logger.info("LLM 두 번째 도구: %s 인자 %s", call.name, "통과" if call.args else "거부")
-        second = await follow(call)
-        content = tuple(block.model_dump(exclude_none=True) for block in final.content)
-        last = _with_result(follow_messages, content, call, second or rules.READ_NOT_RUN)
-        request = self._request(last, max_tokens, tool_system_blocks(today))
+        for round_no in range(1, FOLLOW_ROUNDS + 1):
+            request = self._request(current, max_tokens, tool_system_blocks(today))
+            request["tool_choice"] = TOOL_CHOICE_AUTO
+            started = time.monotonic()
+            events = self._events(request)
+            final = None
+            try:
+                async for event in events:
+                    if isinstance(event, Message):
+                        final = event
+                    elif event.type == "content_block_start" and event.content_block.type == "text":
+                        async for text in self._texts(events, started, "도구 결과 답변"):
+                            yield text
+                        return
+            except (anthropic.APIError, httpx2.HTTPError) as error:
+                reason = _stream_failure(error)
+                _log_failure("도구 결과 답변", started, reason)
+                raise AnswerError(reason) from None
+            finally:
+                await events.aclose()
+            if final is None or final.stop_reason == "refusal":
+                reason = (final.stop_reason if final else None) or "no_output"
+                _log_failure("도구 결과 답변", started, reason)
+                raise AnswerError(reason)
+            self._log(final, "도구 결과 답변", started)
+            use = next((block for block in final.content if block.type == "tool_use"), None)
+            if use is None:
+                raise AnswerError("no_output")
+            call = tools.parse(use.name, use.input if isinstance(use.input, dict) else {}, use.id)
+            logger.info(
+                "LLM 결과 뒤 도구(%d): %s 인자 %s",
+                round_no,
+                call.name,
+                "통과" if call.args else "거부",
+            )
+            second = await follow(call)
+            content = tuple(block.model_dump(exclude_none=True) for block in final.content)
+            current = _with_result(current, content, call, second or rules.READ_NOT_RUN)
+            if not isinstance(second, ReadMore):
+                break
+        request = self._request(current, max_tokens, tool_system_blocks(today))
         request["tool_choice"] = TOOL_CHOICE_NONE
         async for text in self._texts(self._events(request), time.monotonic(), "도구 결과 답변"):
             yield text
