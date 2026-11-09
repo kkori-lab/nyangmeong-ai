@@ -1,4 +1,3 @@
-import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -8,7 +7,7 @@ from app.character import router as character_router
 from app.chat import catalog, tools
 from app.chat import router as chat_router
 from app.checkup import router as checkup_router
-from app.core import health
+from app.core import health, logs
 from app.core.backend import create_backend_client
 from app.core.config import get_settings
 from app.core.errors import register_error_handlers
@@ -26,19 +25,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.backend_client.aclose()
 
 
-def configure_logging() -> None:
-    # app.* 로거의 INFO(건수·소요 시간)를 uvicorn 콘솔에 노출 : 원문은 원래 로그 제외
-    logger = logging.getLogger("app")
-    if not logger.handlers:
-        handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter("%(levelname)s:     %(name)s - %(message)s"))
-        logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
-
-
 def create_app() -> FastAPI:
-    configure_logging()
+    logs.configure(get_settings().log_dir)
     app = FastAPI(title="냥멍케어 AI", lifespan=lifespan)
+    app.add_middleware(logs.RequestLogMiddleware)
     register_error_handlers(app)
     app.include_router(health.router)
     app.include_router(ocr_router.router)
