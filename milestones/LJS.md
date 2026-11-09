@@ -288,10 +288,12 @@
 - 넘김: `draft_receipt_save` (저장 전 OCR 영수증 번호를 주는 READ가 없음, SCR-AIM-013 ⑤ 팀 결정 뒤, LJS)
 - 연결 남음: 배열·파일 칸 카드 폼·사진 첨부 multipart 실행·`action-result` 호출 (프론트 범용 카드, LJS 프론트)
 
-## SCR-AIM-012 대화창 · 2단계 쓰기 ④ 기존 등록 카드 2개 ACTION 전환 (추가 요청) — 대기
+## SCR-AIM-012 대화창 · 2단계 쓰기 ④ 기존 등록 카드 2개 ACTION 전환 (추가 요청) — 끝
 - 기능: `draft_schedule`·`draft_care_item`을 REGISTER `done.card`에서 ACTION으로 — 프론트 범용 카드 연결 뒤 (기능 ID는 기능명세서에 아직 없음 — 설계 `docs/design/tool-catalog.md` 8절 0번·5번, 응답 계약은 `docs/design/tool-calling.md` 6절. 2026-11-06 사람 결정: CARD 12개 전부, 6절 ACTION 계약, 출처 코드 없이)
 - 기다리는 것: 프론트 범용 카드(LJS 프론트, 연결 확인)
 - 완료 조건: `/start` 기획의 완료 조건을 따른다. 대화창은 항상 도구 흐름(2026-11-09, `CHAT_TOOL_AGENT` 삭제).
+- 연결 남음: ④-1·④-3 일정·케어 항목 확인 카드 표시·`notice`·옛 등록 카드 제거 (프론트 범용 카드, LJS 프론트)
+- 연결 남음: ④-3 같은 이름 안내 실제 동작 (register-context `careArtclNms`, JAJ)
 
 ## SCR-AIM-013 대화창 · 첨부 사진 의도 판단·캐릭터·가계부 영수증 등록 응답 — 대기
 - 기능: 명세 기능 ID 추가 없음(메인 개편 뒤 추가). 걸치는 기능 FN-MAN-002, SCR-AIM-013

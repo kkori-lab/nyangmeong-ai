@@ -318,17 +318,23 @@ def test_도구_없이_글이면_그_스트림을_SEARCH_답변으로(client, ja
 
 
 def test_등록_도구는_추출기_없이_도구_인자로_카드(client, java):
-    raw = {"schdl_knd_cd": "HLTC0057", "ckup_type_cd": "HLTC0002", "hsptl_nm": "메이 동물병원"}
+    raw = {
+        "schdl_knd_cd": "HLTC0057",
+        "ckup_type_cd": "HLTC0002",
+        "hsptl_nm": "메이 동물병원",
+        "schdl_ymd": "2026-10-06",
+        "schdl_tm": "15:00",
+    }
     agent = use_agent(client, FakeToolAgent("draft_schedule", raw))
     extractor = use_extractor(client, Extractor({"hsptl_nm": "다른 병원"}))
     room = room_of(client, java, pet_sn=CHOCO)
     evs = events(send(client, room, "다음 주 화요일 오후 3시에 병원 가는 거 등록해 줘"))
 
-    assert evs[0][1]["kind"] == "REGISTER"
-    card = evs[-1][1]["card"]
-    assert card["cardType"] == "SCHEDULE"
-    assert (card["schdlYmd"], card["schdlTm"]) == ("2026-10-06", "15:00")
-    assert (card["hsptlNm"], card["ckupTypeCd"]) == ("메이 동물병원", "HLTC0002")
+    # SCR-AIM-012 2단계 ④ : 등록 카드도 확인 카드(ACTION)
+    assert evs[0][1]["kind"] == "ACTION"
+    values = evs[-1][1]["action"]["input"]
+    assert (values["schdlDt"], values["hrInptYn"]) == ("2026-10-06T15:00:00", True)
+    assert (values["hsptlNm"], values["ckupTypeCd"]) == ("메이 동물병원", "HLTC0002")
     assert extractor.calls == []
     assert agent.decides[0][1] == TODAY
 
@@ -339,7 +345,7 @@ def test_등록_요청은_라우팅_키워드가_있어도_도구_고르기로(c
     room = room_of(client, java, pet_sn=CHOCO)
     evs = events(send(client, room, "내일 3시 병원 예약 잡아줘"))
 
-    assert evs[0][1]["kind"] == "REGISTER"
+    assert evs[0][1]["kind"] == "ACTION"
     assert agent.decides[0][2] is None
 
 

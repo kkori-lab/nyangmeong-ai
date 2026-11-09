@@ -212,6 +212,8 @@ class ActionCard(_Camel):
     # 반려동물을 정하지 못했을 때 이름 칩(FN-AIM-012-04 규칙)
     pet_choices: list[PetChoice] = []
     pet_nm: str | None = None
+    # FN-AIM-012-08 : 같은 이름 케어 항목 안내 문구(케어 항목 등록), 없으면 null
+    notice: str | None = None
 
 
 class AnswerDone(_Camel):

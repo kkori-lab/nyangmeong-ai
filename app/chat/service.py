@@ -274,7 +274,7 @@ def _tool_judged(
     prior: ActionDraft | None = None,
     now: datetime | None = None,
 ) -> Judged:
-    # 도구 -> intent 값 (설계 6절). 등록 카드 2개 밖 CARD 도구는 ACTION
+    # 도구 -> intent 값 (설계 6절). CARD 도구는 ACTION(등록 카드 2개도 ④부터)
     call = decision.call
     if call is None:
         if decision.text is not None:
@@ -287,9 +287,6 @@ def _tool_judged(
         return Judged(Intent(kind=IntentKind.FALLBACK))
     if call.name == tools.NAVIGATE:
         return Judged(tools.route_row(call).to_intent())
-    if call.name in tools.REGISTER_TOOLS:
-        values = tools.register_values(call)
-        return Judged(Intent(kind=IntentKind.REGISTER), ai_values=values, tool=call.name)
     if call.name == tools.DECLINE:
         return Judged(Intent(kind=IntentKind.FALLBACK), out_of_scope=not call.args.unclear)
     card = tools.card_entry(call.name)
@@ -1085,6 +1082,12 @@ def action_card(
             values[catalog.PET_SN] = pet.pet_sn
         else:
             choices = [PetChoice(pet_sn=p.pet_sn, pet_nm=p.pet_nm) for p in pets]
+    notice = None
+    name = values.get("careArtclNm")
+    warn = "same_name_warning" in entry.hooks and pet is not None and isinstance(name, str)
+    # FN-AIM-012-08 : 같은 반려동물에 같은 이름의 케어 항목이 있으면 안내
+    if warn and _same_name(name, pet.care_artcl_nms):
+        notice = DUPLICATE_NOTICE.format(pet=pet.pet_nm, name=name)
     return ActionCard.model_validate(
         {
             "tool": entry.name,
@@ -1097,6 +1100,7 @@ def action_card(
             "missing": catalog.missing(entry, values),
             "petChoices": choices,
             "petNm": pet.pet_nm if pet else None,
+            "notice": notice,
         }
     )
 
@@ -1126,7 +1130,7 @@ ACTION_FAILED_MESSAGE = "실패 — {label} · 저장하지 못했어요."
 ACTION_CANCELED_MESSAGE = "취소됨 — {label} · 저장하지 않았어요."
 
 
-def _input_text(param: "catalog.CatalogItemParam", value: object) -> str:
+def _input_text(param: "catalog.CatalogItemParam", value: object, clock: bool = True) -> str:
     if param.type == catalog.ARRAY:
         # 배열 : 항목마다 값(번호·uuid·petSn·참거짓 칸 빼고)을 " / "로, 항목끼리는 ", "로
         rows = []
@@ -1145,7 +1149,8 @@ def _input_text(param: "catalog.CatalogItemParam", value: object) -> str:
         return _md(date.fromisoformat(str(value)))
     if param.type == "datetime":
         moment = datetime.fromisoformat(str(value))
-        return f"{_md(moment.date())} {moment:%H:%M}"
+        # hrInptYn false : 시간을 입력하지 않은 칸이라 날짜만
+        return f"{_md(moment.date())} {moment:%H:%M}" if clock else _md(moment.date())
     if param.type in ("long", "int"):
         return f"{value:,}"
     if param.type == "decimal":
@@ -1174,8 +1179,9 @@ def action_result_message(request: ActionResultRequest) -> str:
         return ACTION_FAILED_MESSAGE.format(label=label)
     if catalog.missing(entry, values, files=False):
         raise AppError("INVALID_REQUEST", 400, "확인 카드의 필수 칸이 비어 있습니다.")
+    clock = values.get(catalog.HR_INPUT) is not False
     texts = (
-        _input_text(param, values[name])
+        _input_text(param, values[name], clock)
         for name, param in entry.params.items()
         if name in values and name not in entry.fixed and _summarized(name, param)
     )

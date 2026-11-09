@@ -251,15 +251,16 @@ def test_읽기만_한_답변에는_확인_카드가_없어야_한다(client, ja
 
 
 @pytest.mark.parametrize("tool", ["draft_schedule", "draft_care_item"])
-def test_기존_등록_도구는_REGISTER_카드_그대로여야_한다(client, java, tool):
+def test_기존_등록_도구도_ACTION_카드여야_한다(client, java, tool):
+    # SCR-AIM-012 2단계 ④ : 등록 카드 2개도 확인 카드로
     use_agent(client, FakeToolAgent(tool, {}))
     room = room_of(client, java, pet_sn=CHOCO)
 
     evs = events(send(client, room, "등록해 줘"))
 
-    assert evs[0][1]["kind"] == "REGISTER"
-    assert evs[-1][1]["card"] is not None
-    assert evs[-1][1]["action"] is None
+    assert evs[0][1]["kind"] == "ACTION"
+    assert evs[-1][1]["card"] is None
+    assert evs[-1][1]["action"]["tool"] == tool
 
 
 # 추가-1 : 키워드에 걸린 문장도 도구 고르기
@@ -334,7 +335,7 @@ def test_취소와_실패는_빈_칸이어도_정해진_글로_저장해야_한�
 @pytest.mark.parametrize(
     ("tool", "status", "values"),
     [
-        # 목록 밖 도구·등록 카드 도구
+        # 목록 밖 도구, 등록 카드 도구인데 필수 칸 빔
         ("delete_pet", "DONE", {}),
         ("draft_schedule", "DONE", {}),
         # 허용값 밖

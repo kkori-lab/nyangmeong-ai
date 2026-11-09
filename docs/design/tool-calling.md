@@ -226,7 +226,8 @@ Python이 Java 내부 GET을 쿠키와 함께 불러 결과를 LLM에 돌려주�
 ## 6. 응답 계약 변경안 (2단계부터, 백엔드·프론트와 함께)
 
 1단계는 계약을 바꾸지 않는다. `navigate` → `intent.kind=ROUTE`, `draft_schedule`·`draft_care_item` → `REGISTER` + `done.card`,
-글 답변 → `SEARCH`로 지금 값에 맞춰 내보낸다.
+글 답변 → `SEARCH`로 지금 값에 맞춰 내보낸다. 2단계 쓰기 ④(2026-11-09)부터 `draft_schedule`·`draft_care_item`도 `ACTION` + `done.action`
+(출처 코드 없이, 같은 이름 케어 항목은 카드 `notice`)이고, `REGISTER`는 옛 카드의 `draft` 이어 쓰기에만 남는다(프론트 전환 뒤 삭제).
 
 2단계에서 추가할 것(초안):
 
