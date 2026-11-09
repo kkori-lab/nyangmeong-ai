@@ -51,3 +51,4 @@
 {"id": "T51", "type": "헷갈림", "q": "이번 달 지출 총액 얼마야?", "intent": "이번 달 지출 합계 묻기(지출 등록 아님)", "tool": "get_expense_total"}
 {"id": "T52", "type": "케어", "q": "초코 등에 난 혹 오늘 1.2cm야 기록해 줘", "intent": "관찰 항목에 오늘 기록 더하기(먼저 관찰 항목 읽기)", "tool": "list_observation_items"}
 {"id": "T53", "type": "헷갈림", "q": "등에 난 혹 크기 어떻게 변했어?", "intent": "관찰 항목 크기 변화 묻기(관찰 기록 추가 아님)", "tool": "list_observation_items"}
+{"id": "T54", "type": "지식", "q": "전체 반려동물 체중 알려줘", "intent": "모든 아이의 체중 추이 읽기", "tool": "get_health_indicators"}
