@@ -1,10 +1,12 @@
 import asyncio
+import io
 import logging
 import re
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 
+from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel
 from pydantic.alias_generators import to_camel
 
@@ -15,6 +17,8 @@ from app.chat.clients import (
     Classified,
     ClassifiedKind,
     ClassifyError,
+    ImageIntentError,
+    ImageIntentJudge,
     IntentClassifier,
     ReadMore,
     RegisterExtractor,
@@ -42,6 +46,7 @@ from app.chat.schemas import (
     ConversationDetail,
     ConversationMessage,
     ConversationSummary,
+    ImageIntentKind,
     Intent,
     IntentKind,
     PetChoice,
@@ -54,6 +59,7 @@ from app.chat.schemas import (
     StreamError,
 )
 from app.core.backend import BackendError
+from app.core.image import validate_upload
 from app.core.response import AppError
 
 logger = logging.getLogger(__name__)
@@ -1204,3 +1210,37 @@ async def save_action_result(
 ) -> ConversationMessage:
     # 실행(React -> Java 공개 API)·취소·실패의 결과를 AI 메시지로 저장
     return await repo.add_message(room_sn, ROLE_AI, action_result_message(request))
+
+
+# 이미지 축소 기준 : Anthropic 이미지 5MB 상한·토큰 절약
+INTENT_IMAGE_LONG_EDGE = 1024
+INTENT_IMAGE_QUALITY = 85
+
+
+def _intent_jpeg(image: bytes) -> bytes:
+    """판단용 긴 변 1024px JPEG"""
+    try:
+        with Image.open(io.BytesIO(image)) as opened:
+            flat = ImageOps.exif_transpose(opened).convert("RGB")
+    except (UnidentifiedImageError, OSError, ValueError) as error:
+        # 시그니처만 맞고 열 수 없는 파일
+        raise AppError(
+            "FILE_TYPE_NOT_ALLOWED", 400, "jpg·jpeg·png·webp 이미지만 올릴 수 있습니다."
+        ) from error
+    flat.thumbnail((INTENT_IMAGE_LONG_EDGE, INTENT_IMAGE_LONG_EDGE), Image.LANCZOS)
+    out = io.BytesIO()
+    flat.save(out, "JPEG", quality=INTENT_IMAGE_QUALITY)
+    return out.getvalue()
+
+
+async def judge_image_intent(
+    judge: ImageIntentJudge, image: bytes, file_name: str, text: str | None
+) -> ImageIntentKind:
+    validate_upload(image, file_name)
+    jpeg = _intent_jpeg(image)
+    text = text.strip() if text and text.strip() else None
+    try:
+        return await judge.judge(jpeg, text)
+    except ImageIntentError:
+        # 판단 실패 : 오류 대신 되물음(React 칩)
+        return ImageIntentKind.ASK

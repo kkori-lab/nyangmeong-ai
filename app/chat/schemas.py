@@ -279,3 +279,12 @@ class ReceiptResultRequest(_Camel):
         if value is not None and not value.strip():
             raise ValueError("공백만 입력할 수 없습니다.")
         return value
+
+
+class ImageIntentKind(StrEnum):
+    """첨부 사진 용도 (SCR-AIM-013, 메인 검색창 공용)"""
+
+    CHARACTER = "CHARACTER"  # 반려동물 사진 -> 캐릭터 만들기
+    MEDICAL_RECEIPT = "MEDICAL_RECEIPT"  # 동물병원 영수증 -> 영수증 분석
+    EXPENSE_RECEIPT = "EXPENSE_RECEIPT"  # 그 밖의 영수증 -> 가계부
+    ASK = "ASK"  # 모름 -> React가 칩으로 되물음

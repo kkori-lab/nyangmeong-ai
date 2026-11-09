@@ -21,6 +21,7 @@ React가 부르는 `/ai/**` API다. 공통 규칙은 `docs/api/README.md`에 있
 | POST | /ai/conversations/{aiCnvrsRoomSn}/register-result | 옛 등록 카드의 결과(등록됨·취소됨)를 텍스트 요약으로 AI 메시지에 저장한다. 옛 카드 호환용: 2026-11-09 ④부터 일정·케어 항목 등록은 확인 카드(`action-result`)라 프론트 범용 카드 전환 뒤 삭제한다. 등록 자체는 React가 Java 일정·케어 항목 등록 API로 한다(출처 HLTC0067 AI 생성). 등록됨: `✔ 등록됨 — 초코 예방접종 · 10-06(화) 15:00`(시간 없으면 날짜만), 케어 항목은 `✔ 등록됨 — 뭉치 발톱 깎기 · 2주마다 · 다음 예정일 10-10(토)`. 취소됨: `취소됨 — 등록하지 않았어요.` 무응답이면 부르지 않는다(저장 없음). 성공 201. 오류: `cardType`이 ASK·필수 칸 빔·`petNm` 없음·허용값 밖 400 `INVALID_REQUEST`, 남의 대화·없는 번호 404 `NOT_FOUND` | AIM-012-11·16 | LJS | RegisterResultRequest | ConversationMessage |
 | POST | /ai/conversations/{aiCnvrsRoomSn}/action-result | 확인 카드(2단계 쓰기)의 결과를 텍스트 요약으로 AI 메시지에 저장한다. 실행은 React가 카드의 `call`(메서드·경로)과 `input`(경로 칸은 경로에, 나머지는 본문)으로 Java 공개 API를 부른다. 요약 글은 Python이 도구 표시 이름(`label`)과 `input`으로 만든다(React가 보내지 않음): `DONE` `✔ 건강 일지 기록 — 체중 · 09-29(화) 08:30 · 4.2`(번호 칸·`petSn`·참거짓 칸은 빼고, 코드는 이름으로, `hrInptYn`이 false면 datetime 칸은 날짜만, 남는 값이 없으면 `✔ 케어 완료 체크`). 일정 등록 `✔ 일정 등록 — 병원 · 10-06(화) 15:00 · 정기검진 · 메이 동물병원`, 케어 항목 등록 `✔ 케어 항목 등록 — 발톱 깎기 · 정기관리 · 2주`, `CANCELED` `취소됨 — <label> · 저장하지 않았어요.`, `FAILED` `실패 — <label> · 저장하지 못했어요.` 무응답이면 부르지 않는다. Java 실행이 400이면 `data: [{field, message}]`의 칸만 카드에서 다시 고치게 하고, `data`가 비면(가계부 서비스 검사 등) 카드 전체 오류로 보여 준다. 성공 201. 오류: 도구 목록에 없는 도구·목록에 없는 칸·Java 규칙(코드 값·min·max·maxLength) 밖 값·`status` 허용값 밖·`DONE`인데 필수 칸(required·requiredIf) 빔 400 `INVALID_REQUEST`, 남의 대화·없는 번호 404 `NOT_FOUND` | AIM-012(2단계 쓰기) | LJS | ActionResultRequest | ConversationMessage |
 | POST | /ai/conversations/{aiCnvrsRoomSn}/receipt-result | 대화창 영수증 분석(`POST /ai/receipts`, 출처 `AIMC0031`)이 끝나면(인식·인식 실패·일시 오류·분석 취소) 함께 보낸 텍스트를 사용자 메시지로, 결과를 요약 한 줄 AI 메시지로 저장한다. 이미지가 붙은 전송은 `/messages`(의도 판정)를 부르지 않는다. 텍스트는 이후 대화의 AI 컨텍스트에 들어가고 분석에는 쓰지 않는다. 대화 이력에 이미지는 저장하지 않는다. 요약: `RECOGNIZED` `영수증 분석 — 메이 동물병원, 10월 20일, 145,000원`(없는 값은 빼고, 셋 다 없으면 `영수증 분석 — 결과를 확인해 주세요`), `FAILED` `영수증 분석 — 영수증을 읽지 못했어요`, `ERROR` `영수증 분석 — 일시적인 오류로 분석하지 못했어요`, `CANCELED` `영수증 분석 — 취소했어요`. 결과 카드의 [취소]는 이 API를 다시 부르지 않는다. 성공 201, 응답은 저장한 순서(사용자 메시지(있으면) → AI 요약). 오류: `result` 허용값 밖·`cnvrsCn` 길이 위반·공백만 400 `INVALID_REQUEST`, 남의 대화·없는 번호 404 `NOT_FOUND` | AIM-013-02·09 | LJS | ReceiptResultRequest | ConversationMessage[] |
+| POST | /ai/image-intent | 대화창·메인 검색창에 사진을 붙여 보내면 사진과 함께 보낸 글로 사진의 용도를 판단한다(2026-11-09 추가, 기능 ID는 메인 개편 뒤). 판단만 하고 저장하지 않으며 대화방 번호를 받지 않는다. React가 `kind`로 흐름을 나눈다: `MEDICAL_RECEIPT` → `POST /ai/receipts`(출처 `AIMC0031`)·`receipt-result`, `CHARACTER` → `POST /ai/characters`, `EXPENSE_RECEIPT` → 본창 가계부 안내(바로 등록은 다음 차수), `ASK` → React가 칩으로 되묻는다. 판단은 LLM(이미지는 긴 변 1024px JPEG로 줄여 보냄)이 한다. 글이 사진과 다른 용도를 말하면 글을 따른다. LLM 오류·시간 초과·거절·깨진 출력은 오류 대신 200 `ASK`. PDF는 받지 않는다(SCR-AIM-013 ①·POL-006, 검사결과지는 검진상세 `POST /ai/checkups/lab-results`). 성공 200. 오류: 형식(확장자·실제 형식 불일치, 열 수 없는 이미지, PDF 포함) 400 `FILE_TYPE_NOT_ALLOWED`, 10MB 초과 400 `FILE_SIZE_EXCEEDED`, `file` 없음·`cnvrsCn` 1,000자 초과·`petSn` 형식 오류 400 `INVALID_REQUEST`(검증 실패는 LLM을 부르지 않는다), LLM 키 없음 502 `EXTERNAL_API_ERROR` | AIM-013, MAN-002 | LJS | ImageIntentRequest | ImageIntentResponse |
 
 ## DTO
 
@@ -156,3 +157,17 @@ RegisterDraft의 필드에 아래가 더해진다. 필수 칸이 모두 찬 경�
 | hsptlNm | String | N | 병원명. `ReceiptOcrResponse.hsptlNm` 그대로. `RECOGNIZED`일 때만 쓴다 | AIM-013-09 |
 | ckupYmd | LocalDate | N | 검진일. `ReceiptOcrResponse.ckupYmd` 그대로. `RECOGNIZED`일 때만 쓴다 | AIM-013-09 |
 | recptAmt | Integer | N | 영수증 금액. `ReceiptOcrResponse.recptAmt` 그대로. `RECOGNIZED`일 때만 쓴다 | AIM-013-09 |
+
+### ImageIntentRequest
+쓰는 API: POST /ai/image-intent (multipart/form-data)
+| 필드 | 타입 | 필수 | 검증·설명 | 근거 |
+| --- | --- | --- | --- | --- |
+| file | 파일 | Y | jpg·jpeg·png·webp, 10MB 이하. 확장자와 실제 형식(파일 시그니처)이 같아야 한다. PDF 불가 | AIM-008-05 |
+| cnvrsCn | String | N | 사진과 함께 보낸 글. 1,000자 이하. 빈 값·공백만은 글 없음으로 본다. 판단에만 쓰고 저장하지 않는다 | AIM-013 |
+| petSn | Long | N | 선택한 반려동물. 받기만 하고 판단에 쓰지 않는다(React가 다음 요청에 쓴다) | AIM-013 |
+
+### ImageIntentResponse
+쓰는 API: POST /ai/image-intent
+| 필드 | 타입 | 필수 | 검증·설명 | 근거 |
+| --- | --- | --- | --- | --- |
+| kind | String | Y | `CHARACTER` 반려동물 사진(캐릭터 만들기), `MEDICAL_RECEIPT` 동물병원 영수증·진료비 내역, `EXPENSE_RECEIPT` 그 밖의 영수증(사료·용품·미용 등, 가계부), `ASK` 모름(사람·풍경·애매함·판단 실패) | AIM-013 |
