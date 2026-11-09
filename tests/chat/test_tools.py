@@ -217,10 +217,11 @@ def test_search_guide는_안내서를_도구_결과로_돌려주고_SEARCH_답�
     evs = events(send(client, room, "캐릭터는 어디서 만들 수 있어요?"))
 
     assert evs[0][1]["kind"] == "SEARCH"
-    assert deltas(evs) == "안내서대로 답할게요." + DISCLAIMER
+    # FN-AIM-002-03 : 사용법 안내는 건강 관련 응답이 아니라 고지 없음
+    assert deltas(evs) == "안내서대로 답할게요."
     assert rules.find_guide("6-1").text in agent.results[0]
     assert evs[-1][1]["shortcut"]["scrId"] == "SCR-MYP-010"
-    assert [m["cnvrsCn"] for m in java.ai_messages(room)] == ["안내서대로 답할게요." + DISCLAIMER]
+    assert [m["cnvrsCn"] for m in java.ai_messages(room)] == ["안내서대로 답할게요."]
 
 
 def test_안내서_청크가_없으면_범위_안내(client, java):
@@ -230,6 +231,67 @@ def test_안내서_청크가_없으면_범위_안내(client, java):
 
     assert evs[0][1]["kind"] == "FALLBACK"
     assert [m["cnvrsCn"] for m in java.ai_messages(room)] == [OUT_OF_SCOPE_MESSAGE]
+
+
+@pytest.mark.parametrize("text", ["안녕하세요", "고마워!!", "ㅋㅋㅋ", "네 감사합니다~"])
+def test_인사_잡담에_도구_없이_답하면_고지가_없어야_한다(client, java, text):
+    # FN-AIM-002-03 추가 요청(2026-11-09) : 인사·잡담 바로 답은 건강 관련 응답이 아님
+    use_agent(client, FakeToolAgent(texts=("반가워요.",)))
+    room = room_of(client, java)
+    evs = events(send(client, room, text))
+
+    assert evs[0][1]["kind"] == "SEARCH"
+    assert deltas(evs) == "반가워요."
+    assert [m["cnvrsCn"] for m in java.ai_messages(room)] == ["반가워요."]
+
+
+def test_인사에_건강_질문이_섞이면_고지가_붙어야_한다(client, java):
+    use_agent(client, FakeToolAgent(texts=("병원에 가 보세요.",)))
+    room = room_of(client, java)
+    evs = events(send(client, room, "안녕 강아지가 토해"))
+
+    assert deltas(evs) == "병원에 가 보세요." + DISCLAIMER
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("안녕히 계세요~", True),
+        ("ㅇㅇ ㅇㅋ", True),
+        ("좋아요 사료 추천해줘", False),
+        ("<질문>", False),
+        ("강아지가 포도 먹어도 돼?", False),
+    ],
+)
+def test_잡담은_문장_전체가_인사_감사_맞장구일_때만이어야_한다(text, expected):
+    assert rules.is_small_talk(text) is expected
+
+
+def test_자리_표시_글은_도구를_고르지_않고_뜻_모를_입력_안내여야_한다(client, java):
+    agent = use_agent(client, FakeToolAgent(texts=("질문이 비어 있어요.",)))
+    room = room_of(client, java)
+    evs = events(send(client, room, "<질문>"))
+
+    assert names(evs) == ["intent", "done"]
+    assert evs[0][1]["kind"] == "FALLBACK"
+    assert agent.decides == []
+    saved = [m["cnvrsCn"] for m in java.ai_messages(room)]
+    assert len(saved) == 1
+    assert DISCLAIMER not in saved[0]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("<질문>", True),
+        (" < > ", True),
+        ("...", True),
+        ("<질문> 강아지 토해", False),
+        ("질문", False),
+    ],
+)
+def test_자리_표시는_꺾쇠로만_된_글이나_기호뿐인_글이어야_한다(text, expected):
+    assert rules.is_placeholder(text) is expected
 
 
 def test_도구_없이_글이면_그_스트림을_SEARCH_답변으로(client, java):

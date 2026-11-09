@@ -133,6 +133,10 @@ class Judged:
     action: dict | None = None
     # SEARCH(READ) : 결과를 본 뒤 고른 쓰기 도구의 확인 카드, 답변 스트림이 채움
     cards: list[ActionCard] | None = None
+    # FN-AIM-002-03 : 의료 고지 여부. 사용법 답변은 False
+    notice: bool = True
+    # SEARCH(READ) : 성공한 READ 도메인, 답변 스트림이 채움. health가 있을 때만 고지
+    read_domains: set[str] | None = None
 
 
 async def judge(text: str, has_image: bool, classifier: IntentClassifier) -> Judged:
@@ -207,6 +211,9 @@ async def judge_tools(
     now: datetime | None = None,
 ) -> Judged:
     """도구 흐름 판정(docs/design/tool-calling.md 4절)"""
+    if rules.is_placeholder(text):
+        # 추가 요청(2026-11-09) : LLM은 자리 표시 글에 글로 되물어 decline을 안 고름(실측)
+        return Judged(Intent(kind=IntentKind.FALLBACK))
     row = None
     # FN-AIM-004-13 : 등록 요청은 라우팅 키워드보다 먼저, 칸은 도구 인자로
     if not rules.is_register_request(text):
@@ -238,7 +245,9 @@ def _tool_judged(
     call = decision.call
     if call is None:
         if decision.text is not None:
-            return Judged(Intent(kind=IntentKind.SEARCH), stream=decision.text)
+            # FN-AIM-002-03 : 인사·잡담에 대한 바로 답은 고지 없음(추가 요청 2026-11-09)
+            notice = not rules.is_small_talk(text)
+            return Judged(Intent(kind=IntentKind.SEARCH), stream=decision.text, notice=notice)
         return Judged(Intent(kind=IntentKind.FALLBACK))
     if call.args is None:
         logger.info("도구 인자 거부: %s", call.name)
@@ -263,8 +272,13 @@ def _tool_judged(
             return Judged(Intent(kind=IntentKind.FALLBACK))
         # Java 호출은 답변 스트림 안 : 첫 글자 제한이 Java 호출까지 덮음
         cards: list[ActionCard] = []
-        stream = _read_answer(text, context, agent, decision, entry, max_tokens, today, read, cards)
-        return Judged(Intent(kind=IntentKind.SEARCH), stream=stream, cards=cards)
+        domains: set[str] = set()
+        stream = _read_answer(
+            text, context, agent, decision, entry, max_tokens, today, read, cards, domains
+        )
+        return Judged(
+            Intent(kind=IntentKind.SEARCH), stream=stream, cards=cards, read_domains=domains
+        )
     ids = tuple(tools.guide_ids(call, text))
     if not ids:
         logger.info("사용법 안내: 안내서 청크 없음")
@@ -272,7 +286,10 @@ def _tool_judged(
     logger.info("사용법 안내: 도구 %d개 %s", len(ids), ",".join(ids))
     stream = agent.answer(context, decision, guide_text(ids) or "", max_tokens, today)
     shortcut = _guide_shortcut(ids[0], Classified(ClassifiedKind.GUIDE))
-    return Judged(Intent(kind=IntentKind.SEARCH), shortcut, guide_ids=ids, stream=stream)
+    # FN-AIM-002-03 : 사용법 안내는 건강 관련 응답이 아님
+    return Judged(
+        Intent(kind=IntentKind.SEARCH), shortcut, guide_ids=ids, stream=stream, notice=False
+    )
 
 
 @dataclass(frozen=True)
@@ -317,6 +334,7 @@ async def _read_once(
     call: tools.ToolCall | None,
     pets: _ReadPets,
     seen: dict[str, set[int]],
+    domains: set[str] | None = None,
 ) -> _ReadOutcome:
     pet_sn = None
     if "pet" in entry.hooks:
@@ -343,6 +361,8 @@ async def _read_once(
         logger.info("READ 도구 Java 실패: %s %s", entry.name, type(error).__name__)
         return _ReadOutcome(result=rules.READ_FAILED)
     catalog.seen_ids(data, seen)
+    if domains is not None:
+        domains.add(entry.domain)
     return _ReadOutcome(result=rules.read_result_text(data))
 
 
@@ -356,11 +376,13 @@ async def _read_answer(
     today: date,
     read: ReadDeps,
     cards: list[ActionCard] | None = None,
+    domains: set[str] | None = None,
 ) -> AsyncIterator[str]:
     pets = _ReadPets(text, read)
     # 번호 칸은 이 턴 READ 결과에 나온 값만 (catalog.read_request)
     seen: dict[str, set[int]] = {}
-    first = await _read_once(entry, decision.call, pets, seen)
+    # 되물음·실패만이면 domains가 비어 고지 없음(FN-AIM-002-03)
+    first = await _read_once(entry, decision.call, pets, seen, domains)
     if first.ask is not None:
         yield first.ask
         return
@@ -379,7 +401,7 @@ async def _read_answer(
         if second is None or call.args is None:
             logger.info("두 번째 도구 실행 안 함: %s", call.name)
             return None
-        outcome = await _read_once(second, call, pets, seen)
+        outcome = await _read_once(second, call, pets, seen, domains)
         return rules.READ_FAILED if outcome.ask is not None else outcome.result
 
     answer = agent.answer(context, decision, first.result, max_tokens, today, follow)
@@ -576,6 +598,7 @@ async def _run_turn(
                 guide_text(judged.guide_ids),
                 judged.stream,
                 judged.cards,
+                _notice(judged),
             )
             if answer is not None and titles is not None and _is_first_answer(turn):
                 await _retitle(repo, titles, turn, answer)
@@ -617,6 +640,7 @@ async def _search_answer(
     guide: str | None = None,
     started: AsyncIterator[str] | None = None,
     cards: list[ActionCard] | None = None,
+    notice: Callable[[], bool] = lambda: True,
 ) -> str | None:
     # FN-AIM-002-02·07 : 완료면 고지 전 본문 반환(제목 요약용), 실패·미완료면 None
     context = build_context(turn.messages, turn.question.msg_seq, ai.context_turns)
@@ -656,14 +680,27 @@ async def _search_answer(
         await stream.aclose()
     body = "".join(chunks)
     text = body
-    if complete:
-        # FN-AIM-002-03 : 고지는 본문 끝에 포함해 저장, 미완료 답변 제외
+    if complete and notice():
+        # FN-AIM-002-03 : 건강 관련 응답만 고지를 본문 끝에 포함해 저장, 미완료 답변 제외
         emit(("delta", {"text": DISCLAIMER}))
         text += DISCLAIMER
     message = await _save(repo, turn.room_sn, text, complete)
     action = cards[0] if cards else None
     emit(("done", AnswerDone(message=message, shortcut=shortcut, action=action)))
     return body if complete else None
+
+
+HEALTH_DOMAIN = "health"
+
+
+def _notice(judged: Judged) -> Callable[[], bool]:
+    # FN-AIM-002-03 : READ 답변은 스트림이 끝난 뒤 health READ가 하나라도 성공했는지로 정함
+    def decide() -> bool:
+        if not judged.notice:
+            return False
+        return judged.read_domains is None or HEALTH_DOMAIN in judged.read_domains
+
+    return decide
 
 
 def _is_first_answer(turn: Turn) -> bool:
