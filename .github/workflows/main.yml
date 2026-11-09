@@ -58,7 +58,7 @@ jobs:
             echo ".env·.env.local 갱신 완료"
 
             # 4-1. 로그 폴더 : 그룹 deploy, 폴더 2770(setgid라 새 파일도 그룹 deploy)
-            LOG_DIR=$(grep -E '^[[:space:]]*LOG_DIR=' ${{ secrets.OCI_DEPLOY_PATH }}/.env.local | tail -n 1 | cut -d= -f2- | tr -d "\"'" | xargs)
+            LOG_DIR=$(grep -E '^[[:space:]]*LOG_DIR=' ${{ secrets.OCI_DEPLOY_PATH }}/.env.local | tail -n 1 | cut -d= -f2- | tr -d "\"'\r" | xargs)
             if [ -n "$LOG_DIR" ]; then
               SERVICE_USER=$(systemctl show -p User --value ai-backend)
               [ -z "$SERVICE_USER" ] && SERVICE_USER=$(whoami)
