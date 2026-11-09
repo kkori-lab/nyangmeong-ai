@@ -598,8 +598,8 @@ def _drop_free_text(value: object) -> object:
     return value
 
 
-def read_result_text(data: object) -> str:
+def read_result_text(data: object, max_chars: int = READ_RESULT_MAX_CHARS) -> str:
     text = json.dumps(_drop_free_text(data), ensure_ascii=False, default=str)
-    if len(text) <= READ_RESULT_MAX_CHARS:
+    if len(text) <= max_chars:
         return text
-    return text[:READ_RESULT_MAX_CHARS] + READ_TRUNCATED
+    return text[:max_chars] + READ_TRUNCATED

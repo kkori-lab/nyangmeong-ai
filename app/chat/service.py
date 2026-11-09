@@ -2,6 +2,7 @@ import asyncio
 import io
 import logging
 import re
+import time
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -81,6 +82,11 @@ ANSWER_ERROR_MESSAGE = "일시적으로 답변할 수 없어요"
 # READ 도구 : 반려동물을 못 정하면 Java 미호출, 고정 문구로 되물음 (2026-11-06 LJS 결정)
 READ_PET_ASK = "어느 아이의 기록을 볼까요? {names} 중에서 이름을 넣어 다시 물어봐 주세요."
 READ_NO_PET = "등록된 반려동물이 없어요. 반려동물을 먼저 등록해 주세요."
+# READ 도구 : 한 번에 읽는 반려동물 상한과 Java 동시 호출 수 (2026-11-09 LJS 결정)
+READ_MAX_PETS = 10
+READ_CONCURRENCY = 4
+# READ 결과 글의 마리별 머리줄 : LLM이 "선택된 반려동물 기준" 같은 말을 지어내지 않게
+READ_PET_LABEL = "조회한 반려동물: {name}"
 # READ 결과를 본 LLM이 쓰기 도구를 고른 경우의 tool_result : 카드는 done.action으로
 ACTION_SHOWN = (
     "확인 카드를 띄움. 회원이 카드에서 [확인]을 누르기 전에는 저장되지 않음. "
@@ -355,6 +361,8 @@ class _ReadPets:
         self.compact = re.sub(r"\s+", "", text)
         self.read = read
         self._pets: list[PetInfo] | None = None
+        # 앞 READ 결과의 번호 칸 값이 어느 반려동물 것인지 : (칸 이름, 값) -> petSn
+        self.owner: dict[tuple[str, int], int] = {}
 
     async def pets(self) -> list[PetInfo]:
         if self._pets is None:
@@ -366,6 +374,14 @@ class _ReadPets:
 
     def named(self, pets: list[PetInfo]) -> list[PetInfo]:
         return [p for p in pets if p.pet_nm in self.compact]
+
+    def targets(self, pets: list[PetInfo]) -> list[PetInfo]:
+        """읽을 반려동물 : 문장 속 이름들 > 펫 태그 방의 그 아이 > 모든 아이"""
+        named = self.named(pets)
+        if named:
+            return named
+        tagged = [p for p in pets if p.pet_sn == self.read.room_pet]
+        return tagged or pets
 
 
 @dataclass
@@ -383,36 +399,70 @@ async def _read_once(
     domains: set[str] | None = None,
     rows: "catalog.Rows | None" = None,
 ) -> _ReadOutcome:
-    pet_sn = None
+    args = call.args if call is not None else None
+    values = args.model_dump(exclude_none=True) if args is not None else {}
+    targets: list[PetInfo | None] = [None]
     if "pet" in entry.hooks:
-        # FN-AIM-012-04 규칙 : 못 정하면 Java 미호출·이름 되물음
+        # 읽을 반려동물 : 이름 > 펫 태그 > 모두. 상한을 넘으면 Java 미호출·이름 되물음
         found = await pets.pets()
-        pet = _pick_pet(found, pets.named(found), None, pets.read.room_pet)
-        if pet is None:
+        chosen = pets.targets(found)
+        if not chosen or len(chosen) > READ_MAX_PETS:
             names = ", ".join(p.pet_nm for p in found)
             return _ReadOutcome(ask=READ_PET_ASK.format(names=names) if found else READ_NO_PET)
-        pet_sn = pet.pet_sn
+        # 앞 결과의 번호로 상세를 읽을 때는 그 번호가 나온 아이만
+        owners = {
+            pets.owner[(name, value)]
+            for name, value in catalog.to_java(entry, values).items()
+            if (name, value) in pets.owner
+        }
+        targets = [p for p in chosen if not owners or p.pet_sn in owners] or chosen
     elif "pet_filter" in entry.hooks:
         # 가계부 : 문장 속 이름이 하나면 그 반려동물, 아니면 전체(공용 지출 포함, 2026-11-06 결정)
         named = pets.named(await pets.pets())
-        pet_sn = named[0].pet_sn if len(named) == 1 else None
-    args = call.args if call is not None else None
-    values = args.model_dump(exclude_none=True) if args is not None else {}
-    request = catalog.read_request(entry, values, pet_sn, seen)
-    if request is None:
+        targets = [named[0] if len(named) == 1 else None]
+    requests = [catalog.read_request(entry, values, p.pet_sn if p else None, seen) for p in targets]
+    if any(request is None for request in requests):
         logger.info("READ 도구 필수 칸 없음: %s", entry.name)
         return _ReadOutcome(result=rules.READ_FAILED)
-    try:
-        data = await pets.read.reader.read(*request)
-    except (AppError, BackendError) as error:
-        logger.info("READ 도구 Java 실패: %s %s", entry.name, type(error).__name__)
+    gate = asyncio.Semaphore(READ_CONCURRENCY)
+
+    async def fetch(request: tuple[str, dict]) -> object | None:
+        async with gate:
+            try:
+                return await pets.read.reader.read(*request)
+            except (AppError, BackendError) as error:
+                logger.info("READ 도구 Java 실패: %s %s", entry.name, type(error).__name__)
+                return None
+
+    started = time.perf_counter()
+    datas = await asyncio.gather(*(fetch(r) for r in requests if r is not None))
+    logger.info(
+        "READ 도구 시간: %s %d마리 %dms",
+        entry.name,
+        len(targets),
+        (time.perf_counter() - started) * 1000,
+    )
+    if all(data is None for data in datas):
         return _ReadOutcome(result=rules.READ_FAILED)
-    catalog.seen_ids(data, seen)
-    if rows is not None:
-        catalog.seen_rows(data, rows)
+    limit = rules.READ_RESULT_MAX_CHARS // len(targets)
+    blocks = []
+    for pet, data in zip(targets, datas, strict=True):
+        if data is None:
+            text = rules.READ_FAILED
+        else:
+            for key, ids in catalog.seen_ids(data).items():
+                seen.setdefault(key, set()).update(ids)
+                if pet is not None:
+                    pets.owner.update({(key, value): pet.pet_sn for value in ids})
+            if rows is not None:
+                catalog.seen_rows(data, rows)
+            text = rules.read_result_text(data, limit)
+        if "pet" in entry.hooks and pet is not None:
+            text = READ_PET_LABEL.format(name=pet.pet_nm) + "\n" + text
+        blocks.append(text)
     if domains is not None:
         domains.add(entry.domain)
-    return _ReadOutcome(result=rules.read_result_text(data))
+    return _ReadOutcome(result="\n\n".join(blocks))
 
 
 async def _read_answer(
