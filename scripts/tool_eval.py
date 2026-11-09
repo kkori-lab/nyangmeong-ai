@@ -23,6 +23,7 @@ from app.chat.clients import (
     AnthropicRegisterExtractor,
     AnthropicToolAgent,
     ClassifyError,
+    ToolDecision,
 )
 from app.chat.repository import get_ai_settings
 from app.chat.schemas import IntentKind
@@ -34,7 +35,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "tests/chat/data/tool_eval.jsonl"
 OUT_DIR = ROOT / ".cache/tool_eval"
 SONNET = "claude-sonnet-5-5"
-TYPES = ("사용법", "이동", "일정", "케어", "지식", "범위밖", "헷갈림")
+TYPES = ("사용법", "이동", "일정", "케어", "지식", "범위밖", "헷갈림", "수정")
 
 
 @dataclass
@@ -117,10 +118,28 @@ async def run_current(client, model: str, q: str, today) -> Result:
     return Result(tools.DECLINE, {"unclear": not judged.out_of_scope}, usage, ms)
 
 
+class _DecisionRecorder(AnthropicToolAgent):
+    """도구 고르기 결과를 남긴다 : READ(Java 없이 실행 불가)·ACTION을 고른 도구 이름으로 세려고"""
+
+    decision: ToolDecision | None = None
+
+    async def decide(self, *args, **kwargs) -> ToolDecision:
+        self.decision = await super().decide(*args, **kwargs)
+        return self.decision
+
+
+def _picked(agent: _DecisionRecorder) -> tuple[str, dict] | None:
+    call = agent.decision.call if agent.decision is not None else None
+    if call is None or call.args is None:
+        return None
+    return call.name, call.args.model_dump(exclude_none=True)
+
+
 async def run_tools(client, model: str, q: str, today, keep_answer: bool) -> Result:
     # 도구 흐름 판정 그대로. 글 답변 스트림은 끝까지 읽어 지연·토큰에 넣는다(1회차와 같은 셈)
+    # READ는 Java 없이 실행 안 하므로 고른 READ 이름으로, ACTION은 카드 도구 이름·LLM 인자로
     usage = Usage()
-    agent = AnthropicToolAgent(client, model, on_usage=lambda _task, u: usage.add(u))
+    agent = _DecisionRecorder(client, model, on_usage=lambda _task, u: usage.add(u))
     ai = get_ai_settings()
     limits = get_settings()
     started = time.monotonic()
@@ -150,6 +169,11 @@ async def run_tools(client, model: str, q: str, today, keep_answer: bool) -> Res
     if kind is IntentKind.REGISTER:
         values = judged.ai_values or {}
         return Result(judged.tool or _register_kind(values), values, usage, ms, answer)
+    picked = _picked(agent)
+    if kind is IntentKind.ACTION and picked is not None:
+        return Result(picked[0], picked[1], usage, ms, answer)
+    if picked is not None and tools.read_entry(picked[0]) is not None:
+        return Result(picked[0], picked[1], usage, ms, answer)
     return Result(tools.DECLINE, {"unclear": not judged.out_of_scope}, usage, ms, answer)
 
 
@@ -161,7 +185,7 @@ def score(row: dict, result: Result) -> dict:
         args_ok = result.args.get("scr_id") == row.get("scr_id")
     elif row["tool"] == tools.DECLINE:
         args_ok = result.args.get("unclear") == row.get("unclear", False)
-    elif row["tool"] in tools.REGISTER_TOOLS:
+    elif row["tool"] in tools.REGISTER_TOOLS or tools.card_entry(row["tool"]) is not None:
         args_ok = all(result.args.get(k) == v for k, v in row.get("args", {}).items())
     else:
         args_ok = True

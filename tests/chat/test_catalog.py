@@ -21,6 +21,22 @@ from tests.chat.test_tools import room_of, use_agent
 
 BUILTIN = {"navigate", "search_guide", "decline"}
 REGISTER = {"draft_schedule", "draft_care_item"}
+# 2단계 쓰기 확인 카드(ACTION)
+ACTION = {
+    "draft_care_completion",
+    "draft_daily_health_record",
+    "draft_expense_limit",
+    # 수정 4개(2단계 ②) : 모두 코드 칸이 있어 스냅샷만이면 안 실림
+    "draft_schedule_update",
+    "draft_care_item_update",
+    "draft_expense_update",
+    "draft_pet_update",
+    # 배열·파일 칸(2단계 ③) : 코드 칸이 있어 스냅샷만이면 안 실림
+    "draft_expense",
+    "draft_observation_cycle",
+}
+# 스냅샷(코드 값 없음)으로도 싣는 ACTION : 코드 칸 없음
+ACTION_WITHOUT_CODES = {"draft_care_completion", "draft_expense_limit"}
 READ = {
     "get_checkup",
     "get_health_indicators",
@@ -82,7 +98,7 @@ def test_스냅샷의_CARD_도구마다_설명이_있고_설명의_Java_도구�
     java_prompts = {name for name, prompt in prompts.items() if not prompt.builtin}
 
     assert cards >= REGISTER
-    assert java_prompts == REGISTER | READ
+    assert java_prompts == REGISTER | READ | ACTION
     assert java_prompts <= {tool.name for tool in snapshot}
     assert {name for name, prompt in prompts.items() if prompt.builtin} == BUILTIN
 
@@ -266,14 +282,14 @@ def test_가짜_공통코드는_룰_흐름의_코드와_같아야_한다():
 
 def test_설명이_없는_Java_도구는_싣지_않고_경고해야_한다(caplog):
     raw = fake_catalog_json()
-    extra = copy.deepcopy(tool_of(raw, "draft_care_item")) | {"name": "draft_expense"}
+    extra = copy.deepcopy(tool_of(raw, "draft_care_item")) | {"name": "draft_unknown"}
     raw["tools"].append(extra)
 
     with caplog.at_level(logging.WARNING, logger="app.chat.catalog"):
         built = build(raw)
 
-    assert set(built.entries) == REGISTER | READ
-    assert "draft_expense 설명 없음" in caplog.text
+    assert set(built.entries) == REGISTER | READ | ACTION
+    assert "draft_unknown 설명 없음" in caplog.text
 
 
 def test_Java_목록에_없는_설명_도구는_싣지_않고_경고해야_한다(caplog):
@@ -312,42 +328,31 @@ def test_지원하지_않는_칸_타입이면_싣지_않아야_한다(caplog):
 # 기동(설계 4-2절 1·2번)
 
 
-def on(enabled: bool = True) -> Settings:
-    return Settings(_env_file=None, chat_tool_agent=enabled)
-
-
-def test_CHAT_TOOL_AGENT가_꺼져_있으면_도구_목록을_받지_않아야_한다():
-    client = FakeToolCatalogClient()
-
-    installed = asyncio.run(catalog.install(on(False), client))
-
-    assert installed is None
-    assert client.calls == 0
-
-
 def test_Java_목록을_받으면_등록_도구를_실어야_한다():
-    installed = asyncio.run(catalog.install(on(), FakeToolCatalogClient()))
+    installed = asyncio.run(catalog.install(FakeToolCatalogClient()))
     assert installed is not None
 
     assert installed.source == "java"
-    assert set(installed.entries) == REGISTER | READ
+    assert set(installed.entries) == REGISTER | READ | ACTION
 
 
 def test_Java가_실패하면_스냅샷으로_뜨고_코드_칸_도구는_빼야_한다(caplog):
     with caplog.at_level(logging.WARNING, logger="app.chat.catalog"):
-        installed = asyncio.run(catalog.install(on(), FakeToolCatalogClient(fail=True)))
+        installed = asyncio.run(catalog.install(FakeToolCatalogClient(fail=True)))
     assert installed is not None
     tools.use_catalog(installed)
 
     assert installed.source == "snapshot"
-    assert set(installed.entries) == READ_WITHOUT_CODES
-    assert {d["name"] for d in tools.tool_definitions()} == BUILTIN | READ_WITHOUT_CODES
+    assert set(installed.entries) == READ_WITHOUT_CODES | ACTION_WITHOUT_CODES
+    assert {d["name"] for d in tools.tool_definitions()} == (
+        BUILTIN | READ_WITHOUT_CODES | ACTION_WITHOUT_CODES
+    )
     assert "Java 받기 실패" in caplog.text
     assert "공통코드 값 없음" in caplog.text
 
 
 def test_Java_응답_모양이_다르면_스냅샷으로_떠야_한다():
-    installed = asyncio.run(catalog.install(on(), FakeToolCatalogClient(response={"tools": 1})))
+    installed = asyncio.run(catalog.install(FakeToolCatalogClient(response={"tools": 1})))
     assert installed is not None
 
     assert installed.source == "snapshot"
@@ -357,11 +362,11 @@ def test_structureVersion이_스냅샷과_다르면_경고하고_Java_응답을_
     client = FakeToolCatalogClient(response=fake_catalog_json(structure_version="changed"))
 
     with caplog.at_level(logging.WARNING, logger="app.chat.catalog"):
-        installed = asyncio.run(catalog.install(on(), client))
+        installed = asyncio.run(catalog.install(client))
 
     assert installed is not None
     assert installed.source == "java"
-    assert set(installed.entries) == REGISTER | READ
+    assert set(installed.entries) == REGISTER | READ | ACTION
     assert "structureVersion 다름" in caplog.text
 
 
@@ -384,7 +389,6 @@ def test_Java_클라이언트는_내부_API_응답의_data를_읽어야_한다()
 
 
 def test_기동_때_켜져_있고_Java가_없으면_builtin_도구만_실어야_한다(monkeypatch):
-    monkeypatch.setenv("CHAT_TOOL_AGENT", "true")
     monkeypatch.setenv("BACKEND_BASE_URL", "")
     get_settings.cache_clear()
     tools.use_catalog(None)
@@ -394,7 +398,7 @@ def test_기동_때_켜져_있고_Java가_없으면_builtin_도구만_실어야_
 
     get_settings.cache_clear()
     active = tools.active_catalog()
-    assert names == BUILTIN | READ_WITHOUT_CODES
+    assert names == BUILTIN | READ_WITHOUT_CODES | ACTION_WITHOUT_CODES
     assert active is not None and active.source == "snapshot"
 
 
@@ -414,25 +418,24 @@ def register_card(client, java, tool: str, raw: dict, text: str) -> tuple[dict, 
     return evs[0][1], evs[-1][1]
 
 
-def test_케어_항목_도구에_반복_유형이_없으면_케어_항목으로_반복_유형을_되물어야_한다(client, java):
+def test_케어_항목_도구에_반복_유형이_없으면_카드_빈_칸에_반복_유형이_있어야_한다(client, java):
+    # SCR-AIM-012 2단계 ④ : 빈 칸은 카드 missing으로, 되물음 글은 저장하지 않음
     intent, done = register_card(
         client, java, "draft_care_item", {"care_artcl_nm": "발톱 깎기"}, "발톱 깎기 넣어줘"
     )
 
-    assert intent["kind"] == "REGISTER"
-    assert done["card"]["cardType"] == "ASK"
-    assert done["card"]["careArtclNm"] == "발톱 깎기"
-    assert done["card"]["missing"] == ["careZoneCd"]
-    assert "매일 하나요, 주기마다 하나요?" in done["message"]["cnvrsCn"]
+    assert intent["kind"] == "ACTION"
+    assert done["action"]["input"]["careArtclNm"] == "발톱 깎기"
+    assert done["action"]["missing"] == ["careZoneCd"]
+    assert done["message"] is None
 
 
-def test_병원_일정의_빈_칸은_Java_requiredIf로_되물어야_한다(client, java):
+def test_병원_일정의_빈_칸은_Java_requiredIf로_정해야_한다(client, java):
     raw = {"schdl_knd_cd": "HLTC0057", "schdl_ymd": "2026-10-06"}
 
     _, done = register_card(client, java, "draft_schedule", raw, "6일에 병원 잡아줘")
 
-    assert done["card"]["cardType"] == "ASK"
-    assert done["card"]["missing"] == ["ckupTypeCd", "hsptlNm"]
+    assert done["action"]["missing"] == ["ckupTypeCd", "hsptlNm"]
 
 
 def test_Java_규칙이_바뀌면_되묻는_칸도_따라_바뀌어야_한다(client, java):
@@ -445,7 +448,7 @@ def test_Java_규칙이_바뀌면_되묻는_칸도_따라_바뀌어야_한다(cl
 
     _, done = register_card(client, java, "draft_schedule", raw, "6일에 병원 잡아줘")
 
-    assert done["card"]["missing"] == ["ckupTypeCd"]
+    assert done["action"]["missing"] == ["ckupTypeCd"]
 
 
 def test_빈_칸_LLM_이름은_Java_칸을_LLM_칸으로_되돌려야_한다():

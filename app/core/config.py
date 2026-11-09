@@ -12,6 +12,8 @@ class Settings(BaseSettings):
 
     # Python→Java 내부 API 주소(인증 확인·대화 저장) : 빈 값이면 /ai/** 전부 502
     backend_base_url: str = ""
+    # 로그 파일 폴더(배포 서버 /home/ggorilab/logs) : 비면 콘솔에만
+    log_dir: str = ""
 
     # FN-AIM-008-07 : OCR 분석 제한 시간(초), Vision·LLM 정리 합산
     ocr_timeout_sec: float = 15.0
@@ -39,9 +41,6 @@ class Settings(BaseSettings):
     # FN-AIM-002-07 : 답변 첫 글자 제한·전체 제한(초)
     answer_first_token_sec: float = 10.0
     answer_total_sec: float = 60.0
-    # tool calling 1단계 실험(docs/design/tool-calling.md) : 켜면 분류·추출 대신 도구 고르기 LLM
-    # 2026-11-08 결정 : 기본 켬 (끄려면 CHAT_TOOL_AGENT=false)
-    chat_tool_agent: bool = True
 
 
 @lru_cache

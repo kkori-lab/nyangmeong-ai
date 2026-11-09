@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 
 import httpx2
 import pytest
@@ -7,7 +8,7 @@ import pytest
 from app.chat import repository, rules, tools
 from app.chat.clients import AnthropicToolAgent, ToolDecision
 from app.chat.repository import JavaToolReader
-from app.chat.service import DISCLAIMER, READ_NO_PET, READ_PET_ASK
+from app.chat.service import DISCLAIMER, READ_MAX_PETS, READ_NO_PET, READ_PET_ASK
 from app.core.backend import external_error
 from app.core.config import Settings
 from tests.chat.fakes import FakeToolAgent
@@ -24,16 +25,32 @@ class FakeToolReader:
     - data : 돌려줄 Java data, fail : 502
     - 받은 경로·query(calls) 기록"""
 
-    def __init__(self, data: object = None, fail: bool = False) -> None:
+    def __init__(
+        self,
+        data: object = None,
+        fail: bool = False,
+        by_path: dict[str, object] | None = None,
+        fail_paths: tuple[str, ...] = (),
+    ) -> None:
         self.data = [] if data is None else data
         self.fail = fail
+        # 경로별 data(없으면 data), 이 경로들만 502
+        self.by_path = by_path or {}
+        self.fail_paths = fail_paths
         self.calls: list[tuple[str, dict]] = []
 
     async def read(self, path: str, params: dict) -> object:
         self.calls.append((path, params))
-        if self.fail:
+        if self.fail or path in self.fail_paths:
             raise external_error()
-        return self.data
+        return self.by_path.get(path, self.data)
+
+
+def payload(text: str | None) -> object:
+    """READ 결과 글 : 첫 줄은 '조회한 반려동물: 이름', 나머지는 JSON"""
+    head, body = (text or "").split("\n", 1)
+    assert head.startswith("조회한 반려동물: ")
+    return json.loads(body)
 
 
 @pytest.fixture
@@ -64,7 +81,7 @@ def test_READ_도구를_고르면_경로와_query로_Java를_부르고_결과로
             {"fromYmd": "2026-10-01", "schdlKndCd": "HLTC0057", "size": 10},
         )
     ]
-    assert json.loads(agent.results[0]) == [{"schdlNm": "병원"}]
+    assert payload(agent.results[0]) == [{"schdlNm": "병원"}]
     assert deltas(evs) == ANSWER + DISCLAIMER
     assert [m["cnvrsCn"] for m in java.ai_messages(room)] == [ANSWER + DISCLAIMER]
 
@@ -93,7 +110,7 @@ def test_도구_결과에서_메모_같은_내용_칸은_중첩까지_지워야_
 
     events(send(client, room, "다음 병원 언제야?"))
 
-    assert json.loads(agent.results[0]) == [
+    assert payload(agent.results[0]) == [
         {"schdlNm": "정기검진", "lastCycle": {"obsrvSz": 1.5, "cyclCnt": 2}}
     ]
 
@@ -107,7 +124,7 @@ def test_Java_READ가_실패하면_불러오지_못함을_도구_결과로_넘�
 
     assert evs[0][1]["kind"] == "SEARCH"
     assert agent.results == [rules.READ_FAILED]
-    assert deltas(evs) == ANSWER + DISCLAIMER
+    assert deltas(evs) == ANSWER
 
 
 # 반려동물 결정
@@ -123,9 +140,15 @@ def test_문장_속_이름으로_반려동물을_정해야_한다(client, java):
     assert reader.calls == [("/api/pets/2/health-indicators", {})]
 
 
-def test_반려동물을_못_정하면_Java_READ를_부르지_않고_이름을_되물어야_한다(client, java):
+def many_pets(java, count: int) -> str:
+    java.pets = [{"petSn": 100 + i, "petNm": f"아이{i}", "careArtclNms": []} for i in range(count)]
+    return ", ".join(p["petNm"] for p in java.pets)
+
+
+def test_이름_없이_열_마리를_넘으면_Java_READ를_부르지_않고_이름을_되물어야_한다(client, java):
     agent = use_agent(client, FakeToolAgent("get_health_indicators", {}))
     reader = use_reader(client, FakeToolReader())
+    names = many_pets(java, READ_MAX_PETS + 1)
     room = room_of(client, java)
 
     evs = events(send(client, room, "요즘 체중 어때?"))
@@ -133,7 +156,132 @@ def test_반려동물을_못_정하면_Java_READ를_부르지_않고_이름을_�
     assert evs[0][1]["kind"] == "SEARCH"
     assert reader.calls == []
     assert agent.results == []
-    assert deltas(evs) == READ_PET_ASK.format(names="초코, 뭉치") + DISCLAIMER
+    assert deltas(evs) == READ_PET_ASK.format(names=names)
+
+
+def test_이름이_둘이면_그_아이들을_마리마다_읽고_이름_줄을_붙여야_한다(client, java):
+    agent = use_agent(client, FakeToolAgent("get_health_indicators", {}))
+    reader = use_reader(
+        client,
+        FakeToolReader(
+            by_path={
+                "/api/pets/1/health-indicators": {"weight": 4},
+                "/api/pets/2/health-indicators": {"weight": 6},
+            }
+        ),
+    )
+    room = room_of(client, java)
+
+    events(send(client, room, "초코랑 뭉치 요즘 체중 어때?"))
+
+    assert sorted(path for path, _ in reader.calls) == [
+        "/api/pets/1/health-indicators",
+        "/api/pets/2/health-indicators",
+    ]
+    first, second = (agent.results[0] or "").split("\n\n")
+    assert first.startswith("조회한 반려동물: 초코\n")
+    assert json.loads(first.split("\n", 1)[1]) == {"weight": 4}
+    assert second.startswith("조회한 반려동물: 뭉치\n")
+    assert json.loads(second.split("\n", 1)[1]) == {"weight": 6}
+
+
+def test_전체_방에서_이름이_없으면_모든_아이를_읽어야_한다(client, java):
+    use_agent(client, FakeToolAgent("get_health_indicators", {}))
+    reader = use_reader(client, FakeToolReader())
+    room = room_of(client, java)
+
+    events(send(client, room, "전체 반려동물 체중 알려 줘"))
+
+    assert sorted(path for path, _ in reader.calls) == [
+        "/api/pets/1/health-indicators",
+        "/api/pets/2/health-indicators",
+    ]
+
+
+def test_펫_태그_방에서_이름이_없으면_그_아이만_읽어야_한다(client, java):
+    use_agent(client, FakeToolAgent("get_health_indicators", {}))
+    reader = use_reader(client, FakeToolReader())
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    events(send(client, room, "요즘 체중 어때?"))
+
+    assert reader.calls == [("/api/pets/1/health-indicators", {})]
+
+
+def test_한_마리가_실패해도_다른_아이_결과는_남겨야_한다(client, java):
+    agent = use_agent(client, FakeToolAgent("get_health_indicators", {}))
+    use_reader(
+        client,
+        FakeToolReader({"weight": 4}, fail_paths=("/api/pets/2/health-indicators",)),
+    )
+    room = room_of(client, java)
+
+    events(send(client, room, "전체 반려동물 체중 알려 줘"))
+
+    first, second = (agent.results[0] or "").split("\n\n")
+    assert json.loads(first.split("\n", 1)[1]) == {"weight": 4}
+    assert second == f"조회한 반려동물: 뭉치\n{rules.READ_FAILED}"
+
+
+def test_모든_아이가_실패하면_불러오지_못함_하나여야_한다(client, java):
+    agent = use_agent(client, FakeToolAgent("get_health_indicators", {}))
+    use_reader(client, FakeToolReader(fail=True))
+    room = room_of(client, java)
+
+    events(send(client, room, "전체 반려동물 체중 알려 줘"))
+
+    assert agent.results == [rules.READ_FAILED]
+
+
+def test_결과_상한은_마리_수로_나눠_마리마다_잘라야_한다(client, java):
+    agent = use_agent(client, FakeToolAgent("get_health_indicators", {}))
+    use_reader(client, FakeToolReader([{"schdlNm": "가" * 100}] * 100))
+    room = room_of(client, java)
+
+    events(send(client, room, "전체 반려동물 체중 알려 줘"))
+
+    for block in (agent.results[0] or "").split("\n\n"):
+        body = block.split("\n", 1)[1]
+        assert len(body) == rules.READ_RESULT_MAX_CHARS // 2 + len(rules.READ_TRUNCATED)
+
+
+def test_앞_결과의_번호로_상세를_읽을_때는_그_번호가_나온_아이만_불러야_한다(client, java):
+    agent = use_agent(
+        client,
+        FakeToolAgent(
+            "list_checkups", {}, follow_tool="get_checkup", follow_raw={"ckup_rcd_sn": 22}
+        ),
+    )
+    reader = use_reader(
+        client,
+        FakeToolReader(
+            by_path={
+                "/api/pets/1/checkups": [{"ckupRcdSn": 11}],
+                "/api/pets/2/checkups": [{"ckupRcdSn": 22}],
+            }
+        ),
+    )
+    room = room_of(client, java)
+
+    events(send(client, room, "전체 반려동물 마지막 검진 자세히 알려 줘"))
+
+    paths = [path for path, _ in reader.calls]
+    assert sorted(paths[:2]) == ["/api/pets/1/checkups", "/api/pets/2/checkups"]
+    assert paths[2:] == ["/api/pets/2/checkups/22"]
+    assert len(agent.results) == 2
+
+
+def test_READ_시간을_마리_수와_함께_로그로_남겨야_한다(client, java, caplog):
+    use_agent(client, FakeToolAgent("get_health_indicators", {}))
+    use_reader(client, FakeToolReader())
+    room = room_of(client, java)
+
+    with caplog.at_level("INFO", logger="app.chat.service"):
+        events(send(client, room, "전체 반려동물 체중 알려 줘"))
+
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("READ 도구 시간")]
+    assert len(lines) == 1
+    assert re.fullmatch(r"READ 도구 시간: get_health_indicators 2마리 \d+ms", lines[0])
 
 
 def test_반려동물이_없으면_등록을_안내해야_한다(client, java):
@@ -145,7 +293,7 @@ def test_반려동물이_없으면_등록을_안내해야_한다(client, java):
     evs = events(send(client, room, "요즘 체중 어때?"))
 
     assert reader.calls == []
-    assert deltas(evs) == READ_NO_PET + DISCLAIMER
+    assert deltas(evs) == READ_NO_PET
 
 
 def test_반려동물_목록을_못_받으면_error_이벤트여야_한다(client, java):
@@ -208,7 +356,7 @@ def test_결과를_보고_읽기_도구를_한_번_더_고르면_앞_결과의_�
 
     assert reader.calls == [("/api/pets/1/checkups", {}), ("/api/pets/1/checkups/7", {})]
     assert len(agent.results) == 2
-    assert json.loads(agent.results[1] or "") == [{"ckupRcdSn": 7, "hsptlNm": "메이"}]
+    assert payload(agent.results[1]) == [{"ckupRcdSn": 7, "hsptlNm": "메이"}]
     assert deltas(evs) == ANSWER + DISCLAIMER
 
 
@@ -252,7 +400,7 @@ def test_선택_번호_칸도_앞_결과에_없으면_조건에서_빼야_한다
 def test_결과를_보고_읽기_도구가_아닌_도구를_고르면_실행하지_않아야_한다(client, java):
     agent = use_agent(
         client,
-        FakeToolAgent("list_checkups", {}, follow_tool="draft_schedule", follow_raw={}),
+        FakeToolAgent("list_checkups", {}, follow_tool="navigate", follow_raw={"screen_num": 1}),
     )
     reader = use_reader(client, FakeToolReader([{"ckupRcdSn": 7}]))
     room = room_of(client, java, pet_sn=CHOCO)
@@ -275,7 +423,7 @@ def test_가계부는_문장에_이름이_없으면_대화_펫_태그와_관계�
     evs = events(send(client, room, "이번 달 가계부 얼마 썼어?"))
 
     assert reader.calls == [("/api/expenses/totals", {"startYmd": "2026-11-01"})]
-    assert deltas(evs) == ANSWER + DISCLAIMER
+    assert deltas(evs) == ANSWER
 
 
 def test_가계부는_문장_속_이름이_하나면_petSn_조건을_붙여야_한다(client, java):
@@ -307,7 +455,65 @@ def test_반려동물_칸이_없는_가계부_도구는_반려동물_목록을_�
     evs = events(send(client, room, "가계부 언제부터 썼어?"))
 
     assert reader.calls == [("/api/expenses/months", {})]
+    assert deltas(evs) == ANSWER
+
+
+# 의료 고지 범위 (FN-AIM-002-03 : 건강 관련 응답만)
+
+
+def test_가계부_READ_답변은_고지_없이_저장해야_한다(client, java):
+    use_agent(client, FakeToolAgent("list_expenses", {}))
+    use_reader(client, FakeToolReader([{"expndSn": 1}]))
+    room = room_of(client, java)
+
+    evs = events(send(client, room, "지난달 지출 알려 줘"))
+
+    assert deltas(evs) == ANSWER
+    assert [m["cnvrsCn"] for m in java.ai_messages(room)] == [ANSWER]
+
+
+def test_건강_READ_실패만이면_고지_없이_저장해야_한다(client, java):
+    use_agent(client, FakeToolAgent("list_checkups", {}))
+    use_reader(client, FakeToolReader(fail=True))
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    events(send(client, room, "검진 기록 알려 줘"))
+
+    assert [m["cnvrsCn"] for m in java.ai_messages(room)] == [ANSWER]
+
+
+def test_건강_READ_다음_가계부_READ면_고지가_붙어야_한다(client, java):
+    use_agent(client, FakeToolAgent("list_checkups", {}, follow_tool="list_expenses"))
+    reader = use_reader(client, FakeToolReader([{"ckupRcdSn": 7}]))
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    evs = events(send(client, room, "검진하고 병원비 알려 줘"))
+
+    assert len(reader.calls) == 2
     assert deltas(evs) == ANSWER + DISCLAIMER
+    assert [m["cnvrsCn"] for m in java.ai_messages(room)] == [ANSWER + DISCLAIMER]
+
+
+def test_가계부_READ_다음_건강_READ면_고지가_붙어야_한다(client, java):
+    use_agent(client, FakeToolAgent("list_expenses", {}, follow_tool="list_checkups"))
+    reader = use_reader(client, FakeToolReader([{"expndSn": 1}]))
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    evs = events(send(client, room, "병원비랑 검진 알려 줘"))
+
+    assert len(reader.calls) == 2
+    assert deltas(evs) == ANSWER + DISCLAIMER
+
+
+def test_반려동물_되물음은_고지_없이_저장해야_한다(client, java):
+    use_agent(client, FakeToolAgent("get_health_indicators", {}))
+    use_reader(client, FakeToolReader())
+    names = many_pets(java, READ_MAX_PETS + 1)
+    room = room_of(client, java)
+
+    events(send(client, room, "체중 어때?"))
+
+    assert [m["cnvrsCn"] for m in java.ai_messages(room)] == [READ_PET_ASK.format(names=names)]
 
 
 def test_연월은_YYYY_MM만_보내야_한다(client, java):

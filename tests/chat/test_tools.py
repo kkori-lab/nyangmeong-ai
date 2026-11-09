@@ -85,6 +85,16 @@ def test_도구는_builtin_등록_READ이고_설명과_인자_스키마를_모�
         "list_expense_months",
         "list_expense_pets",
         "list_expenses",
+    } | {
+        "draft_care_completion",
+        "draft_daily_health_record",
+        "draft_expense_limit",
+        "draft_schedule_update",
+        "draft_care_item_update",
+        "draft_expense_update",
+        "draft_pet_update",
+        "draft_expense",
+        "draft_observation_cycle",
     }
     for d in defs.values():
         assert "쓸 때:" in d["description"] and "말하는 법:" in d["description"]
@@ -182,26 +192,18 @@ def test_목차에_없는_청크는_버리고_M1_결과만():
 # 설정과 클라이언트
 
 
-def settings(enabled: bool, key: str = "test-key") -> Settings:
-    return Settings(_env_file=None, llm_api_key=key, llm_model=MODEL, chat_tool_agent=enabled)
-
-
-def test_설정이_꺼져_있으면_도구_흐름_없음_키도_보지_않는다():
-    assert get_tool_agent(settings(False, key="")) is None
+def settings(key: str = "test-key") -> Settings:
+    return Settings(_env_file=None, llm_api_key=key, llm_model=MODEL)
 
 
 def test_설정을_켜면_Anthropic_도구_구현():
-    assert isinstance(get_tool_agent(settings(True)), AnthropicToolAgent)
+    assert isinstance(get_tool_agent(settings()), AnthropicToolAgent)
 
 
 def test_설정을_켜고_키가_비면_502():
     with pytest.raises(AppError) as raised:
-        get_tool_agent(settings(True, key=""))
+        get_tool_agent(settings(key=""))
     assert (raised.value.code, raised.value.http_code) == ("EXTERNAL_API_ERROR", 502)
-
-
-def test_설정이_없으면_도구_흐름이_켜져야_한다():
-    assert Settings(_env_file=None).chat_tool_agent is True
 
 
 # 도구별 SSE(응답 계약 그대로, 설계 6절)
@@ -225,10 +227,11 @@ def test_search_guide는_안내서를_도구_결과로_돌려주고_SEARCH_답�
     evs = events(send(client, room, "캐릭터는 어디서 만들 수 있어요?"))
 
     assert evs[0][1]["kind"] == "SEARCH"
-    assert deltas(evs) == "안내서대로 답할게요." + DISCLAIMER
+    # FN-AIM-002-03 : 사용법 안내는 건강 관련 응답이 아니라 고지 없음
+    assert deltas(evs) == "안내서대로 답할게요."
     assert rules.find_guide("6-1").text in agent.results[0]
     assert evs[-1][1]["shortcut"]["scrId"] == "SCR-MYP-010"
-    assert [m["cnvrsCn"] for m in java.ai_messages(room)] == ["안내서대로 답할게요." + DISCLAIMER]
+    assert [m["cnvrsCn"] for m in java.ai_messages(room)] == ["안내서대로 답할게요."]
 
 
 def test_안내서_청크가_없으면_범위_안내(client, java):
@@ -238,6 +241,67 @@ def test_안내서_청크가_없으면_범위_안내(client, java):
 
     assert evs[0][1]["kind"] == "FALLBACK"
     assert [m["cnvrsCn"] for m in java.ai_messages(room)] == [OUT_OF_SCOPE_MESSAGE]
+
+
+@pytest.mark.parametrize("text", ["안녕하세요", "고마워!!", "ㅋㅋㅋ", "네 감사합니다~"])
+def test_인사_잡담에_도구_없이_답하면_고지가_없어야_한다(client, java, text):
+    # FN-AIM-002-03 추가 요청(2026-11-09) : 인사·잡담 바로 답은 건강 관련 응답이 아님
+    use_agent(client, FakeToolAgent(texts=("반가워요.",)))
+    room = room_of(client, java)
+    evs = events(send(client, room, text))
+
+    assert evs[0][1]["kind"] == "SEARCH"
+    assert deltas(evs) == "반가워요."
+    assert [m["cnvrsCn"] for m in java.ai_messages(room)] == ["반가워요."]
+
+
+def test_인사에_건강_질문이_섞이면_고지가_붙어야_한다(client, java):
+    use_agent(client, FakeToolAgent(texts=("병원에 가 보세요.",)))
+    room = room_of(client, java)
+    evs = events(send(client, room, "안녕 강아지가 토해"))
+
+    assert deltas(evs) == "병원에 가 보세요." + DISCLAIMER
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("안녕히 계세요~", True),
+        ("ㅇㅇ ㅇㅋ", True),
+        ("좋아요 사료 추천해줘", False),
+        ("<질문>", False),
+        ("강아지가 포도 먹어도 돼?", False),
+    ],
+)
+def test_잡담은_문장_전체가_인사_감사_맞장구일_때만이어야_한다(text, expected):
+    assert rules.is_small_talk(text) is expected
+
+
+def test_자리_표시_글은_도구를_고르지_않고_뜻_모를_입력_안내여야_한다(client, java):
+    agent = use_agent(client, FakeToolAgent(texts=("질문이 비어 있어요.",)))
+    room = room_of(client, java)
+    evs = events(send(client, room, "<질문>"))
+
+    assert names(evs) == ["intent", "done"]
+    assert evs[0][1]["kind"] == "FALLBACK"
+    assert agent.decides == []
+    saved = [m["cnvrsCn"] for m in java.ai_messages(room)]
+    assert len(saved) == 1
+    assert DISCLAIMER not in saved[0]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("<질문>", True),
+        (" < > ", True),
+        ("...", True),
+        ("<질문> 강아지 토해", False),
+        ("질문", False),
+    ],
+)
+def test_자리_표시는_꺾쇠로만_된_글이나_기호뿐인_글이어야_한다(text, expected):
+    assert rules.is_placeholder(text) is expected
 
 
 def test_도구_없이_글이면_그_스트림을_SEARCH_답변으로(client, java):
@@ -254,17 +318,23 @@ def test_도구_없이_글이면_그_스트림을_SEARCH_답변으로(client, ja
 
 
 def test_등록_도구는_추출기_없이_도구_인자로_카드(client, java):
-    raw = {"schdl_knd_cd": "HLTC0057", "ckup_type_cd": "HLTC0002", "hsptl_nm": "메이 동물병원"}
+    raw = {
+        "schdl_knd_cd": "HLTC0057",
+        "ckup_type_cd": "HLTC0002",
+        "hsptl_nm": "메이 동물병원",
+        "schdl_ymd": "2026-10-06",
+        "schdl_tm": "15:00",
+    }
     agent = use_agent(client, FakeToolAgent("draft_schedule", raw))
     extractor = use_extractor(client, Extractor({"hsptl_nm": "다른 병원"}))
     room = room_of(client, java, pet_sn=CHOCO)
     evs = events(send(client, room, "다음 주 화요일 오후 3시에 병원 가는 거 등록해 줘"))
 
-    assert evs[0][1]["kind"] == "REGISTER"
-    card = evs[-1][1]["card"]
-    assert card["cardType"] == "SCHEDULE"
-    assert (card["schdlYmd"], card["schdlTm"]) == ("2026-10-06", "15:00")
-    assert (card["hsptlNm"], card["ckupTypeCd"]) == ("메이 동물병원", "HLTC0002")
+    # SCR-AIM-012 2단계 ④ : 등록 카드도 확인 카드(ACTION)
+    assert evs[0][1]["kind"] == "ACTION"
+    values = evs[-1][1]["action"]["input"]
+    assert (values["schdlDt"], values["hrInptYn"]) == ("2026-10-06T15:00:00", True)
+    assert (values["hsptlNm"], values["ckupTypeCd"]) == ("메이 동물병원", "HLTC0002")
     assert extractor.calls == []
     assert agent.decides[0][1] == TODAY
 
@@ -275,7 +345,7 @@ def test_등록_요청은_라우팅_키워드가_있어도_도구_고르기로(c
     room = room_of(client, java, pet_sn=CHOCO)
     evs = events(send(client, room, "내일 3시 병원 예약 잡아줘"))
 
-    assert evs[0][1]["kind"] == "REGISTER"
+    assert evs[0][1]["kind"] == "ACTION"
     assert agent.decides[0][2] is None
 
 
@@ -303,14 +373,14 @@ def test_인자_거부나_빈_응답은_판단_못_함(client, java, tool, raw):
     assert [m["cnvrsCn"] for m in java.ai_messages(room)] == [FALLBACK_MESSAGE]
 
 
-def test_룰_라우팅_문장은_도구_고르기를_부르지_않는다(client, java):
+def test_룰_라우팅_문장은_도구_고르기가_실패하면_그_행으로_이동해야_한다(client, java):
     # FN-AIM-002-10
     agent = use_agent(client, FakeToolAgent(fail=True))
     room = room_of(client, java)
     evs = events(send(client, room, "일정 등록할래"))
 
     assert (evs[0][1]["kind"], evs[0][1]["scrId"]) == ("ROUTE", "SCR-HLT-003")
-    assert agent.decides == []
+    assert len(agent.decides) == 1
 
 
 def test_키워드에_걸린_질문꼴은_힌트와_함께_도구_고르기(client, java):
@@ -339,7 +409,7 @@ def test_도구_고르기_장애여도_키워드에_걸린_질문은_ROUTE(clien
     assert evs[0][1]["kind"] == "ROUTE"
 
 
-def test_설정을_끄면_도구_고르기를_부르지_않는다(client, java):
+def test_도구_고르기_가짜를_끼우지_않으면_기존_판정으로_답해야_한다(client, java):
     room = room_of(client, java)
     evs = events(send(client, room, "주식 추천해 줘"))
 

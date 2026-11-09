@@ -2,7 +2,7 @@ import json
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, Form, Path, Query, UploadFile
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -10,11 +10,13 @@ from pydantic import BaseModel
 from app.chat import rules, service
 from app.chat.clients import (
     AnswerGenerator,
+    ImageIntentJudge,
     IntentClassifier,
     RegisterExtractor,
     TitleGenerator,
     ToolAgent,
     get_answer_generator,
+    get_image_intent_judge,
     get_intent_classifier,
     get_register_extractor,
     get_title_generator,
@@ -31,6 +33,8 @@ from app.chat.repository import (
     get_tool_reader,
 )
 from app.chat.schemas import (
+    MAX_MESSAGE_LENGTH,
+    ActionResultRequest,
     ConversationCreateRequest,
     MessageSendRequest,
     ReceiptResultRequest,
@@ -39,6 +43,7 @@ from app.chat.schemas import (
 from app.core import response
 from app.core.auth import require_member, require_requested_with
 from app.core.config import Settings, get_settings
+from app.core.image import MAX_IMAGE_BYTES
 
 # 대화 API의 회원 판정은 Java 대화 내부 API(Cookie) : 별도 인증 확인 호출 없음
 router = APIRouter(prefix="/ai/conversations", dependencies=[Depends(require_requested_with)])
@@ -52,6 +57,21 @@ Repo = Annotated[ConversationRepository, Depends(get_conversation_repository)]
 async def me(mbr_sn: Member) -> JSONResponse:
     # FN-AIM-011-03 : 인증 확인용. Java /internal/auth/check 결과만 반환
     return response.success({"mbrSn": mbr_sn})
+
+
+# 인증 먼저 : 쿠키 없는 요청은 LLM 미호출
+@me_router.post("/image-intent", dependencies=[Depends(require_member)])
+async def judge_image_intent(
+    file: UploadFile,
+    judge: Annotated[ImageIntentJudge, Depends(get_image_intent_judge)],
+    cnvrs_cn: Annotated[str | None, Form(alias="cnvrsCn", max_length=MAX_MESSAGE_LENGTH)] = None,
+    # 판단 미사용 : React가 다음 요청(영수증·캐릭터)에 사용
+    pet_sn: Annotated[int | None, Form(alias="petSn", ge=1)] = None,
+) -> JSONResponse:
+    # 10MB + 1바이트까지만 읽기 : 초과 판정용
+    image = await file.read(MAX_IMAGE_BYTES + 1)
+    kind = await service.judge_image_intent(judge, image, file.filename or "", cnvrs_cn)
+    return response.success({"kind": kind})
 
 
 # 생성만 제목 생성(LLM) 전에 인증 확인 : 로그인하지 않은 요청이 LLM을 부르지 않게
@@ -109,7 +129,7 @@ async def send_message(
     room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
 ) -> StreamingResponse:
     # 스트림 시작 전 오류(400·401·403·404·502)는 다른 API와 같은 JSON 응답
-    turn = await service.prepare_turn(repo, room_sn, body.cnvrs_cn, body.draft)
+    turn = await service.prepare_turn(repo, room_sn, body.cnvrs_cn, body.draft, body.action)
     limits = service.AnswerLimits(settings.answer_first_token_sec, settings.answer_total_sec)
     register = service.RegisterDeps(contexts, extractor, rules.today_kst())
     events = service.answer_turn(
@@ -126,6 +146,17 @@ async def save_register_result(
 ) -> JSONResponse:
     # FN-AIM-012-11·16 : 등록 카드의 결과(등록됨·취소됨) 텍스트 요약 저장
     result = await service.save_register_result(repo, room_sn, body)
+    return response.success(result.model_dump(by_alias=True), http_code=201)
+
+
+@router.post("/{aiCnvrsRoomSn}/action-result")
+async def save_action_result(
+    body: ActionResultRequest,
+    repo: Repo,
+    room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
+) -> JSONResponse:
+    # 2단계 쓰기 : 확인 카드의 결과(완료·취소·실패) 텍스트 요약 저장
+    result = await service.save_action_result(repo, room_sn, body)
     return response.success(result.model_dump(by_alias=True), http_code=201)
 
 

@@ -49,16 +49,25 @@ jobs:
             cd ${{ secrets.OCI_DEPLOY_PATH }}
             git pull origin main
             
-            # 4. .env 파일 생성
-            if [ ! -f ${{ secrets.OCI_DEPLOY_PATH }}/.env ]; then
-              cat > ${{ secrets.OCI_DEPLOY_PATH }}/.env << 'EOF'
+            # 4. .env·.env.local 생성 : 매 배포 secret ENV_FILE로 덮어씀(앱은 .env.local을 읽음)
+            cat > ${{ secrets.OCI_DEPLOY_PATH }}/.env << 'EOF'
             ${{ secrets.ENV_FILE }}
             EOF
-              echo ".env 파일 생성 완료"
-            else
-              echo ".env 파일 이미 존재, 스킵"
+            cp ${{ secrets.OCI_DEPLOY_PATH }}/.env ${{ secrets.OCI_DEPLOY_PATH }}/.env.local
+            chmod 600 ${{ secrets.OCI_DEPLOY_PATH }}/.env ${{ secrets.OCI_DEPLOY_PATH }}/.env.local
+            echo ".env·.env.local 갱신 완료"
+
+            # 4-1. 로그 폴더 : 그룹 deploy, 폴더 2770(setgid라 새 파일도 그룹 deploy)
+            LOG_DIR=$(grep -E '^[[:space:]]*LOG_DIR=' ${{ secrets.OCI_DEPLOY_PATH }}/.env.local | tail -n 1 | cut -d= -f2- | tr -d "\"'" | xargs)
+            if [ -n "$LOG_DIR" ]; then
+              SERVICE_USER=$(systemctl show -p User --value ai-backend)
+              [ -z "$SERVICE_USER" ] && SERVICE_USER=$(whoami)
+              sudo mkdir -p "$LOG_DIR"
+              sudo chown "$SERVICE_USER":deploy "$LOG_DIR"
+              sudo chmod 2770 "$LOG_DIR"
+              echo "로그 폴더 준비 완료: $LOG_DIR"
             fi
-            
+
             # 5. venv 없으면 생성
             if [ ! -f "venv/bin/activate" ]; then
               python3.12 -m venv venv

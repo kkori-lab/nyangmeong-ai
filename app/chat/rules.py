@@ -97,6 +97,30 @@ def _question_markers() -> tuple[str, ...]:
     return tuple(_compact(marker) for marker in _load("routing.yaml")["question_markers"])
 
 
+# 추가 요청(2026-11-09) : 문장 전체가 인사·감사·맞장구면 잡담. 건강 질문이 섞이면 잡담 아님
+_SMALL_TALK = re.compile(
+    r"(안녕(하세요|하십니까|히계세요|히가세요)?|하이|헬로|반가워요?|반갑습니다"
+    r"|고마워요?|고맙습니다|감사(해요|합니다)?|땡큐|ㄳ|ㄱㅅ"
+    r"|좋아요?|좋네요?|알겠어요?|알겠습니다|알았어요?|응|네|넵|예|ㅇ|ㅇㅋ|오케이|굿"
+    r"|잘자|잘가|바이|수고하세요|수고했어)+"
+)
+_SMALL_TALK_NOISE = re.compile(r"[\sㅋㅎㅠㅜ~!?.,^]+")
+
+
+def is_small_talk(text: str) -> bool:
+    # 웃음·기호만 있어도 잡담 : 그 밖의 글자가 하나라도 남으면 잡담 아님
+    rest = _SMALL_TALK_NOISE.sub("", text)
+    return rest == "" or _SMALL_TALK.fullmatch(rest) is not None
+
+
+# 추가 요청(2026-11-09) : "<질문>" 같은 자리 표시·기호뿐인 글은 도구 고르기 없이 unclear 안내
+_PLACEHOLDER = re.compile(r"<[^<>]*>|[\W_]*")
+
+
+def is_placeholder(text: str) -> bool:
+    return _PLACEHOLDER.fullmatch(text.strip()) is not None
+
+
 def is_question(text: str) -> bool:
     # 범위 밖 질문 차단(2026-10-30) : 키워드에 걸린 질문꼴 입력은 AI 분류로 확인
     compact = _compact(text)
@@ -362,6 +386,12 @@ _CYCLE_RULES = (
 _CLOCK = re.compile(r"(오전|오후|아침|저녁|밤|낮|새벽)?\s*(\d{1,2})\s*시\s*(반|(\d{1,2})\s*분)?")
 _HH_MM = re.compile(r"(?<![\d:])([01]?\d|2[0-3]):([0-5]\d)(?![\d:])")
 
+
+def mentions_date(text: str) -> bool:
+    """문장에 날짜 말("어제"·"10월 3일"·"다음 주 화요일" 등)이 있는지 (_DATE_RULES와 같은 규칙)"""
+    return any(re.search(pattern, text) for pattern, _ in _DATE_RULES)
+
+
 _HOSPITAL = re.compile(r"([가-힣A-Za-z0-9]+)\s?(동물병원|동물의료센터|메디컬센터|병원)")
 # 병원명 앞말로 보지 않는 말
 _NOT_HOSPITAL_PREFIX = re.compile(
@@ -568,8 +598,8 @@ def _drop_free_text(value: object) -> object:
     return value
 
 
-def read_result_text(data: object) -> str:
+def read_result_text(data: object, max_chars: int = READ_RESULT_MAX_CHARS) -> str:
     text = json.dumps(_drop_free_text(data), ensure_ascii=False, default=str)
-    if len(text) <= READ_RESULT_MAX_CHARS:
+    if len(text) <= max_chars:
         return text
-    return text[:READ_RESULT_MAX_CHARS] + READ_TRUNCATED
+    return text[:max_chars] + READ_TRUNCATED

@@ -256,6 +256,63 @@
 - 결과 (2026-11-06): 건강 READ 13개(번호 칸 3개 추가)·가계부 READ 6개, 한 턴 READ 최대 2번. 추가 요청 5개(테스트 기대값 3·tool_use 여럿 400 수정·`disable_parallel_tool_use`). 검증 통과(루프 1회차 실패 뒤 다시 검증), 사람 확인
 - 연결 남음: 없음
 
+## SCR-AIM-004 대화창 · 답변 종류별 의료 고지 범위 (추가 요청) — 끝
+- 기능: FN-AIM-002-03 "건강 관련 응답 하단에" 고지 — 고지가 붙는 답변 경로를 전수조사(일반 검색·사용법·건강 READ·가계부 READ·되물음·READ 실패 문구 등)한 뒤 건강 관련만 붙게 맞춘다 (위 `끝` 절에서 센 기능. 대조에 다시 세지 않는다). 2026-11-06 사람 결정: 쓰기 기능 다음에 한다
+- 기다리는 것: 없음
+- 완료 조건: `/start` 기획의 완료 조건을 따른다. 대화창은 항상 도구 흐름(2026-11-09, `CHAT_TOOL_AGENT` 삭제).
+
+## SCR-AIM-012 대화창 · 2단계 쓰기 ① ACTION 계약·단순 등록 3개 (추가 요청) — 끝
+- 기능: `docs/api/chat.md` ACTION 계약 초안, 범용 ACTION 경로, `draft_care_completion`·`draft_daily_health_record`·`draft_expense_limit` (기능 ID는 기능명세서에 아직 없음 — 설계 `docs/design/tool-catalog.md` 8절 0번·5번, 응답 계약은 `docs/design/tool-calling.md` 6절. 2026-11-06 사람 결정: CARD 12개 전부, 6절 ACTION 계약, 출처 코드 없이)
+- 기다리는 것: 프론트 범용 카드(LJS 프론트, 연결 확인)
+- 완료 조건: `/start` 기획의 완료 조건을 따른다. `CHAT_TOOL_AGENT`를 끈 기본 동작은 지금과 같다.
+- 끝(2026-11-09, 검증 2회차 통과·사람 확인): 추가-1(키워드 문장도 도구 고르기)·추가-3(`CHAT_TOOL_AGENT` 삭제, 항상 도구 흐름) 함께
+- 연결 남음: ACTION 카드 폼·[확인] 실행·`action-result` 호출 (프론트 범용 카드, LJS 프론트)
+
+## SCR-AIM-011 공통 · 배포 서버 로그 파일 기록 (추가 요청) — 끝
+- 기능: 배포 서버(gunicorn)에서 Python 로그가 파일에 남지 않는다(2026-11-08 사람 확인). Java 서버의 로그 설정(파일 위치·회전·형식)을 확인해 같은 방식으로 맞춘다. 기동 로그 `도구 목록: …`으로 배포 서버 tool calling 미동작 원인(설정 미반영 / 도구 목록 snapshot)을 가린다. 2026-11-08 사람 결정: 2단계 쓰기 ① 다음 마일스톤
+- 기다리는 것: 없음 (Java 로그 설정 확인 2026-11-09, 정한 것은 핸드오프 "다음에 할 것" 맨 위)
+- 완료 조건: `/start` 기획의 완료 조건을 따른다.
+
+## SCR-AIM-012 대화창 · 2단계 쓰기 ② 수정 4개 (READ → CARD, 추가 요청) — 끝
+- 기능: `draft_schedule_update`·`draft_care_item_update`·`draft_expense_update`·`draft_pet_update` — 수정할 번호는 같은 턴 READ 결과에서만 (기능 ID는 기능명세서에 아직 없음 — 설계 `docs/design/tool-catalog.md` 8절 0번·5번, 응답 계약은 `docs/design/tool-calling.md` 6절. 2026-11-06 사람 결정: CARD 12개 전부, 6절 ACTION 계약, 출처 코드 없이)
+- 기다리는 것: 프론트 범용 카드(LJS 프론트, 연결 확인)
+- 완료 조건: `/start` 기획의 완료 조건을 따른다. 대화창은 항상 도구 흐름(2026-11-09, `CHAT_TOOL_AGENT` 삭제).
+- 끝(2026-11-09, 검증 통과·사람 확인): 추가-1(`tool_eval` READ·ACTION 세기)·추가-2(READ 2번 뒤 카드·0자 안내)·추가-3(날짜만 바꾸면 원래 시간 유지) 함께
+- 연결 남음: 수정 카드 PATCH 폼·[확인] 실행·`action-result` 호출 (프론트 범용 카드, LJS 프론트)
+
+## SCR-AIM-012 대화창 · 2단계 쓰기 ③ 배열·파일 칸 3개 (추가 요청) — 끝
+- 기능: `draft_expense`(`lines`)·`draft_receipt_save`(`pets`, `recptSn`)·`draft_observation_cycle`(`file` — 사진은 React 카드에서 첨부) (기능 ID는 기능명세서에 아직 없음 — 설계 `docs/design/tool-catalog.md` 8절 0번·5번, 응답 계약은 `docs/design/tool-calling.md` 6절. 2026-11-06 사람 결정: CARD 12개 전부, 6절 ACTION 계약, 출처 코드 없이)
+- 기다리는 것: 프론트 범용 카드(LJS 프론트, 연결 확인)
+- 완료 조건: `/start` 기획의 완료 조건을 따른다. 대화창은 항상 도구 흐름(2026-11-09, `CHAT_TOOL_AGENT` 삭제).
+- 끝(2026-11-09, 검증 통과·사람 확인): `draft_expense`·`draft_observation_cycle`, 카탈로그 배열·파일 칸, 추가-1(돌려받은 카드의 날짜 유지) 함께
+- 넘김: `draft_receipt_save` (저장 전 OCR 영수증 번호를 주는 READ가 없음, SCR-AIM-013 ⑤ 팀 결정 뒤, LJS)
+- 연결 남음: 배열·파일 칸 카드 폼·사진 첨부 multipart 실행·`action-result` 호출 (프론트 범용 카드, LJS 프론트)
+
+## SCR-AIM-012 대화창 · 2단계 쓰기 ④ 기존 등록 카드 2개 ACTION 전환 (추가 요청) — 끝
+- 기능: `draft_schedule`·`draft_care_item`을 REGISTER `done.card`에서 ACTION으로 — 프론트 범용 카드 연결 뒤 (기능 ID는 기능명세서에 아직 없음 — 설계 `docs/design/tool-catalog.md` 8절 0번·5번, 응답 계약은 `docs/design/tool-calling.md` 6절. 2026-11-06 사람 결정: CARD 12개 전부, 6절 ACTION 계약, 출처 코드 없이)
+- 기다리는 것: 프론트 범용 카드(LJS 프론트, 연결 확인)
+- 완료 조건: `/start` 기획의 완료 조건을 따른다. 대화창은 항상 도구 흐름(2026-11-09, `CHAT_TOOL_AGENT` 삭제).
+- 연결 남음: ④-1·④-3 일정·케어 항목 확인 카드 표시·`notice`·옛 등록 카드 제거 (프론트 범용 카드, LJS 프론트)
+- 연결 남음: ④-3 같은 이름 안내 실제 동작 (register-context `careArtclNms`, JAJ)
+
+## SCR-AIM-013 대화창 · 첨부 사진 의도 판단·캐릭터·가계부 영수증 등록 응답 — 끝
+- 기능: 명세 기능 ID 추가 없음(메인 개편 뒤 추가). 걸치는 기능 FN-MAN-002, SCR-AIM-013
+- 배경: 프론트 SCR-MAN-001(2026-11-09 끝, PR #272)이 메인 검색창·대화창의 사진+글을 받아 종류를 판단해 흐름을 나눈다. 지금은 프론트 가짜(`features/ai/api.js` `judgeImageIntent`, 글 낱말 기준: 캐릭터 / 진료·병원·검진 / 가계부·지출·사료·용품)
+- 프론트 가정: 요청 multipart `file`·`cnvrsCn`(없을 수 있음)·`petSn`(없을 수 있음) → 응답 `{ kind }`, kind는 `CHARACTER`·`MEDICAL_RECEIPT`·`EXPENSE_RECEIPT`·`ASK`(모름)
+- 프론트 흐름: MEDICAL_RECEIPT → 기존 POST /ai/receipts + receipt-result, CHARACTER → 기존 POST /ai/characters(photo·petSn), EXPENSE_RECEIPT → 지금은 본창 가계부 화면 안내만, ASK → 프론트가 [캐릭터]·[진료 영수증]·[가계부] 칩으로 되묻는다(메시지 안 보냄)
+- 정할 것: 판단 API 경로와 대화방(`aiCnvrsRoomSn`) 포함 여부 / 캐릭터·가계부 흐름을 대화 이력에 남길지(지금은 진료 영수증만 receipt-result로 저장) / 가계부 영수증을 AI 창에서 바로 등록할지(그러면 SJM 가계부 저장 API와 맞춤)
+- 기다리는 것: 없음
+- 완료 조건: 사진과 글로 네 종류 중 하나를 돌려준다. 글이 없거나 모르면 ASK
+- 프론트 연결: `judgeImageIntent`만 실제 요청으로 바꾼다(프론트 저장소에서 /start). 응답 모양이 위 가정과 달라지면 이 절에 적는다
+- 연결 남음: 사진 의도 판단 `POST /ai/image-intent` (프론트 `judgeImageIntent` 연결, LJS 프론트). 응답 모양은 위 가정과 같음
+
+## SCR-AIM-004 대화창 · 건강 READ 여러 마리 조회·조회한 반려동물 표시 (추가 요청) — 끝
+- 기능: 건강 READ(`pet` hook)의 반려동물 결정을 여러 마리로 넓히고, 읽기 결과에 조회한 반려동물 이름을 싣는다 (위 `끝` 절에서 센 기능. 대조에 다시 세지 않는다. 읽기 반려동물 결정은 설계 8절 0번 004-19 후보, 2026-11-09 사람 결정)
+- 기다리는 것: 없음 (Java 할 일 없음, 마리마다 기존 READ 호출)
+- 완료 조건: `/start` 기획의 완료 조건을 따른다. 쓰기 카드의 반려동물 결정(FN-AIM-012-04)과 가계부 READ(`pet_filter`)는 그대로
+- 결과 (2026-11-09): 검증 1회차 통과, 사람 확인. 로컬 8마리 READ 1157ms·1마리 613ms
+- 연결 남음: 없음
+
 ## 제외
 - FN-AIM-001-01~04,06, FN-AIM-002-01,05~06, FN-AIM-004-03~07, FN-AIM-005-03~06, FN-AIM-011-01~02,04~06,17~18,20, FN-AIM-012-09,15 (27건): 프론트 몫 (LJS 프론트: 대화창 화면)
 - FN-AIM-012-12~14,17 (4건): Java 몫 (JAJ: 일정·케어 항목 저장, 알림 연계)
