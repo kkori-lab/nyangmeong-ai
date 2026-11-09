@@ -73,4 +73,6 @@ async def main() -> None:
 if __name__ == "__main__":
     # 실패하면 clients.py가 남기는 경고(실패 종류)를 보이게
     logging.basicConfig(level=logging.WARNING)
+    # 분류 로그(입력·캐시 읽기·쓰기 토큰)를 보이게 : 두 번째 분류부터 캐시 읽기 0 초과
+    logging.getLogger("app.chat.clients").setLevel(logging.INFO)
     asyncio.run(main())
