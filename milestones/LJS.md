@@ -273,10 +273,12 @@
 - 기다리는 것: Java 서버 로그 설정 확인(LJS 백엔드)
 - 완료 조건: `/start` 기획의 완료 조건을 따른다.
 
-## SCR-AIM-012 대화창 · 2단계 쓰기 ② 수정 4개 (READ → CARD, 추가 요청) — 대기
+## SCR-AIM-012 대화창 · 2단계 쓰기 ② 수정 4개 (READ → CARD, 추가 요청) — 끝
 - 기능: `draft_schedule_update`·`draft_care_item_update`·`draft_expense_update`·`draft_pet_update` — 수정할 번호는 같은 턴 READ 결과에서만 (기능 ID는 기능명세서에 아직 없음 — 설계 `docs/design/tool-catalog.md` 8절 0번·5번, 응답 계약은 `docs/design/tool-calling.md` 6절. 2026-11-06 사람 결정: CARD 12개 전부, 6절 ACTION 계약, 출처 코드 없이)
 - 기다리는 것: 프론트 범용 카드(LJS 프론트, 연결 확인)
 - 완료 조건: `/start` 기획의 완료 조건을 따른다. 대화창은 항상 도구 흐름(2026-11-09, `CHAT_TOOL_AGENT` 삭제).
+- 끝(2026-11-09, 검증 통과·사람 확인): 추가-1(`tool_eval` READ·ACTION 세기)·추가-2(READ 2번 뒤 카드·0자 안내)·추가-3(날짜만 바꾸면 원래 시간 유지) 함께
+- 연결 남음: 수정 카드 PATCH 폼·[확인] 실행·`action-result` 호출 (프론트 범용 카드, LJS 프론트)
 
 ## SCR-AIM-012 대화창 · 2단계 쓰기 ③ 배열·파일 칸 3개 (추가 요청) — 대기
 - 기능: `draft_expense`(`lines`)·`draft_receipt_save`(`pets`, `recptSn`)·`draft_observation_cycle`(`file` — 사진은 React 카드에서 첨부) (기능 ID는 기능명세서에 아직 없음 — 설계 `docs/design/tool-catalog.md` 8절 0번·5번, 응답 계약은 `docs/design/tool-calling.md` 6절. 2026-11-06 사람 결정: CARD 12개 전부, 6절 ACTION 계약, 출처 코드 없이)

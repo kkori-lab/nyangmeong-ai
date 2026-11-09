@@ -58,6 +58,9 @@ class CatalogParam(BaseModel):
     # @Min·@Max (숫자 칸)
     min_value: int | None = Field(None, alias="min")
     max_value: int | None = Field(None, alias="max")
+    # @Positive (숫자 칸), @Pattern (글자 칸)
+    positive: bool | None = None
+    pattern: str | None = None
 
 
 class RequiredIf(BaseModel):
@@ -107,6 +110,8 @@ class ToolPrompt(BaseModel):
     builtin: bool = False
     # 도구 표시 이름 : 확인 카드 제목·결과 요약 글
     label: str | None = None
+    # 수정 도구 : 바꿀 대상을 찾지 못했을 때 안내 글의 대상 이름
+    target: str | None = None
     description: str
     hooks: list[str] = []
     params: dict[str, PromptParam] = {}
@@ -164,6 +169,7 @@ class CatalogEntry:
     # LLM 칸 -> 허용 코드, LLM 칸 -> (min, max)
     codes: dict[str, frozenset[str]]
     bounds: dict[str, tuple[int | None, int | None]] = field(default_factory=dict)
+    target: str | None = None
 
 
 @dataclass(frozen=True)
@@ -283,6 +289,7 @@ def _entry(tool: CatalogTool, prompt: ToolPrompt) -> CatalogEntry:
         hook_roles=hook_roles,
         codes=codes,
         bounds=bounds,
+        target=prompt.target,
     )
 
 
@@ -398,6 +405,24 @@ def seen_ids(data: object, seen: dict[str, set[int]] | None = None) -> dict[str,
     return seen
 
 
+Rows = dict[tuple[str, int], dict]
+
+
+def seen_rows(data: object, rows: Rows | None = None) -> Rows:
+    """READ 결과의 번호 칸이 있는 행 : (칸 이름, 값) -> 그 행. 수정 카드가 원래 값을 쓰려고"""
+    rows = {} if rows is None else rows
+    if isinstance(data, dict):
+        for key, value in data.items():
+            if is_id(key) and isinstance(value, int) and not isinstance(value, bool):
+                rows.setdefault((key, value), data)
+            else:
+                seen_rows(value, rows)
+    elif isinstance(data, list):
+        for value in data:
+            seen_rows(value, rows)
+    return rows
+
+
 def read_request(
     entry: CatalogEntry,
     values: dict,
@@ -486,9 +511,13 @@ def _valid(param: CatalogParam, value: object) -> bool:
     if kind == "string":
         if not isinstance(value, str) or not value.strip():
             return False
+        if param.pattern is not None and re.fullmatch(param.pattern, value) is None:
+            return False
         return param.max_length is None or len(value) <= param.max_length
     numeric = (int,) if kind in ("long", "int") else (int, float)
     if isinstance(value, bool) or not isinstance(value, numeric):
+        return False
+    if param.positive and value <= 0:
         return False
     low, high = param.min_value, param.max_value
     return (low is None or value >= low) and (high is None or value <= high)
@@ -509,10 +538,12 @@ def card_input(
     now: datetime | None = None,
     seen: dict[str, set[int]] | None = None,
     prior: dict | None = None,
+    rows: Rows | None = None,
 ) -> dict:
     """CARD 도구 인자 -> 확인 카드 input(Java 칸). 틀린 칸은 비움(되물음)
     - 번호 칸은 같은 턴 앞 READ 결과(seen)에 나온 값만, petSn은 service.py가 pet hook으로
-    - prior : 돌려받은 카드 input(같은 도구), 이 메시지 값이 덮어씀"""
+    - prior : 돌려받은 카드 input(같은 도구), 이 메시지 값이 덮어씀
+    - rows : 같은 턴 READ 결과 행. 수정 카드에서 날짜만 바꾸면 원래 시간을 씀(_keep_time)"""
     params = entry.params
     base = {
         name: value
@@ -534,7 +565,47 @@ def card_input(
         and _valid(params[name], value)
         and (not is_id(name) or value in seen.get(name, set()))
     }
-    return base | new
+    given = {roles[name] for name in usable if name in roles}
+    return _keep_time(entry, base | new, given, new, rows or {}, prior or {})
+
+
+def _keep_time(
+    entry: CatalogEntry, merged: dict, given: set[str], new: dict, rows: Rows, prior: dict
+) -> dict:
+    # 수정 카드(경로 번호 칸·date hook·hrInptYn) : 날짜만 오면 0시·미입력 대신 원래 시간
+    # 원래 값은 같은 턴 READ 결과의 그 번호 행, 없으면 돌려받은 카드 input. 새 등록 카드는 그대로
+    ids = [n for n, p in entry.params.items() if p.loc == "path" and is_id(n)]
+    target = next((n for n, p in entry.params.items() if p.type == "datetime"), None)
+    if not ids or target is None or HR_INPUT not in entry.params or "date" not in entry.hooks:
+        return merged
+    if "date:ymd" not in given or "date:tm" in given or target not in new:
+        return merged
+    sn = merged.get(ids[0])
+    source = rows.get((ids[0], sn)) if sn is not None else None
+    if source is None and sn is not None and prior.get(ids[0]) == sn:
+        source = prior
+    if source is None:
+        return merged
+    try:
+        original = datetime.fromisoformat(str(source.get(target)))
+    except ValueError:
+        return merged
+    entered = source.get(HR_INPUT)
+    if entered is False or (entered is None and original.time() == time(0, 0)):
+        # 원래 시간 미입력 : 0시·미입력 그대로
+        return merged
+    day = datetime.fromisoformat(str(merged[target])).date()
+    moment = datetime.combine(day, original.time().replace(second=0, microsecond=0))
+    return merged | {target: moment.isoformat(), HR_INPUT: True}
+
+
+def missing_path_ids(entry: CatalogEntry, values: dict) -> list[str]:
+    """경로의 번호 칸(…Sn, petSn 제외) 중 빈 칸. 회원이 카드에서 고를 수 없어 카드를 안 띄움"""
+    return [
+        name
+        for name, param in entry.params.items()
+        if param.loc == "path" and is_id(name) and values.get(name) is None
+    ]
 
 
 def invalid_input(entry: CatalogEntry, values: dict) -> list[str]:

@@ -16,6 +16,7 @@ from app.chat.clients import (
     ClassifiedKind,
     ClassifyError,
     IntentClassifier,
+    ReadMore,
     RegisterExtractor,
     TitleGenerator,
     ToolAgent,
@@ -79,6 +80,25 @@ ACTION_SHOWN = (
     "확인 카드를 띄움. 회원이 카드에서 [확인]을 누르기 전에는 저장되지 않음. "
     "카드 내용을 확인하고 [확인]을 눌러 달라고 한두 문장으로 안내한다."
 )
+# 수정 도구(경로 번호 칸) : 번호를 이 턴 READ 결과에서 못 정하면 카드 없이 (SCR-AIM-012 2단계 ②)
+ACTION_TARGET_MISSING = (
+    "바꿀 대상을 이 턴 읽기 결과에서 찾지 못해 카드를 띄우지 않음. "
+    "어떤 것을 바꿀지 이름이나 날짜를 넣어 다시 말해 달라고 한두 문장으로 안내한다."
+)
+TARGET_MISSING_MESSAGE = "바꿀 {target}을 찾지 못했어요. 이름이나 날짜를 넣어 다시 말해 주세요."
+# READ 답변이 오류 없이 0자로 끝남(실측 2026-11-09, READ 2번 뒤) : 오류 대신 안내 글
+READ_EMPTY_CARD_MESSAGE = "카드 내용을 확인하고 [확인]을 눌러 주세요."
+READ_EMPTY_MESSAGE = "요청을 처리하지 못했어요. 이름이나 날짜를 넣어 다시 말해 주세요."
+
+
+async def _fixed(text: str) -> AsyncIterator[str]:
+    yield text
+
+
+def _target_missing(entry: "catalog.CatalogEntry") -> str:
+    target = entry.target or entry.label or "대상"
+    return TARGET_MISSING_MESSAGE.format(target=target)
+
 
 # SSE 이벤트 하나 : (이름, 내용)
 Event = tuple[str, BaseModel | dict]
@@ -264,6 +284,11 @@ def _tool_judged(
         # 돌려받은 카드와 같은 도구면 그 input을 바탕으로 이 메시지 칸을 덮어씀
         base = prior.values if prior is not None and prior.tool == call.name else None
         values = catalog.card_input(card, call.args.model_dump(exclude_none=True), now, {}, base)
+        if catalog.missing_path_ids(card, values):
+            # 경로 번호 칸은 카드에서 고를 수 없음 : 안내 글(SEARCH), 고지 없음
+            logger.info("쓰기 도구 대상 번호 없음: %s", call.name)
+            stream = _fixed(_target_missing(card))
+            return Judged(Intent(kind=IntentKind.SEARCH), stream=stream, notice=False)
         return Judged(Intent(kind=IntentKind.ACTION), tool=call.name, action=values)
     entry = tools.read_entry(call.name)
     if entry is not None:
@@ -335,6 +360,7 @@ async def _read_once(
     pets: _ReadPets,
     seen: dict[str, set[int]],
     domains: set[str] | None = None,
+    rows: "catalog.Rows | None" = None,
 ) -> _ReadOutcome:
     pet_sn = None
     if "pet" in entry.hooks:
@@ -361,6 +387,8 @@ async def _read_once(
         logger.info("READ 도구 Java 실패: %s %s", entry.name, type(error).__name__)
         return _ReadOutcome(result=rules.READ_FAILED)
     catalog.seen_ids(data, seen)
+    if rows is not None:
+        catalog.seen_rows(data, rows)
     if domains is not None:
         domains.add(entry.domain)
     return _ReadOutcome(result=rules.read_result_text(data))
@@ -381,35 +409,56 @@ async def _read_answer(
     pets = _ReadPets(text, read)
     # 번호 칸은 이 턴 READ 결과에 나온 값만 (catalog.read_request)
     seen: dict[str, set[int]] = {}
+    # 번호별 원래 행 : 수정 카드가 날짜만 바꿀 때 원래 시간을 씀(추가-3)
+    rows: catalog.Rows = {}
     # 되물음·실패만이면 domains가 비어 고지 없음(FN-AIM-002-03)
-    first = await _read_once(entry, decision.call, pets, seen, domains)
+    first = await _read_once(entry, decision.call, pets, seen, domains, rows)
     if first.ask is not None:
         yield first.ask
         return
 
+    reads = 1
+
     async def follow(call: tools.ToolCall) -> str | None:
+        nonlocal reads
         # 결과를 보고 고른 쓰기 도구 : 번호 칸은 이 턴 READ 결과 값만, 카드로 끝냄(목록→완료 체크)
         card = tools.card_entry(call.name)
         if card is not None and call.args is not None and cards is not None:
+            if cards:
+                logger.info("쓰기 도구 두 번째 실행 안 함: %s", call.name)
+                return None
             found = await pets.pets() if "pet" in card.hooks else []
             values = call.args.model_dump(exclude_none=True)
-            values = catalog.card_input(card, values, read.now, seen)
+            values = catalog.card_input(card, values, read.now, seen, rows=rows)
+            if catalog.missing_path_ids(card, values):
+                logger.info("쓰기 도구 대상 번호 없음: %s", call.name)
+                return ACTION_TARGET_MISSING
             cards.append(action_card(card, values, found, pets.named(found), None, read.room_pet))
             return ACTION_SHOWN
         # 한 턴 READ 최대 2번 : 두 번째는 읽기 도구만, 반려동물을 못 정하면 불러오지 못함
         second = tools.read_entry(call.name)
-        if second is None or call.args is None:
+        if second is None or call.args is None or reads >= 2:
             logger.info("두 번째 도구 실행 안 함: %s", call.name)
             return None
-        outcome = await _read_once(second, call, pets, seen, domains)
-        return rules.READ_FAILED if outcome.ask is not None else outcome.result
+        reads += 1
+        outcome = await _read_once(second, call, pets, seen, domains, rows)
+        if outcome.ask is not None:
+            return rules.READ_FAILED
+        # READ 2번 뒤에도 쓰기 카드는 한 번 고를 수 있게 (2단계 ②, 목록 두 번 → 수정 카드)
+        return ReadMore(outcome.result)
 
     answer = agent.answer(context, decision, first.result, max_tokens, today, follow)
+    produced = False
     try:
         async for chunk in answer:
+            if chunk:
+                produced = True
             yield chunk
     finally:
         await answer.aclose()
+    if not produced:
+        logger.info("READ 답변 0자: 안내 글로")
+        yield READ_EMPTY_CARD_MESSAGE if cards else READ_EMPTY_MESSAGE
 
 
 def guide_text(ids: tuple[str, ...]) -> str | None:

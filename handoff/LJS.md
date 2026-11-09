@@ -1,10 +1,13 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-끝: SCR-AIM-004 답변 종류별 의료 고지 범위 (2026-11-09, 검증 2회차 통과·사람 확인). 고지는 바로 답과 health 도메인 READ가 하나라도 성공한 답에만(`Judged.notice`·`read_domains`), 사용법·가계부 READ·되물음·READ 실패만은 없음. 추가-1 `<…>`·기호뿐인 글은 LLM 없이 FALLBACK(`rules.is_placeholder`, 프롬프트 예시는 실측 7회 중 decline 1회·판단 글 노출로 버림), 추가-2 인사·잡담 바로 답은 고지 없음(`rules.is_small_talk`). 기존 흐름 `judge`는 그대로
+끝: SCR-AIM-012 2단계 쓰기 ② 수정 4개 (2026-11-09, 검증 통과·사람 확인). `draft_schedule_update`·`draft_care_item_update`·`draft_expense_update`·`draft_pet_update`를 `data/tool_prompts.yaml`로 엶(PATCH, 바꿀 칸만). 경로 번호 칸은 같은 턴 READ 결과 값만, 못 정하면 카드 없이 안내 글(`missing_path_ids`, `target`). 칸 검사에 `positive`·`pattern`. 추가-1 `scripts/tool_eval.py`가 READ·ACTION을 고른 도구 이름으로 셈(T45~T49 2회 모두 맞음, 도구 정확 46/49·45/49). 추가-2 READ 2번 뒤에도 카드 1회(`ReadMore`, LLM 최대 4번)·0자 답변은 안내 글·카드 뒤 쓰기 도구 실행 안 함. 추가-3 수정 카드에서 날짜만 바꾸면 READ 결과(없으면 돌려받은 카드)의 원래 시간·`hrInptYn`을 씀(`seen_rows`·`_keep_time`)
 
 ## 다음에 할 것
-- 연결 남음: SCR-AIM-012 ① ACTION 카드 폼·[확인] 실행·`action-result` 호출 (프론트 범용 카드, LJS 프론트). 계약 초안 PR로 프론트에 알림. Java 400은 `data: [{field, message}]` 칸만 다시 고치게, `data`가 비면(가계부 서비스 검사, 백엔드 2026-11-06 결정으로 담기로 했으나 일정 미정) 카드 전체 오류로
+- 연결 남음: SCR-AIM-012 ①·② ACTION 카드 폼·[확인] 실행·`action-result` 호출 (프론트 범용 카드, LJS 프론트). 계약은 2026-11-09 프론트 세션에 전달, 프론트는 지금 마일스톤 뒤 `/start`에서 `docs/api/chat.md`를 정본으로. ② 수정 카드: PATCH·경로 칸 2개, `input`은 바꿀 칸만(원래 값은 프론트가 읽음), 바꾼 칸이 없을 때 [확인] 막을지 프론트가 정함. 여러 줄 지출 `expndAmt` PATCH 뜻(SJM). Java 400은 `data: [{field, message}]` 칸만 다시 고치게, `data`가 비면 카드 전체 오류로
+- 프론트(LJS) 알리기: ② 수정 카드분이 develop에 병합되면 알림. 사진 의도 판단(SCR-AIM-013 대기 절, 프론트 가짜 `judgeImageIntent`) 계약을 `/start SCR-AIM-013`으로 정해 보냄
+- `docs/api/chat.md` 맞추기 (LJS): ActionCard `params`는 값 없는 키가 null로 나옴(문서는 "없는 키는 생략", ①부터, `ActionParam`), `input`의 "datetime 칸에 날짜만 오면…"에 수정 카드는 원래 시간을 쓴다는 것(추가-3) 미반영
+- 공용 하네스 PR: `scripts/tool_eval.py`(추가-1, READ·ACTION 세기·유형 `수정`)는 end-check가 공용 하네스로 분류해 이번 커밋에서 뺌 — PR로 따로
 - 실제 LLM에서 "코코 오늘 체중 4.2kg 기록해줘"에 `rcd_ymd`를 비워 `missing ["rcdDt"]`가 된 적 있음(2026-11-09 검증, 1/2). 날짜를 말하지 않았으면 서버가 오늘로 채울지 정한다(지금 결정은 "날짜만 오면"만) (LJS)
 - 기존 흐름 코드 삭제 (LJS, 별도 마일스톤 후보): `judge`·분류 LLM·답변 LLM 단독 호출은 앱에서 안 탐. `test_messages`·`test_register`·`test_intent`·`test_guide` 등이 `conftest.py`의 도구 가짜 미주입(기존 흐름)으로 돌아 테스트를 도구 흐름 기준으로 옮겨야 지울 수 있다. 등록 칸 추출 LLM은 초안 이어 쓰기에 계속 씀
 - 2단계 쓰기 ②~④ (CARD 12개 전부, 2026-11-06 사람 결정). 백엔드 답변(2026-11-06): 출처 코드는 일정 외 테이블 미정 → 출처 없이 진행. 일정 수정 요청엔 `schdlSrcCd` 없음, HLTC0067로 등록하면 케어미션 반영 빠짐(DIRECT만, `CareScheduleService.java:87`) — ④에서 의도인지 확인. 12개 API 경로·칸 변경 없음(스냅샷 bd57d24·e681968)

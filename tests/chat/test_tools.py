@@ -85,7 +85,15 @@ def test_도구는_builtin_등록_READ이고_설명과_인자_스키마를_모�
         "list_expense_months",
         "list_expense_pets",
         "list_expenses",
-    } | {"draft_care_completion", "draft_daily_health_record", "draft_expense_limit"}
+    } | {
+        "draft_care_completion",
+        "draft_daily_health_record",
+        "draft_expense_limit",
+        "draft_schedule_update",
+        "draft_care_item_update",
+        "draft_expense_update",
+        "draft_pet_update",
+    }
     for d in defs.values():
         assert "쓸 때:" in d["description"] and "말하는 법:" in d["description"]
         assert d["input_schema"]["type"] == "object"

@@ -22,7 +22,16 @@ from tests.chat.test_tools import room_of, use_agent
 BUILTIN = {"navigate", "search_guide", "decline"}
 REGISTER = {"draft_schedule", "draft_care_item"}
 # 2단계 쓰기 확인 카드(ACTION)
-ACTION = {"draft_care_completion", "draft_daily_health_record", "draft_expense_limit"}
+ACTION = {
+    "draft_care_completion",
+    "draft_daily_health_record",
+    "draft_expense_limit",
+    # 수정 4개(2단계 ②) : 모두 코드 칸이 있어 스냅샷만이면 안 실림
+    "draft_schedule_update",
+    "draft_care_item_update",
+    "draft_expense_update",
+    "draft_pet_update",
+}
 # 스냅샷(코드 값 없음)으로도 싣는 ACTION : 코드 칸 없음
 ACTION_WITHOUT_CODES = {"draft_care_completion", "draft_expense_limit"}
 READ = {
