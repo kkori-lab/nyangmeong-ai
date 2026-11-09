@@ -85,7 +85,7 @@ def test_도구는_builtin_등록_READ이고_설명과_인자_스키마를_모�
         "list_expense_months",
         "list_expense_pets",
         "list_expenses",
-    }
+    } | {"draft_care_completion", "draft_daily_health_record", "draft_expense_limit"}
     for d in defs.values():
         assert "쓸 때:" in d["description"] and "말하는 법:" in d["description"]
         assert d["input_schema"]["type"] == "object"
@@ -182,26 +182,18 @@ def test_목차에_없는_청크는_버리고_M1_결과만():
 # 설정과 클라이언트
 
 
-def settings(enabled: bool, key: str = "test-key") -> Settings:
-    return Settings(_env_file=None, llm_api_key=key, llm_model=MODEL, chat_tool_agent=enabled)
-
-
-def test_설정이_꺼져_있으면_도구_흐름_없음_키도_보지_않는다():
-    assert get_tool_agent(settings(False, key="")) is None
+def settings(key: str = "test-key") -> Settings:
+    return Settings(_env_file=None, llm_api_key=key, llm_model=MODEL)
 
 
 def test_설정을_켜면_Anthropic_도구_구현():
-    assert isinstance(get_tool_agent(settings(True)), AnthropicToolAgent)
+    assert isinstance(get_tool_agent(settings()), AnthropicToolAgent)
 
 
 def test_설정을_켜고_키가_비면_502():
     with pytest.raises(AppError) as raised:
-        get_tool_agent(settings(True, key=""))
+        get_tool_agent(settings(key=""))
     assert (raised.value.code, raised.value.http_code) == ("EXTERNAL_API_ERROR", 502)
-
-
-def test_설정이_없으면_도구_흐름이_켜져야_한다():
-    assert Settings(_env_file=None).chat_tool_agent is True
 
 
 # 도구별 SSE(응답 계약 그대로, 설계 6절)
@@ -303,14 +295,14 @@ def test_인자_거부나_빈_응답은_판단_못_함(client, java, tool, raw):
     assert [m["cnvrsCn"] for m in java.ai_messages(room)] == [FALLBACK_MESSAGE]
 
 
-def test_룰_라우팅_문장은_도구_고르기를_부르지_않는다(client, java):
+def test_룰_라우팅_문장은_도구_고르기가_실패하면_그_행으로_이동해야_한다(client, java):
     # FN-AIM-002-10
     agent = use_agent(client, FakeToolAgent(fail=True))
     room = room_of(client, java)
     evs = events(send(client, room, "일정 등록할래"))
 
     assert (evs[0][1]["kind"], evs[0][1]["scrId"]) == ("ROUTE", "SCR-HLT-003")
-    assert agent.decides == []
+    assert len(agent.decides) == 1
 
 
 def test_키워드에_걸린_질문꼴은_힌트와_함께_도구_고르기(client, java):
@@ -339,7 +331,7 @@ def test_도구_고르기_장애여도_키워드에_걸린_질문은_ROUTE(clien
     assert evs[0][1]["kind"] == "ROUTE"
 
 
-def test_설정을_끄면_도구_고르기를_부르지_않는다(client, java):
+def test_도구_고르기_가짜를_끼우지_않으면_기존_판정으로_답해야_한다(client, java):
     room = room_of(client, java)
     evs = events(send(client, room, "주식 추천해 줘"))
 

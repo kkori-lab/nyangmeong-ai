@@ -256,6 +256,38 @@
 - 결과 (2026-11-06): 건강 READ 13개(번호 칸 3개 추가)·가계부 READ 6개, 한 턴 READ 최대 2번. 추가 요청 5개(테스트 기대값 3·tool_use 여럿 400 수정·`disable_parallel_tool_use`). 검증 통과(루프 1회차 실패 뒤 다시 검증), 사람 확인
 - 연결 남음: 없음
 
+## SCR-AIM-004 대화창 · 답변 종류별 의료 고지 범위 (추가 요청) — 대기
+- 기능: FN-AIM-002-03 "건강 관련 응답 하단에" 고지 — 고지가 붙는 답변 경로를 전수조사(일반 검색·사용법·건강 READ·가계부 READ·되물음·READ 실패 문구 등)한 뒤 건강 관련만 붙게 맞춘다 (위 `끝` 절에서 센 기능. 대조에 다시 세지 않는다). 2026-11-06 사람 결정: 쓰기 기능 다음에 한다
+- 기다리는 것: 없음
+- 완료 조건: `/start` 기획의 완료 조건을 따른다. 대화창은 항상 도구 흐름(2026-11-09, `CHAT_TOOL_AGENT` 삭제).
+
+## SCR-AIM-012 대화창 · 2단계 쓰기 ① ACTION 계약·단순 등록 3개 (추가 요청) — 끝
+- 기능: `docs/api/chat.md` ACTION 계약 초안, 범용 ACTION 경로, `draft_care_completion`·`draft_daily_health_record`·`draft_expense_limit` (기능 ID는 기능명세서에 아직 없음 — 설계 `docs/design/tool-catalog.md` 8절 0번·5번, 응답 계약은 `docs/design/tool-calling.md` 6절. 2026-11-06 사람 결정: CARD 12개 전부, 6절 ACTION 계약, 출처 코드 없이)
+- 기다리는 것: 프론트 범용 카드(LJS 프론트, 연결 확인)
+- 완료 조건: `/start` 기획의 완료 조건을 따른다. `CHAT_TOOL_AGENT`를 끈 기본 동작은 지금과 같다.
+- 끝(2026-11-09, 검증 2회차 통과·사람 확인): 추가-1(키워드 문장도 도구 고르기)·추가-3(`CHAT_TOOL_AGENT` 삭제, 항상 도구 흐름) 함께
+- 연결 남음: ACTION 카드 폼·[확인] 실행·`action-result` 호출 (프론트 범용 카드, LJS 프론트)
+
+## 공통 · 배포 서버 로그 파일 기록 (추가 요청) — 대기
+- 기능: 배포 서버(gunicorn)에서 Python 로그가 파일에 남지 않는다(2026-11-08 사람 확인). Java 서버의 로그 설정(파일 위치·회전·형식)을 확인해 같은 방식으로 맞춘다. 기동 로그 `도구 목록: …`으로 배포 서버 tool calling 미동작 원인(설정 미반영 / 도구 목록 snapshot)을 가린다. 2026-11-08 사람 결정: 2단계 쓰기 ① 다음 마일스톤
+- 기다리는 것: Java 서버 로그 설정 확인(LJS 백엔드)
+- 완료 조건: `/start` 기획의 완료 조건을 따른다.
+
+## SCR-AIM-012 대화창 · 2단계 쓰기 ② 수정 4개 (READ → CARD, 추가 요청) — 대기
+- 기능: `draft_schedule_update`·`draft_care_item_update`·`draft_expense_update`·`draft_pet_update` — 수정할 번호는 같은 턴 READ 결과에서만 (기능 ID는 기능명세서에 아직 없음 — 설계 `docs/design/tool-catalog.md` 8절 0번·5번, 응답 계약은 `docs/design/tool-calling.md` 6절. 2026-11-06 사람 결정: CARD 12개 전부, 6절 ACTION 계약, 출처 코드 없이)
+- 기다리는 것: 프론트 범용 카드(LJS 프론트, 연결 확인)
+- 완료 조건: `/start` 기획의 완료 조건을 따른다. 대화창은 항상 도구 흐름(2026-11-09, `CHAT_TOOL_AGENT` 삭제).
+
+## SCR-AIM-012 대화창 · 2단계 쓰기 ③ 배열·파일 칸 3개 (추가 요청) — 대기
+- 기능: `draft_expense`(`lines`)·`draft_receipt_save`(`pets`, `recptSn`)·`draft_observation_cycle`(`file` — 사진은 React 카드에서 첨부) (기능 ID는 기능명세서에 아직 없음 — 설계 `docs/design/tool-catalog.md` 8절 0번·5번, 응답 계약은 `docs/design/tool-calling.md` 6절. 2026-11-06 사람 결정: CARD 12개 전부, 6절 ACTION 계약, 출처 코드 없이)
+- 기다리는 것: 프론트 범용 카드(LJS 프론트, 연결 확인)
+- 완료 조건: `/start` 기획의 완료 조건을 따른다. 대화창은 항상 도구 흐름(2026-11-09, `CHAT_TOOL_AGENT` 삭제).
+
+## SCR-AIM-012 대화창 · 2단계 쓰기 ④ 기존 등록 카드 2개 ACTION 전환 (추가 요청) — 대기
+- 기능: `draft_schedule`·`draft_care_item`을 REGISTER `done.card`에서 ACTION으로 — 프론트 범용 카드 연결 뒤 (기능 ID는 기능명세서에 아직 없음 — 설계 `docs/design/tool-catalog.md` 8절 0번·5번, 응답 계약은 `docs/design/tool-calling.md` 6절. 2026-11-06 사람 결정: CARD 12개 전부, 6절 ACTION 계약, 출처 코드 없이)
+- 기다리는 것: 프론트 범용 카드(LJS 프론트, 연결 확인)
+- 완료 조건: `/start` 기획의 완료 조건을 따른다. 대화창은 항상 도구 흐름(2026-11-09, `CHAT_TOOL_AGENT` 삭제).
+
 ## 제외
 - FN-AIM-001-01~04,06, FN-AIM-002-01,05~06, FN-AIM-004-03~07, FN-AIM-005-03~06, FN-AIM-011-01~02,04~06,17~18,20, FN-AIM-012-09,15 (27건): 프론트 몫 (LJS 프론트: 대화창 화면)
 - FN-AIM-012-12~14,17 (4건): Java 몫 (JAJ: 일정·케어 항목 저장, 알림 연계)

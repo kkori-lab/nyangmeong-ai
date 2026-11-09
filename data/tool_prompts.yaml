@@ -98,6 +98,75 @@ draft_care_item:
       java: lastCmptnYmd
       description: 마지막으로 한 날 YYYY-MM-DD
 
+# 쓰기 확인 카드 도구 (SCR-AIM-012 2단계, intent ACTION) : 카드만 띄우고 [확인] 때 React가 Java 실행
+# - label : 카드 제목·결과 요약 글의 도구 이름
+
+draft_care_completion:
+  label: 케어 완료 체크
+  hooks: [pet]
+  description: |
+    케어 항목 하나를 했다고 체크하는 확인 카드를 대화창에 띄운다.
+    회원이 카드에서 [확인]을 누르기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 산책·양치·약 먹이기 같은 케어 항목을 했다고 체크해 달라는 말.
+      예) "오늘 산책 완료 체크해 줘", "양치 했어, 체크해 줘"
+    쓰지 않을 때: 새 반복 케어 항목을 넣는 말은 draft_care_item. 완료한 기록을 묻는 말은
+      list_care_completions.
+    인자: care_artcl_sn은 이 턴에 받은 list_care_items 결과의 careArtclSn만 쓴다.
+      결과가 없으면 list_care_items를 먼저 부른다. 반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    care_artcl_sn:
+      java: careArtclSn
+      description: 케어 항목 번호. 이 턴 list_care_items 결과의 careArtclSn만, 모르면 비운다
+
+draft_daily_health_record:
+  label: 건강 일지 기록
+  hooks: [pet, date]
+  description: |
+    건강 일지 기록 하나(체중·식사량·음수량·배변상태·산책)의 확인 카드를 대화창에 띄운다.
+    회원이 카드에서 [확인]을 누르기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 체중·식사량·음수량·배변상태·산책을 일지에 기록해 달라는 말.
+      예) "초코 오늘 체중 4.2kg 기록해줘", "오늘 변이 좀 묽었어 적어 줘", "어제 산책 30분 했어 기록해 줘"
+    쓰지 않을 때: 지난 기록을 묻는 말은 list_daily_health_records. 매일 반복하는 케어 항목을
+      넣는 말은 draft_care_item.
+    인자: 회원이 말하지 않은 칸은 비운다(지어내지 않는다). 날짜는 시스템의 오늘 날짜 기준으로 계산한다.
+      수치는 단위 없이 숫자만 쓴다. 반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    daily_rcd_idct_cd:
+      java: dailyRcdIdctCd
+      description: 기록할 일지 지표 종류
+    rcd_ymd:
+      hook: date:ymd
+      description: 기록 날짜 YYYY-MM-DD. 날짜를 말하지 않았으면 오늘
+    rcd_tm:
+      hook: date:tm
+      description: 기록 시간 24시간 HH:MM. 말하지 않았으면 비운다
+    rcd_nvl:
+      java: rcdNvl
+      description: 체중·식사량·음수량·산책의 수치(숫자만, 체중은 kg)
+    crsd_stts_cd:
+      java: crsdSttsCd
+      description: 배변상태를 기록할 때 상태
+
+draft_expense_limit:
+  label: 월 지출 한도 설정
+  description: |
+    가계부의 월 지출 한도 금액을 정하는 확인 카드를 대화창에 띄운다.
+    회원이 카드에서 [확인]을 누르기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 한 달 지출 한도를 정하거나 바꿔 달라는 말.
+      예) "이번 달 지출 한도 30만원으로 해줘", "한도 50만원으로 올려 줘"
+    쓰지 않을 때: 한도를 넘었는지·얼마 남았는지 묻는 말은 get_expense_statistics.
+    인자: 금액은 원 단위 정수로 바꾼다(30만원 → 300000). 말하지 않았으면 비운다.
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    mm_expnd_lim_amt:
+      java: mmExpndLimAmt
+      description: 월 지출 한도 금액(원)
+
 # 건강 READ 도구 (docs/design/tool-catalog.md 8절 4번) : Python이 바로 실행, 결과로 답한다
 # get_checkup·list_etc_inspections·list_observation_cycles는 싣지 않는다 :
 #   필수 번호 칸(ckupRcdSn·obsrvArtclSn)을 LLM이 알 수 없음(한 턴 READ 1번, 읽기 결과는 이력에 안 남음)

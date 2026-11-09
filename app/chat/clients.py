@@ -731,10 +731,8 @@ def _with_result(
     ]
 
 
-def get_tool_agent(settings: Annotated[Settings, Depends(get_settings)]) -> ToolAgent | None:
-    # CHAT_TOOL_AGENT 꺼짐이면 None : 지금 흐름 그대로, 키 확인도 하지 않음
-    if not settings.chat_tool_agent:
-        return None
+def get_tool_agent(settings: Annotated[Settings, Depends(get_settings)]) -> ToolAgent:
+    # 2026-11-09 결정 : 대화창 판정은 항상 도구 흐름(끄는 설정 없음)
     return AnthropicToolAgent(get_anthropic_client(settings), settings.llm_model)
 
 

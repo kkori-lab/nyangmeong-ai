@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
@@ -73,11 +74,19 @@ class RegisterCard(RegisterDraft):
     notice: str | None = None
 
 
+class ActionDraft(_Camel):
+    # 2단계 쓰기 : React가 돌려보낸 가장 최근 확인 카드의 도구와 input(Java 칸 이름)
+    tool: str = Field(min_length=1, max_length=64)
+    values: dict[str, Any] = Field(default_factory=dict, alias="input")
+
+
 class MessageSendRequest(_Camel):
     # 없으면 저장 없이 방의 마지막 사용자 메시지에 답변 (첫 메시지 직후·다시 시도·다시 생성)
     cnvrs_cn: str | None = Field(default=None, min_length=1, max_length=MAX_MESSAGE_LENGTH)
     # FN-AIM-012-05·10 : 가장 최근 카드(되물음 포함). 있으면 이 메시지로 칸 채움·수정
     draft: RegisterDraft | None = None
+    # 가장 최근 확인 카드(ACTION). 같은 도구를 다시 고르면 이 input을 바탕으로 칸 채움·수정
+    action: ActionDraft | None = None
 
     @field_validator("cnvrs_cn")
     @classmethod
@@ -115,6 +124,7 @@ class IntentKind(StrEnum):
     SEARCH = "SEARCH"  # 검색 질문/응답(SCR-AIM-002)
     FALLBACK = "FALLBACK"  # 매칭 실패 폴백(SCR-AIM-005)
     RECEIPT = "RECEIPT"  # 영수증 분석(SCR-AIM-013)
+    ACTION = "ACTION"  # 쓰기 확인 카드(SCR-AIM-012 2단계)
 
 
 class MoveType(StrEnum):
@@ -131,6 +141,57 @@ class Intent(_Camel):
     move_type: MoveType | None = None
 
 
+class ActionCode(_Camel):
+    cd: str
+    nm: str
+
+
+class ActionParam(_Camel):
+    """확인 카드 칸 : Java 도구 목록(GET /internal/ai/tools)의 칸 그대로"""
+
+    loc: str = Field(alias="in")
+    type: str
+    required: bool = False
+    group: str | None = None
+    codes: list[ActionCode] | None = None
+    max_length: int | None = None
+    min_value: int | None = Field(default=None, alias="min")
+    max_value: int | None = Field(default=None, alias="max")
+
+
+class ActionRule(_Camel):
+    # requiredIf : when 칸이 equals면 field 칸 필수
+    field: str
+    when: str
+    equals: str
+
+
+class ActionCall(_Camel):
+    method: str
+    path: str
+
+
+class ActionCard(_Camel):
+    """[확인 카드(2단계 쓰기)]
+    - React가 params로 폼을 그리고 [확인] 때 call로 Java 공개 API 실행
+    - Python은 카드·실행 결과 미저장 : 결과 요약만 action-result로 저장"""
+
+    tool: str
+    domain: str
+    # 도구 표시 이름(data/tool_prompts.yaml label)
+    label: str | None = None
+    call: ActionCall
+    params: dict[str, ActionParam]
+    rules: list[ActionRule] = []
+    # Python이 검증한 값(Java 칸 이름). 경로 칸(petSn 등)도 여기
+    values: dict[str, Any] = Field(default_factory=dict, alias="input")
+    # 빈 필수·조건부 필수 칸(Java 칸 이름)
+    missing: list[str] = []
+    # 반려동물을 정하지 못했을 때 이름 칩(FN-AIM-012-04 규칙)
+    pet_choices: list[PetChoice] = []
+    pet_nm: str | None = None
+
+
 class AnswerDone(_Camel):
     # SSE done 이벤트. message는 저장된 AI 메시지(없거나 저장 실패면 null)
     message: ConversationMessage | None = None
@@ -138,6 +199,8 @@ class AnswerDone(_Camel):
     shortcut: Intent | None = None
     # REGISTER : 미리보기 카드나 되물음(FN-AIM-012-05~08), 카드 미저장
     card: RegisterCard | None = None
+    # ACTION : 확인 카드. READ 결과를 본 뒤 고른 쓰기 도구면 SEARCH 답변에도 붙음
+    action: ActionCard | None = None
 
 
 class StreamError(_Camel):
@@ -155,6 +218,19 @@ class RegisterResultRequest(_Camel):
     # FN-AIM-012-11·16 : 카드 결과 텍스트 요약 저장
     result: RegisterResult
     card: RegisterCard
+
+
+class ActionStatus(StrEnum):
+    DONE = "DONE"  # [확인] 뒤 Java 실행 성공
+    CANCELED = "CANCELED"  # [취소]
+    FAILED = "FAILED"  # Java 실행 실패
+
+
+class ActionResultRequest(_Camel):
+    # 확인 카드 결과 텍스트 요약 저장 : 요약 글은 Python이 도구 표시 이름과 input으로 만듦
+    tool: str = Field(min_length=1, max_length=64)
+    status: ActionStatus
+    values: dict[str, Any] = Field(default_factory=dict, alias="input")
 
 
 class ReceiptResult(StrEnum):

@@ -19,12 +19,9 @@ from app.ocr import router as ocr_router
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.backend_client = create_backend_client()
-    # 도구 목록(docs/design/tool-catalog.md 4-2절) : CHAT_TOOL_AGENT 켜짐일 때만 기동 때 1회
-    settings = get_settings()
-    client = catalog.JavaToolCatalogClient(app.state.backend_client, settings)
-    installed = await catalog.install(settings, client)
-    if installed is not None:
-        tools.use_catalog(installed)
+    # 도구 목록(docs/design/tool-catalog.md 4-2절) : 기동 때 1회
+    client = catalog.JavaToolCatalogClient(app.state.backend_client, get_settings())
+    tools.use_catalog(await catalog.install(client))
     yield
     await app.state.backend_client.aclose()
 
