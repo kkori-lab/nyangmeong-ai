@@ -12,6 +12,8 @@ class Settings(BaseSettings):
 
     # Python→Java 내부 API 주소(인증 확인·대화 저장) : 빈 값이면 /ai/** 전부 502
     backend_base_url: str = ""
+    # 로그 파일 폴더(배포 서버 /home/ggorilab/logs) : 비면 콘솔에만
+    log_dir: str = ""
 
     # FN-AIM-008-07 : OCR 분석 제한 시간(초), Vision·LLM 정리 합산
     ocr_timeout_sec: float = 15.0
