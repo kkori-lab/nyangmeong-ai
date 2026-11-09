@@ -288,6 +288,16 @@
 - 기다리는 것: 프론트 범용 카드(LJS 프론트, 연결 확인)
 - 완료 조건: `/start` 기획의 완료 조건을 따른다. 대화창은 항상 도구 흐름(2026-11-09, `CHAT_TOOL_AGENT` 삭제).
 
+## SCR-AIM-013 대화창 · 첨부 사진 의도 판단·캐릭터·가계부 영수증 등록 응답 — 대기
+- 기능: 명세 기능 ID 추가 없음(메인 개편 뒤 추가). 걸치는 기능 FN-MAN-002, SCR-AIM-013
+- 배경: 프론트 SCR-MAN-001(2026-11-09 끝, PR #272)이 메인 검색창·대화창의 사진+글을 받아 종류를 판단해 흐름을 나눈다. 지금은 프론트 가짜(`features/ai/api.js` `judgeImageIntent`, 글 낱말 기준: 캐릭터 / 진료·병원·검진 / 가계부·지출·사료·용품)
+- 프론트 가정: 요청 multipart `file`·`cnvrsCn`(없을 수 있음)·`petSn`(없을 수 있음) → 응답 `{ kind }`, kind는 `CHARACTER`·`MEDICAL_RECEIPT`·`EXPENSE_RECEIPT`·`ASK`(모름)
+- 프론트 흐름: MEDICAL_RECEIPT → 기존 POST /ai/receipts + receipt-result, CHARACTER → 기존 POST /ai/characters(photo·petSn), EXPENSE_RECEIPT → 지금은 본창 가계부 화면 안내만, ASK → 프론트가 [캐릭터]·[진료 영수증]·[가계부] 칩으로 되묻는다(메시지 안 보냄)
+- 정할 것: 판단 API 경로와 대화방(`aiCnvrsRoomSn`) 포함 여부 / 캐릭터·가계부 흐름을 대화 이력에 남길지(지금은 진료 영수증만 receipt-result로 저장) / 가계부 영수증을 AI 창에서 바로 등록할지(그러면 SJM 가계부 저장 API와 맞춤)
+- 기다리는 것: 없음
+- 완료 조건: 사진과 글로 네 종류 중 하나를 돌려준다. 글이 없거나 모르면 ASK
+- 프론트 연결: `judgeImageIntent`만 실제 요청으로 바꾼다(프론트 저장소에서 /start). 응답 모양이 위 가정과 달라지면 이 절에 적는다
+
 ## 제외
 - FN-AIM-001-01~04,06, FN-AIM-002-01,05~06, FN-AIM-004-03~07, FN-AIM-005-03~06, FN-AIM-011-01~02,04~06,17~18,20, FN-AIM-012-09,15 (27건): 프론트 몫 (LJS 프론트: 대화창 화면)
 - FN-AIM-012-12~14,17 (4건): Java 몫 (JAJ: 일정·케어 항목 저장, 알림 연계)
