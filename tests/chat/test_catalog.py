@@ -418,25 +418,24 @@ def register_card(client, java, tool: str, raw: dict, text: str) -> tuple[dict, 
     return evs[0][1], evs[-1][1]
 
 
-def test_케어_항목_도구에_반복_유형이_없으면_케어_항목으로_반복_유형을_되물어야_한다(client, java):
+def test_케어_항목_도구에_반복_유형이_없으면_카드_빈_칸에_반복_유형이_있어야_한다(client, java):
+    # SCR-AIM-012 2단계 ④ : 빈 칸은 카드 missing으로, 되물음 글은 저장하지 않음
     intent, done = register_card(
         client, java, "draft_care_item", {"care_artcl_nm": "발톱 깎기"}, "발톱 깎기 넣어줘"
     )
 
-    assert intent["kind"] == "REGISTER"
-    assert done["card"]["cardType"] == "ASK"
-    assert done["card"]["careArtclNm"] == "발톱 깎기"
-    assert done["card"]["missing"] == ["careZoneCd"]
-    assert "매일 하나요, 주기마다 하나요?" in done["message"]["cnvrsCn"]
+    assert intent["kind"] == "ACTION"
+    assert done["action"]["input"]["careArtclNm"] == "발톱 깎기"
+    assert done["action"]["missing"] == ["careZoneCd"]
+    assert done["message"] is None
 
 
-def test_병원_일정의_빈_칸은_Java_requiredIf로_되물어야_한다(client, java):
+def test_병원_일정의_빈_칸은_Java_requiredIf로_정해야_한다(client, java):
     raw = {"schdl_knd_cd": "HLTC0057", "schdl_ymd": "2026-10-06"}
 
     _, done = register_card(client, java, "draft_schedule", raw, "6일에 병원 잡아줘")
 
-    assert done["card"]["cardType"] == "ASK"
-    assert done["card"]["missing"] == ["ckupTypeCd", "hsptlNm"]
+    assert done["action"]["missing"] == ["ckupTypeCd", "hsptlNm"]
 
 
 def test_Java_규칙이_바뀌면_되묻는_칸도_따라_바뀌어야_한다(client, java):
@@ -449,7 +448,7 @@ def test_Java_규칙이_바뀌면_되묻는_칸도_따라_바뀌어야_한다(cl
 
     _, done = register_card(client, java, "draft_schedule", raw, "6일에 병원 잡아줘")
 
-    assert done["card"]["missing"] == ["ckupTypeCd"]
+    assert done["action"]["missing"] == ["ckupTypeCd"]
 
 
 def test_빈_칸_LLM_이름은_Java_칸을_LLM_칸으로_되돌려야_한다():

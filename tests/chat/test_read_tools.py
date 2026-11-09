@@ -252,7 +252,7 @@ def test_선택_번호_칸도_앞_결과에_없으면_조건에서_빼야_한다
 def test_결과를_보고_읽기_도구가_아닌_도구를_고르면_실행하지_않아야_한다(client, java):
     agent = use_agent(
         client,
-        FakeToolAgent("list_checkups", {}, follow_tool="draft_schedule", follow_raw={}),
+        FakeToolAgent("list_checkups", {}, follow_tool="navigate", follow_raw={"screen_num": 1}),
     )
     reader = use_reader(client, FakeToolReader([{"ckupRcdSn": 7}]))
     room = room_of(client, java, pet_sn=CHOCO)

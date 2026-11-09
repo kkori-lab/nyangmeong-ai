@@ -288,12 +288,14 @@
 - 넘김: `draft_receipt_save` (저장 전 OCR 영수증 번호를 주는 READ가 없음, SCR-AIM-013 ⑤ 팀 결정 뒤, LJS)
 - 연결 남음: 배열·파일 칸 카드 폼·사진 첨부 multipart 실행·`action-result` 호출 (프론트 범용 카드, LJS 프론트)
 
-## SCR-AIM-012 대화창 · 2단계 쓰기 ④ 기존 등록 카드 2개 ACTION 전환 (추가 요청) — 대기
+## SCR-AIM-012 대화창 · 2단계 쓰기 ④ 기존 등록 카드 2개 ACTION 전환 (추가 요청) — 끝
 - 기능: `draft_schedule`·`draft_care_item`을 REGISTER `done.card`에서 ACTION으로 — 프론트 범용 카드 연결 뒤 (기능 ID는 기능명세서에 아직 없음 — 설계 `docs/design/tool-catalog.md` 8절 0번·5번, 응답 계약은 `docs/design/tool-calling.md` 6절. 2026-11-06 사람 결정: CARD 12개 전부, 6절 ACTION 계약, 출처 코드 없이)
 - 기다리는 것: 프론트 범용 카드(LJS 프론트, 연결 확인)
 - 완료 조건: `/start` 기획의 완료 조건을 따른다. 대화창은 항상 도구 흐름(2026-11-09, `CHAT_TOOL_AGENT` 삭제).
+- 연결 남음: ④-1·④-3 일정·케어 항목 확인 카드 표시·`notice`·옛 등록 카드 제거 (프론트 범용 카드, LJS 프론트)
+- 연결 남음: ④-3 같은 이름 안내 실제 동작 (register-context `careArtclNms`, JAJ)
 
-## SCR-AIM-013 대화창 · 첨부 사진 의도 판단·캐릭터·가계부 영수증 등록 응답 — 대기
+## SCR-AIM-013 대화창 · 첨부 사진 의도 판단·캐릭터·가계부 영수증 등록 응답 — 끝
 - 기능: 명세 기능 ID 추가 없음(메인 개편 뒤 추가). 걸치는 기능 FN-MAN-002, SCR-AIM-013
 - 배경: 프론트 SCR-MAN-001(2026-11-09 끝, PR #272)이 메인 검색창·대화창의 사진+글을 받아 종류를 판단해 흐름을 나눈다. 지금은 프론트 가짜(`features/ai/api.js` `judgeImageIntent`, 글 낱말 기준: 캐릭터 / 진료·병원·검진 / 가계부·지출·사료·용품)
 - 프론트 가정: 요청 multipart `file`·`cnvrsCn`(없을 수 있음)·`petSn`(없을 수 있음) → 응답 `{ kind }`, kind는 `CHARACTER`·`MEDICAL_RECEIPT`·`EXPENSE_RECEIPT`·`ASK`(모름)
@@ -302,6 +304,7 @@
 - 기다리는 것: 없음
 - 완료 조건: 사진과 글로 네 종류 중 하나를 돌려준다. 글이 없거나 모르면 ASK
 - 프론트 연결: `judgeImageIntent`만 실제 요청으로 바꾼다(프론트 저장소에서 /start). 응답 모양이 위 가정과 달라지면 이 절에 적는다
+- 연결 남음: 사진 의도 판단 `POST /ai/image-intent` (프론트 `judgeImageIntent` 연결, LJS 프론트). 응답 모양은 위 가정과 같음
 
 ## 제외
 - FN-AIM-001-01~04,06, FN-AIM-002-01,05~06, FN-AIM-004-03~07, FN-AIM-005-03~06, FN-AIM-011-01~02,04~06,17~18,20, FN-AIM-012-09,15 (27건): 프론트 몫 (LJS 프론트: 대화창 화면)

@@ -1,10 +1,12 @@
 import asyncio
+import io
 import logging
 import re
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 
+from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel
 from pydantic.alias_generators import to_camel
 
@@ -15,6 +17,8 @@ from app.chat.clients import (
     Classified,
     ClassifiedKind,
     ClassifyError,
+    ImageIntentError,
+    ImageIntentJudge,
     IntentClassifier,
     ReadMore,
     RegisterExtractor,
@@ -42,6 +46,7 @@ from app.chat.schemas import (
     ConversationDetail,
     ConversationMessage,
     ConversationSummary,
+    ImageIntentKind,
     Intent,
     IntentKind,
     PetChoice,
@@ -54,6 +59,7 @@ from app.chat.schemas import (
     StreamError,
 )
 from app.core.backend import BackendError
+from app.core.image import validate_upload
 from app.core.response import AppError
 
 logger = logging.getLogger(__name__)
@@ -274,7 +280,7 @@ def _tool_judged(
     prior: ActionDraft | None = None,
     now: datetime | None = None,
 ) -> Judged:
-    # 도구 -> intent 값 (설계 6절). 등록 카드 2개 밖 CARD 도구는 ACTION
+    # 도구 -> intent 값 (설계 6절). CARD 도구는 ACTION(등록 카드 2개도 ④부터)
     call = decision.call
     if call is None:
         if decision.text is not None:
@@ -287,9 +293,6 @@ def _tool_judged(
         return Judged(Intent(kind=IntentKind.FALLBACK))
     if call.name == tools.NAVIGATE:
         return Judged(tools.route_row(call).to_intent())
-    if call.name in tools.REGISTER_TOOLS:
-        values = tools.register_values(call)
-        return Judged(Intent(kind=IntentKind.REGISTER), ai_values=values, tool=call.name)
     if call.name == tools.DECLINE:
         return Judged(Intent(kind=IntentKind.FALLBACK), out_of_scope=not call.args.unclear)
     card = tools.card_entry(call.name)
@@ -1085,6 +1088,12 @@ def action_card(
             values[catalog.PET_SN] = pet.pet_sn
         else:
             choices = [PetChoice(pet_sn=p.pet_sn, pet_nm=p.pet_nm) for p in pets]
+    notice = None
+    name = values.get("careArtclNm")
+    warn = "same_name_warning" in entry.hooks and pet is not None and isinstance(name, str)
+    # FN-AIM-012-08 : 같은 반려동물에 같은 이름의 케어 항목이 있으면 안내
+    if warn and _same_name(name, pet.care_artcl_nms):
+        notice = DUPLICATE_NOTICE.format(pet=pet.pet_nm, name=name)
     return ActionCard.model_validate(
         {
             "tool": entry.name,
@@ -1097,6 +1106,7 @@ def action_card(
             "missing": catalog.missing(entry, values),
             "petChoices": choices,
             "petNm": pet.pet_nm if pet else None,
+            "notice": notice,
         }
     )
 
@@ -1126,7 +1136,7 @@ ACTION_FAILED_MESSAGE = "실패 — {label} · 저장하지 못했어요."
 ACTION_CANCELED_MESSAGE = "취소됨 — {label} · 저장하지 않았어요."
 
 
-def _input_text(param: "catalog.CatalogItemParam", value: object) -> str:
+def _input_text(param: "catalog.CatalogItemParam", value: object, clock: bool = True) -> str:
     if param.type == catalog.ARRAY:
         # 배열 : 항목마다 값(번호·uuid·petSn·참거짓 칸 빼고)을 " / "로, 항목끼리는 ", "로
         rows = []
@@ -1145,7 +1155,8 @@ def _input_text(param: "catalog.CatalogItemParam", value: object) -> str:
         return _md(date.fromisoformat(str(value)))
     if param.type == "datetime":
         moment = datetime.fromisoformat(str(value))
-        return f"{_md(moment.date())} {moment:%H:%M}"
+        # hrInptYn false : 시간을 입력하지 않은 칸이라 날짜만
+        return f"{_md(moment.date())} {moment:%H:%M}" if clock else _md(moment.date())
     if param.type in ("long", "int"):
         return f"{value:,}"
     if param.type == "decimal":
@@ -1174,8 +1185,9 @@ def action_result_message(request: ActionResultRequest) -> str:
         return ACTION_FAILED_MESSAGE.format(label=label)
     if catalog.missing(entry, values, files=False):
         raise AppError("INVALID_REQUEST", 400, "확인 카드의 필수 칸이 비어 있습니다.")
+    clock = values.get(catalog.HR_INPUT) is not False
     texts = (
-        _input_text(param, values[name])
+        _input_text(param, values[name], clock)
         for name, param in entry.params.items()
         if name in values and name not in entry.fixed and _summarized(name, param)
     )
@@ -1198,3 +1210,37 @@ async def save_action_result(
 ) -> ConversationMessage:
     # 실행(React -> Java 공개 API)·취소·실패의 결과를 AI 메시지로 저장
     return await repo.add_message(room_sn, ROLE_AI, action_result_message(request))
+
+
+# 이미지 축소 기준 : Anthropic 이미지 5MB 상한·토큰 절약
+INTENT_IMAGE_LONG_EDGE = 1024
+INTENT_IMAGE_QUALITY = 85
+
+
+def _intent_jpeg(image: bytes) -> bytes:
+    """판단용 긴 변 1024px JPEG"""
+    try:
+        with Image.open(io.BytesIO(image)) as opened:
+            flat = ImageOps.exif_transpose(opened).convert("RGB")
+    except (UnidentifiedImageError, OSError, ValueError) as error:
+        # 시그니처만 맞고 열 수 없는 파일
+        raise AppError(
+            "FILE_TYPE_NOT_ALLOWED", 400, "jpg·jpeg·png·webp 이미지만 올릴 수 있습니다."
+        ) from error
+    flat.thumbnail((INTENT_IMAGE_LONG_EDGE, INTENT_IMAGE_LONG_EDGE), Image.LANCZOS)
+    out = io.BytesIO()
+    flat.save(out, "JPEG", quality=INTENT_IMAGE_QUALITY)
+    return out.getvalue()
+
+
+async def judge_image_intent(
+    judge: ImageIntentJudge, image: bytes, file_name: str, text: str | None
+) -> ImageIntentKind:
+    validate_upload(image, file_name)
+    jpeg = _intent_jpeg(image)
+    text = text.strip() if text and text.strip() else None
+    try:
+        return await judge.judge(jpeg, text)
+    except ImageIntentError:
+        # 판단 실패 : 오류 대신 되물음(React 칩)
+        return ImageIntentKind.ASK
