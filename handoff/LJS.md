@@ -10,7 +10,7 @@
 - 지출 등록 후속 (LJS·SJM): `lines[0].petSn`을 비우면 공용 지출로 저장되는지 SJM에 확인. 중복 확인(`/api/expenses/duplicate-check`, 설계 4-4 `duplicate_expense`)은 도구 목록에 없어 안 함 — React가 [확인] 전에 부를지·Python hook으로 할지 정한다
 - `draft_receipt_save` 대기 (LJS): 저장 전 OCR 영수증 번호를 주는 READ가 없어 싣지 않음(카탈로그는 중첩 배열을 읽음). SCR-AIM-013 ⑤ 팀 결정 뒤 마일스톤 대기 절로
 - 프론트(LJS) 알리기: ②·③ 카드분과 추가-1(돌려받은 카드 날짜 유지)이 develop에 병합되면 알림. 사진 의도 판단(SCR-AIM-013 대기 절, 프론트 가짜 `judgeImageIntent`) 계약을 `/start SCR-AIM-013`으로 정해 보냄
-- `docs/api/chat.md` 맞추기 (LJS): ActionCard `params`는 값 없는 키가 null로 나옴(문서는 "없는 키는 생략", ①부터, `ActionParam`), `input`의 "datetime 칸에 날짜만 오면…"에 수정 카드는 원래 시간을 쓴다는 것(추가-3) 미반영
+- `docs/api/chat.md` 맞추기 (LJS): AI 메시지 `cnvrsCn`·SSE `delta`는 Markdown(GFM)이라고 적기(2026-11-09 프론트 세션에 렌더링 요청: `react-markdown`+`remark-gfm`, HTML 렌더링 안 함, 답변 표가 글자 그대로 보이던 문제), ActionCard `params`는 값 없는 키가 null로 나옴(문서는 "없는 키는 생략", ①부터, `ActionParam`), `input`의 "datetime 칸에 날짜만 오면…"에 수정 카드는 원래 시간을 쓴다는 것(추가-3) 미반영
 - 공용 하네스 PR: `scripts/tool_eval.py`(추가-1, READ·ACTION 세기·유형 `수정`)는 end-check가 공용 하네스로 분류해 이번 커밋에서 뺌 — PR로 따로
 - 실제 LLM에서 "코코 오늘 체중 4.2kg 기록해줘"에 `rcd_ymd`를 비워 `missing ["rcdDt"]`가 된 적 있음(2026-11-09 검증, 1/2). 날짜를 말하지 않았으면 서버가 오늘로 채울지 정한다(지금 결정은 "날짜만 오면"만) (LJS). 돌려받은 카드가 있으면 LLM의 "오늘"은 버림(추가-1)
 - 기존 흐름 코드 삭제 (LJS, 별도 마일스톤 후보): `judge`·분류 LLM·답변 LLM 단독 호출은 앱에서 안 탐. `test_messages`·`test_register`·`test_intent`·`test_guide` 등이 `conftest.py`의 도구 가짜 미주입(기존 흐름)으로 돌아 테스트를 도구 흐름 기준으로 옮겨야 지울 수 있다. 등록 칸 추출 LLM은 초안 이어 쓰기에 계속 씀
