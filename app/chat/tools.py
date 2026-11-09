@@ -2,6 +2,7 @@
 
 - 도구 설명 정본 : data/tool_prompts.yaml
 - 등록 도구(draft_*)의 칸·필수·코드 값 : Java 도구 목록(catalog)
+- draft_schedule·draft_care_item 밖 CARD 도구 : 확인 카드(ACTION, 2단계 쓰기)
 - navigate·search_guide·decline : Java API가 아닌 Python 도구(builtin)
 - LLM은 도구와 인자만 고름 -> 인자는 여기서 다시 검증(매핑표·안내서·공통코드)
 """
@@ -151,6 +152,14 @@ def register_missing(name: str | None, values: dict) -> list[str] | None:
 def read_entry(name: str) -> catalog.CatalogEntry | None:
     entry = _catalog.entries.get(name) if _catalog is not None else None
     return entry if entry is not None and entry.kind == "READ" else None
+
+
+def card_entry(name: str | None) -> catalog.CatalogEntry | None:
+    # 2단계 쓰기 : 확인 카드(ACTION) 도구. 지금 등록 카드 2개는 REGISTER 그대로
+    entry = _catalog.entries.get(name) if _catalog is not None and name else None
+    if entry is None or entry.kind != "CARD" or name in REGISTER_TOOLS:
+        return None
+    return entry
 
 
 def guide_ids(call: ToolCall, text: str) -> list[str]:

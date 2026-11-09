@@ -31,6 +31,7 @@ from app.chat.repository import (
     get_tool_reader,
 )
 from app.chat.schemas import (
+    ActionResultRequest,
     ConversationCreateRequest,
     MessageSendRequest,
     ReceiptResultRequest,
@@ -109,7 +110,7 @@ async def send_message(
     room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
 ) -> StreamingResponse:
     # 스트림 시작 전 오류(400·401·403·404·502)는 다른 API와 같은 JSON 응답
-    turn = await service.prepare_turn(repo, room_sn, body.cnvrs_cn, body.draft)
+    turn = await service.prepare_turn(repo, room_sn, body.cnvrs_cn, body.draft, body.action)
     limits = service.AnswerLimits(settings.answer_first_token_sec, settings.answer_total_sec)
     register = service.RegisterDeps(contexts, extractor, rules.today_kst())
     events = service.answer_turn(
@@ -126,6 +127,17 @@ async def save_register_result(
 ) -> JSONResponse:
     # FN-AIM-012-11·16 : 등록 카드의 결과(등록됨·취소됨) 텍스트 요약 저장
     result = await service.save_register_result(repo, room_sn, body)
+    return response.success(result.model_dump(by_alias=True), http_code=201)
+
+
+@router.post("/{aiCnvrsRoomSn}/action-result")
+async def save_action_result(
+    body: ActionResultRequest,
+    repo: Repo,
+    room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
+) -> JSONResponse:
+    # 2단계 쓰기 : 확인 카드의 결과(완료·취소·실패) 텍스트 요약 저장
+    result = await service.save_action_result(repo, room_sn, body)
     return response.success(result.model_dump(by_alias=True), http_code=201)
 
 

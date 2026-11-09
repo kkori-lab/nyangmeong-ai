@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 CATALOG_PATH = "/internal/ai/tools"
 PET_SN = "petSn"
+HR_INPUT = "hrInptYn"
 YEAR_MONTH = "yearMonth"
 _YEAR_MONTH = re.compile(r"\d{4}-(0[1-9]|1[0-2])")
 
@@ -104,6 +105,8 @@ class PromptParam(BaseModel):
 
 class ToolPrompt(BaseModel):
     builtin: bool = False
+    # 도구 표시 이름 : 확인 카드 제목·결과 요약 글
+    label: str | None = None
     description: str
     hooks: list[str] = []
     params: dict[str, PromptParam] = {}
@@ -120,7 +123,8 @@ class Hook:
 
 HOOKS: dict[str, Hook] = {
     "pet": Hook(makes=frozenset({"petSn"})),
-    "date": Hook(makes=frozenset({"schdlDt", "hrInptYn"}), roles=frozenset({"ymd", "tm"})),
+    # 도구의 datetime 칸(schdlDt·rcdDt)을 만듦. hrInptYn이 있는 도구만 시간 입력 여부도
+    "date": Hook(makes=frozenset({"schdlDt", HR_INPUT, "rcdDt"}), roles=frozenset({"ymd", "tm"})),
     "same_name_warning": Hook(),
     # 가계부 READ : 문장 속 이름이 하나면 petSn 조건, 아니면 전체(공용 지출 포함)
     "pet_filter": Hook(),
@@ -146,6 +150,8 @@ class CatalogEntry:
 
     name: str
     kind: str
+    domain: str
+    label: str | None
     call: CatalogCall
     params: dict[str, CatalogParam]
     rules: tuple[RequiredIf, ...]
@@ -265,6 +271,8 @@ def _entry(tool: CatalogTool, prompt: ToolPrompt) -> CatalogEntry:
     return CatalogEntry(
         name=tool.name,
         kind=tool.kind,
+        domain=tool.domain,
+        label=prompt.label,
         call=tool.call,
         params=tool.params,
         rules=rules,
@@ -342,22 +350,32 @@ def clean_codes(entry: CatalogEntry, args: BaseModel) -> BaseModel:
     return args.model_copy(update=wrong) if wrong else args
 
 
-def to_java(entry: CatalogEntry, values: dict) -> dict:
-    """LLM 칸 값 -> Java 요청 칸 값 (date hook이 날짜·시간을 schdlDt·hrInptYn으로 합침)"""
+def to_java(entry: CatalogEntry, values: dict, now: datetime | None = None) -> dict:
+    """LLM 칸 값 -> Java 요청 칸 값 (date hook이 날짜·시간을 도구의 datetime 칸으로 합침)"""
     names, hooks = entry.to_java_name, entry.hook_roles
     java = {names[name]: value for name, value in values.items() if name in names}
     roles = {hooks[name]: value for name, value in values.items() if name in hooks}
     if "date" in entry.hooks:
-        java |= _compose_datetime(roles.get("date:ymd"), roles.get("date:tm"))
+        java |= _compose_datetime(entry, roles.get("date:ymd"), roles.get("date:tm"), now)
     return {name: value for name, value in java.items() if value is not None}
 
 
-def _compose_datetime(ymd, tm) -> dict:
-    if ymd is None:
+def _compose_datetime(entry: CatalogEntry, ymd, tm, now: datetime | None) -> dict:
+    target = next((name for name, p in entry.params.items() if p.type == "datetime"), None)
+    if ymd is None or target is None:
         return {}
     day = ymd if isinstance(ymd, date) else date.fromisoformat(str(ymd))
-    clock = tm if isinstance(tm, time) else time.fromisoformat(str(tm)) if tm else time(0, 0)
-    return {"schdlDt": datetime.combine(day, clock).isoformat(), "hrInptYn": tm is not None}
+    clock = tm if isinstance(tm, time) else time.fromisoformat(str(tm)) if tm else None
+    if HR_INPUT in entry.params:
+        # 일정 : 시간이 없으면 0시 + 시간 미입력
+        moment = datetime.combine(day, clock or time(0, 0))
+        return {target: moment.isoformat(), HR_INPUT: clock is not None}
+    if clock is None:
+        # 2026-11-06 결정 : 날짜만이면 오늘은 지금 시각(KST), 다른 날은 빈 칸(되물음)
+        if now is None or day != now.date():
+            return {}
+        clock = now.time().replace(second=0, microsecond=0)
+    return {target: datetime.combine(day, clock).isoformat()}
 
 
 def is_id(name: str) -> bool:
@@ -446,6 +464,99 @@ def missing_llm(entry: CatalogEntry, values: dict) -> list[str]:
     return names
 
 
+# 확인 카드(2단계 쓰기, CARD)
+
+
+def _valid(param: CatalogParam, value: object) -> bool:
+    # Java 칸 규칙(타입·코드 값·min·max·maxLength)에 맞는 값인지
+    kind = param.type
+    if value is None:
+        return False
+    if kind in ("date", "datetime", "time"):
+        parse = {"date": date, "datetime": datetime, "time": time}[kind].fromisoformat
+        try:
+            parse(str(value))
+        except ValueError:
+            return False
+        return True
+    if kind == "code":
+        return bool(param.codes) and value in {code.cd for code in param.codes}
+    if kind == "boolean":
+        return isinstance(value, bool)
+    if kind == "string":
+        if not isinstance(value, str) or not value.strip():
+            return False
+        return param.max_length is None or len(value) <= param.max_length
+    numeric = (int,) if kind in ("long", "int") else (int, float)
+    if isinstance(value, bool) or not isinstance(value, numeric):
+        return False
+    low, high = param.min_value, param.max_value
+    return (low is None or value >= low) and (high is None or value <= high)
+
+
+def _valid_role(role: str, value: object) -> bool:
+    parse = date.fromisoformat if role == "date:ymd" else time.fromisoformat
+    try:
+        parse(str(value))
+    except ValueError:
+        return False
+    return True
+
+
+def card_input(
+    entry: CatalogEntry,
+    values: dict,
+    now: datetime | None = None,
+    seen: dict[str, set[int]] | None = None,
+    prior: dict | None = None,
+) -> dict:
+    """CARD 도구 인자 -> 확인 카드 input(Java 칸). 틀린 칸은 비움(되물음)
+    - 번호 칸은 같은 턴 앞 READ 결과(seen)에 나온 값만, petSn은 service.py가 pet hook으로
+    - prior : 돌려받은 카드 input(같은 도구), 이 메시지 값이 덮어씀"""
+    params = entry.params
+    base = {
+        name: value
+        for name, value in (prior or {}).items()
+        if name in params and name != PET_SN and _valid(params[name], value)
+    }
+    roles = entry.hook_roles
+    usable = {
+        name: value
+        for name, value in values.items()
+        if name not in roles or _valid_role(roles[name], value)
+    }
+    seen = seen or {}
+    new = {
+        name: value
+        for name, value in to_java(entry, usable, now).items()
+        if name in params
+        and name != PET_SN
+        and _valid(params[name], value)
+        and (not is_id(name) or value in seen.get(name, set()))
+    }
+    return base | new
+
+
+def invalid_input(entry: CatalogEntry, values: dict) -> list[str]:
+    """목록에 없는 칸·Java 규칙 밖 값 (결과 저장 요청 검사)"""
+    return [
+        name
+        for name, value in values.items()
+        if name not in entry.params or (value is not None and not _valid(entry.params[name], value))
+    ]
+
+
+def card_params(entry: CatalogEntry) -> dict[str, dict]:
+    return {
+        name: param.model_dump(by_alias=True, exclude_none=True)
+        for name, param in entry.params.items()
+    }
+
+
+def card_rules(entry: CatalogEntry) -> list[dict]:
+    return [rule.model_dump() for rule in entry.rules]
+
+
 # Java 호출
 
 
@@ -482,10 +593,8 @@ async def load(client: ToolCatalogClient) -> Catalog:
     return build(response, "java")
 
 
-async def install(settings: Settings, client: ToolCatalogClient) -> Catalog | None:
-    # CHAT_TOOL_AGENT 꺼짐이면 받지 않는다. 다시 받기는 기동 때 1회(9절 결정 남음)
-    if not settings.chat_tool_agent:
-        return None
+async def install(client: ToolCatalogClient) -> Catalog:
+    # 다시 받기는 기동 때 1회(9절 결정 남음)
     catalog = await load(client)
     logger.info(
         "도구 목록: %s %s, %d개 %s",
