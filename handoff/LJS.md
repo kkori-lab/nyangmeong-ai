@@ -1,7 +1,30 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-끝: SCR-AIM-011 공통 · 배포 서버 로그 파일 기록 (2026-11-09, 검증 1회차 통과·사람 확인). `LOG_DIR`이 있으면 `ai_YYYY-MM-DD.log` 날짜별 이어 쓰기(30일 보관, 파일 660·앱이 만든 폴더 2770), 대상 `app`·`uvicorn.error`·`gunicorn.error`, 요청마다 `METHOD 경로 -> 상태 (ms)`(SSE는 끝까지, 쿼리 미기록). 배포 워크플로우가 매번 secret `ENV_FILE`로 `.env`·`.env.local`을 덮어쓰고(600) 로그 폴더를 `<서비스 사용자>:deploy` 2770으로 준비
+SCR-AIM-004 대화창 · 도구 목록 받기 제한 시간·다시 시도·실패 이유 로그 — 기획 (시작 2026-11-09 17:16)
+
+고른 이유: 사람 요청(2026-11-09). 음수량·식사량 답변 품질 기획(승인 전)은 내리고 마일스톤 `대기`로 되돌림. 기능 ID·`/ai/**` API·DMS 변경 없음.
+
+확인한 것 (2026-11-09 배포 서버, 사람 실행):
+- 서버 Java 설정 `app.security.permit-all-paths`에 `/internal/ai/tools`가 빠져 401 → 사람이 추가, 이제 200
+- 그 뒤에도 기동마다 `도구 목록: Java 받기 실패(AppError), 스냅샷으로`(워커 4개 모두). `.env.local`·`BACKEND_BASE_URL`(localhost:8080)·권한(opc 600)·`WorkingDirectory` 정상
+- 같은 코드로 단독 호출하면 52개를 1.92초에 받음. curl은 1초 안팎, Java 재시작 직후 첫 호출은 17.7초
+- 원인: Java 호출 공통 제한 `TIMEOUT_SEC = 3.0`(`app/core/backend.py:11`). 기동 때 워커 4개가 무거운 import로 CPU를 다투며 동시에 부르면 3초를 넘김. `AppError`에 이유가 없어 로그로는 시간 초과인지 구분 불가였음
+
+할 일 (바꿀 파일 `app/chat/catalog.py`·`app/main.py`, 테스트 `tests/chat/test_catalog.py`, 설계 `docs/design/tool-catalog.md`):
+1. 제한 시간 — `JavaToolCatalogClient.fetch`만 `call_backend(..., timeout=CATALOG_TIMEOUT_SEC)`(20초)로 부른다. 다른 Java 호출은 3초 그대로(`backend.py` 안 바꿈, `_send`가 kwargs를 httpx에 넘김)
+   - 완료 조건 `명령:` `call_backend`를 가로채 `JavaToolCatalogClient.fetch`가 `timeout=20`을 넘기는지 테스트
+2. 다시 시도 — 기동 때 받기가 실패해 스냅샷이면 백그라운드 작업이 `CATALOG_RETRY_SEC`(30초)마다 최대 `CATALOG_RETRY_MAX`(10회, 약 5분) 다시 받는다. 성공하면 `tools.use_catalog`로 Java 목록으로 바꾸고 `도구 목록: 다시 받기 성공(n회째) java <버전>, N개` 로그, 모두 실패하면 `도구 목록: 다시 받기 포기(10회), 스냅샷 유지` 경고. 기동 때 성공하면 작업을 만들지 않는다. `main.py` lifespan이 작업을 만들고 종료 때 취소한다. 진행 중인 턴은 시작할 때 잡은 도구 정의를 그대로 쓰고 다음 턴부터 새 목록(바꾸기는 참조 교체 한 번)
+   - 완료 조건 `명령:` 가짜 클라이언트가 처음 2번 실패하고 3번째 성공(간격 0으로 바꿈) → `tools.active_catalog().source == "java"`와 성공 로그. 계속 실패 → 10번 뒤 멈추고 `snapshot` 유지·포기 경고. 기동 때 성공이면 다시 시도 안 함. `TestClient`로 앱을 열고 닫을 때 작업이 남지 않음(멈춤 없음)
+3. 실패 이유 로그 — `도구 목록: Java 받기 실패(<이유>, <ms>ms), 스냅샷으로`. 이유는 `BackendError 401`처럼 상태 코드, `AppError`면 코드 이름, `ValidationError`면 그대로. 경과 시간으로 시간 초과(20000ms 근처)를 구분한다. 다시 시도 실패도 같은 꼴(회차 포함)
+   - 완료 조건 `명령:` 기존 `Java 받기 실패` 테스트에 `BackendError 401`·`ms` 단언 추가
+4. 설계 문서 — `docs/design/tool-catalog.md` 4-2절 5번과 9절 "다시 받는 주기"를 "기동 때 1회 + 실패하면 30초 간격 최대 10회(2026-11-09 결정), 주기적 다시 받기는 아직"으로 고친다
+5. 공통 `명령:` `sh scripts/check.sh` 종료 0
+6. `화면:` 로컬에서 Java를 끈 채 서버를 띄우면(`uv run python -m uvicorn app.main:app --reload`) `Java 받기 실패(AppError …ms)`와 스냅샷 로그, 30초 안에 Java를 켜면 `다시 받기 성공`이 남는다. 배포 서버는 PR 병합·배포 뒤 사람이 `도구 목록: java` 줄을 확인한다
+
+하지 않는 것: Java 호출 공통 제한 3초 변경, 주기적으로 목록 다시 받기(설계 9절 결정 남음), Java 도구 목록 API 속도(1~2초, 재시작 직후 17초)는 백엔드에 알리기만
+
+새 의존성: 없음
 
 ## 다음에 할 것
 - 로그 파일 배포 전 사람 할 일 (LJS, 다음 main 배포 전): 배포마다 서버 `.env.local`이 secret `ENV_FILE`로 통째로 덮어써지므로, 서버의 지금 `.env.local`·`.env`에 있는 키(`BACKEND_BASE_URL`, AI 키 3개, `CHAT_TOOL_*`, 타임아웃 등)를 빠짐없이 `ENV_FILE`에 옮기고 `LOG_DIR`(Java `app.log.dir`과 같은 폴더)를 추가. 서버에 `deploy` 그룹·SELinux 확인, 배포 사용자와 서비스 사용자가 다르면 600인 `.env.local`을 서비스가 못 읽으니 확인, 워크플로우 변경을 backend-90에 알림. 배포 뒤 폴더 `drwxrws---`·파일 `-rw-rw----`(그룹 deploy)와 요청 줄 확인. 필요하면 배포 전 `.env.local.bak` 백업 단계 추가 검토
