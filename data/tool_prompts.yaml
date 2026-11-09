@@ -167,6 +167,82 @@ draft_expense_limit:
       java: mmExpndLimAmt
       description: 월 지출 한도 금액(원)
 
+# 배열·파일 칸 확인 카드 (SCR-AIM-012 2단계 ③)
+# - java "lines[].expndAmt" : 배열 lines의 첫 줄 항목 칸. fixed : Java 칸에 늘 넣는 값(불러올 때 검사)
+# - 파일 칸(사진)은 Python이 채우지 않는다. 회원이 카드에서 첨부한다
+# - draft_receipt_save(영수증 저장)는 아직 싣지 않는다 : 저장 전 영수증 번호를 주는 READ가 없음
+
+draft_expense:
+  label: 지출 등록
+  hooks: [line_pet]
+  fixed:
+    expndInptMthCd: MYPC0019
+  description: |
+    가계부에 새 지출 기록 하나를 넣는 확인 카드를 대화창에 띄운다.
+    회원이 카드에서 [확인]을 누르기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 돈을 쓴 것을 가계부에 적어 달라는 말.
+      예) "어제 사료 3만 2천원 샀어 가계부에 적어 줘", "오늘 병원비 5만원 지출로 넣어 줘"
+    쓰지 않을 때: 이미 있는 지출을 고치는 말은 draft_expense_update. 지출을 묻기만 하는 말은
+      list_expenses·get_expense_total. 월 한도를 정하는 말은 draft_expense_limit.
+    인자: 회원이 말하지 않은 칸은 비운다(지어내지 않는다). 날짜는 시스템의 오늘 날짜 기준으로
+      계산하고 말하지 않았으면 오늘. 금액은 원 단위 정수로 바꾼다(3만 2천원 → 32000).
+      어느 반려동물 지출인지는 고르지 않는다(서버가 정하고 회원이 카드에서 바꾼다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    expnd_ymd:
+      java: expndYmd
+      description: 지출 날짜 YYYY-MM-DD. 날짜를 말하지 않았으면 오늘
+    expnd_clsf_cd:
+      java: expndClsfCd
+      description: 지출 카테고리
+    expnd_amt:
+      java: lines[].expndAmt
+      description: 금액(원)
+    dtl_mttr:
+      java: dtlMttr
+      description: 상세 내용(무엇을 샀는지)
+    expnd_plcus_nm:
+      java: expndPlcusNm
+      description: 사용처 이름(가게·병원 이름)
+
+draft_observation_cycle:
+  label: 관찰 기록 추가
+  target: 관찰 항목
+  hooks: [pet, date]
+  description: |
+    지켜보는 관찰 항목(혹·상처 등)에 오늘의 관찰 기록 하나를 더하는 확인 카드를 대화창에 띄운다.
+    회원이 카드에서 사진을 붙이고 [확인]을 누르기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 관찰 중인 부위의 크기·변화를 기록해 달라는 말.
+      예) "초코 등에 난 혹 오늘 1.2cm야 기록해 줘", "다리 상처 좀 작아졌어 관찰 기록 남겨 줘"
+    쓰지 않을 때: 관찰 기록을 묻기만 하는 말은 list_observation_items·list_observation_cycles.
+      체중·식사량 등 일지는 draft_daily_health_record.
+    인자: obsrv_artcl_sn은 이 턴에 받은 list_observation_items 결과의 obsrvArtclSn만 쓴다.
+      결과가 없으면 list_observation_items를 먼저 부른다. 말하지 않은 칸은 비운다.
+      날짜는 시스템의 오늘 날짜 기준으로 계산한다. 크기는 단위 없이 숫자만(cm). 사진은 다루지 않는다.
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    obsrv_artcl_sn:
+      java: obsrvArtclSn
+      description: 관찰 항목 번호. 이 턴 list_observation_items 결과의 obsrvArtclSn만, 모르면 비운다
+    obsrv_ymd:
+      hook: date:ymd
+      description: 관찰 날짜 YYYY-MM-DD. 날짜를 말하지 않았으면 오늘
+    obsrv_tm:
+      hook: date:tm
+      description: 관찰 시간 24시간 HH:MM. 말하지 않았으면 비운다
+    obsrv_sz:
+      java: obsrvSz
+      description: 크기(숫자만, cm)
+    obsrv_chg_cd:
+      java: obsrvChgCd
+      description: 지난 관찰보다의 크기 변화
+    memo_cn:
+      java: memoCn
+      description: 메모
+
 # 수정 확인 카드 (SCR-AIM-012 2단계 ②, PATCH) : 바꿀 칸만 채우고 바꾸지 않은 칸은 비운다
 # - target : 바꿀 대상을 찾지 못했을 때 안내 글의 대상 이름
 # 경로의 번호 칸(schdlSn·careArtclSn·expndSn)은 이 턴 READ 결과에 나온 값만. 못 정하면 카드 없이 안내 글

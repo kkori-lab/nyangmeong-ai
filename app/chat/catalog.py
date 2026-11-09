@@ -42,14 +42,27 @@ class CatalogCode(BaseModel):
 
 
 ParamType = Literal[
-    "string", "long", "int", "decimal", "boolean", "date", "time", "datetime", "code"
+    "string",
+    "long",
+    "int",
+    "decimal",
+    "boolean",
+    "date",
+    "time",
+    "datetime",
+    "code",
+    "array",
+    "file",
 ]
+ARRAY = "array"
+FILE = "file"
 
 
-class CatalogParam(BaseModel):
+class CatalogItemParam(BaseModel):
+    """칸 규칙 : 배열 항목 칸(in 없음)과 요청 칸(CatalogParam)이 같이 쓴다"""
+
     model_config = ConfigDict(populate_by_name=True)
 
-    loc: Literal["path", "query", "body"] = Field(alias="in")
     type: str
     required: bool = False
     group: str | None = None
@@ -61,6 +74,15 @@ class CatalogParam(BaseModel):
     # @Positive (숫자 칸), @Pattern (글자 칸)
     positive: bool | None = None
     pattern: str | None = None
+    # 배열 칸 : 항목 칸 규칙(중첩 배열 포함)·최소 항목 수
+    items: dict[str, "CatalogItemParam"] | None = None
+    min_items: int | None = Field(None, alias="minItems")
+    # "uuid" : React가 [확인] 때 카드 하나에 한 번 만든다(Python은 채우지 않고 필수로 세지 않음)
+    generated: str | None = None
+
+
+class CatalogParam(CatalogItemParam):
+    loc: Literal["path", "query", "body"] = Field(alias="in")
 
 
 class RequiredIf(BaseModel):
@@ -76,8 +98,12 @@ class CatalogRule(BaseModel):
 
 
 class CatalogCall(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     method: str
     path: str
+    # 파일 칸이 있는 도구 : multipart/form-data
+    content_type: str | None = Field(None, alias="contentType")
 
 
 class CatalogTool(BaseModel):
@@ -115,6 +141,8 @@ class ToolPrompt(BaseModel):
     description: str
     hooks: list[str] = []
     params: dict[str, PromptParam] = {}
+    # Java 칸 -> 늘 넣는 값(지출 등록의 입력 방법 등). 불러올 때 Java 규칙으로 검사
+    fixed: dict[str, str | int | bool] = {}
 
 
 # hook(설계 4-4절) : 이름 -> 만드는 Java 칸. 반려동물·같은 이름 경고는 지금 service.py 흐름이 처리
@@ -129,10 +157,14 @@ class Hook:
 HOOKS: dict[str, Hook] = {
     "pet": Hook(makes=frozenset({"petSn"})),
     # 도구의 datetime 칸(schdlDt·rcdDt)을 만듦. hrInptYn이 있는 도구만 시간 입력 여부도
-    "date": Hook(makes=frozenset({"schdlDt", HR_INPUT, "rcdDt"}), roles=frozenset({"ymd", "tm"})),
+    "date": Hook(
+        makes=frozenset({"schdlDt", HR_INPUT, "rcdDt", "obsrvDt"}), roles=frozenset({"ymd", "tm"})
+    ),
     "same_name_warning": Hook(),
     # 가계부 READ : 문장 속 이름이 하나면 petSn 조건, 아니면 전체(공용 지출 포함)
     "pet_filter": Hook(),
+    # 배열 줄의 petSn(지출 등록 lines[0].petSn) : 문장 속 이름이 하나면 그 번호, 아니면 비움(공용)
+    "line_pet": Hook(),
 }
 
 # LLM 칸 타입 : 날짜·시간은 글자로 받아 다시 검증
@@ -170,6 +202,7 @@ class CatalogEntry:
     codes: dict[str, frozenset[str]]
     bounds: dict[str, tuple[int | None, int | None]] = field(default_factory=dict)
     target: str | None = None
+    fixed: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -216,20 +249,51 @@ def build(
     return Catalog(response.version, response.structure_version, source, entries)
 
 
+ITEM_MARK = "[]."
+
+
+def _java_param(params: dict[str, CatalogParam], java: str) -> CatalogItemParam | None:
+    """설명의 java 칸 -> Java 칸 규칙. "lines[].expndAmt"는 배열 lines 항목의 expndAmt"""
+    array, mark, item = java.partition(ITEM_MARK)
+    if not mark:
+        return params.get(java)
+    param = params.get(array)
+    if param is None or param.type != ARRAY or not param.items:
+        return None
+    return param.items.get(item)
+
+
+def _all_params(params: dict) -> list[CatalogItemParam]:
+    # 칸 규칙 전부(배열 항목 칸까지 중첩)
+    found: list[CatalogItemParam] = []
+    for param in params.values():
+        found.append(param)
+        if param.items:
+            found += _all_params(param.items)
+    return found
+
+
 def _problem(tool: CatalogTool, prompt: ToolPrompt, source: str) -> str | None:
     unknown = [name for name in prompt.hooks if name not in HOOKS]
     if unknown:
         return f"모르는 hook {unknown}"
-    for param in tool.params.values():
-        if param.type not in _PY_TYPES:
+    for param in _all_params(tool.params):
+        if param.type not in _PY_TYPES and param.type not in (ARRAY, FILE):
             return f"지원하지 않는 칸 타입 {param.type}"
         if param.type == "code" and not param.codes:
             # 4-2절 1번 : 스냅샷(코드 값 없음)이면 코드 칸 도구는 싣지 않는다
             return "공통코드 값 없음" if source == "snapshot" else f"코드 값 없음 {param.group}"
-    made: set[str] = set()
+    for name, value in prompt.fixed.items():
+        param = tool.params.get(name)
+        if param is None or not _valid(param, value):
+            return f"고정 값 잘못 {name}={value}"
+    made: set[str] = set(prompt.fixed)
     for name, param in prompt.params.items():
-        if param.java is not None and param.java not in tool.params:
-            return f"Java에 없는 칸 {name}->{param.java}"
+        if param.java is not None:
+            java = _java_param(tool.params, param.java)
+            if java is None or java.type in (ARRAY, FILE):
+                return f"Java에 없는 칸 {name}->{param.java}"
+            made.add(param.java.partition(ITEM_MARK)[0])
         if param.hook is not None:
             hook_name, _, role = param.hook.partition(":")
             if hook_name not in prompt.hooks or role not in HOOKS[hook_name].roles:
@@ -237,9 +301,11 @@ def _problem(tool: CatalogTool, prompt: ToolPrompt, source: str) -> str | None:
             made |= HOOKS[hook_name].makes
     for hook_name in prompt.hooks:
         made |= HOOKS[hook_name].makes
-    mapped = {param.java for param in prompt.params.values() if param.java} | made
+    # 파일 칸은 React 카드에서 첨부, generated 칸은 React가 만든다
     uncovered = [
-        name for name, param in tool.params.items() if param.required and name not in mapped
+        name
+        for name, param in tool.params.items()
+        if param.required and name not in made and param.type != FILE and not param.generated
     ]
     if uncovered:
         return f"채울 수 없는 필수 칸 {uncovered}"
@@ -254,7 +320,7 @@ def _entry(tool: CatalogTool, prompt: ToolPrompt) -> CatalogEntry:
     code_names: dict[str, str] = {}
     bounds: dict[str, tuple[int | None, int | None]] = {}
     for name, param in prompt.params.items():
-        java = tool.params.get(param.java) if param.java else None
+        java = _java_param(tool.params, param.java) if param.java else None
         py_type = _PY_TYPES[java.type] if java else str
         # 4-2절 4번 : 필수 판단은 Python이 Java 규칙으로, LLM에는 required를 주지 않는다
         fields[name] = (py_type | None, Field(None, description=param.description))
@@ -290,6 +356,7 @@ def _entry(tool: CatalogTool, prompt: ToolPrompt) -> CatalogEntry:
         codes=codes,
         bounds=bounds,
         target=prompt.target,
+        fixed=dict(prompt.fixed),
     )
 
 
@@ -360,7 +427,16 @@ def clean_codes(entry: CatalogEntry, args: BaseModel) -> BaseModel:
 def to_java(entry: CatalogEntry, values: dict, now: datetime | None = None) -> dict:
     """LLM 칸 값 -> Java 요청 칸 값 (date hook이 날짜·시간을 도구의 datetime 칸으로 합침)"""
     names, hooks = entry.to_java_name, entry.hook_roles
-    java = {names[name]: value for name, value in values.items() if name in names}
+    java: dict = {}
+    for name, value in values.items():
+        if name not in names:
+            continue
+        array, mark, item = names[name].partition(ITEM_MARK)
+        if not mark:
+            java[array] = value
+        elif value is not None:
+            # 배열 항목 칸 : 첫 줄 하나에 모은다(지출 등록 lines[0])
+            java.setdefault(array, [{}])[0][item] = value
     roles = {hooks[name]: value for name, value in values.items() if name in hooks}
     if "date" in entry.hooks:
         java |= _compose_datetime(entry, roles.get("date:ymd"), roles.get("date:tm"), now)
@@ -465,13 +541,36 @@ def read_request(
     return path, query
 
 
-def missing(entry: CatalogEntry, java_values: dict) -> list[str]:
-    """Java 필수·requiredIf로 빈 Java 칸 (설계 4-3절 CARD)"""
-    names = [name for name, param in entry.params.items() if param.required]
+def missing(entry: CatalogEntry, java_values: dict, files: bool = True) -> list[str]:
+    """Java 필수·requiredIf로 빈 Java 칸 (설계 4-3절 CARD)
+    - 배열 : 빈 필수 배열은 "lines", 항목 안 빈 필수 칸은 "lines[0].expndAmt"
+    - files : 파일 필수 칸을 셈(카드는 늘 셈, action-result는 React가 파일을 보낸 뒤라 안 셈)"""
+    found = _missing_in(entry.params, java_values, "", files)
     for rule in entry.rules:
-        if java_values.get(rule.when) == rule.equals and rule.field not in names:
-            names.append(rule.field)
-    return [name for name in names if java_values.get(name) in (None, "")]
+        empty = java_values.get(rule.field) in (None, "")
+        if java_values.get(rule.when) == rule.equals and empty and rule.field not in found:
+            found.append(rule.field)
+    return found
+
+
+def _missing_in(params: dict, values: dict, prefix: str, files: bool) -> list[str]:
+    found: list[str] = []
+    for name, param in params.items():
+        value = values.get(name)
+        if param.generated or (param.type == FILE and not files):
+            continue
+        if param.type == ARRAY:
+            rows = value if isinstance(value, list) else []
+            least = max(param.min_items or 0, 1 if param.required else 0)
+            if len(rows) < least:
+                found.append(prefix + name)
+            for index, row in enumerate(rows):
+                if isinstance(row, dict):
+                    inner = f"{prefix}{name}[{index}]."
+                    found += _missing_in(param.items or {}, row, inner, files)
+        elif param.required and value in (None, ""):
+            found.append(prefix + name)
+    return found
 
 
 def missing_llm(entry: CatalogEntry, values: dict) -> list[str]:
@@ -492,11 +591,14 @@ def missing_llm(entry: CatalogEntry, values: dict) -> list[str]:
 # 확인 카드(2단계 쓰기, CARD)
 
 
-def _valid(param: CatalogParam, value: object) -> bool:
+def _valid(param: CatalogItemParam, value: object) -> bool:
     # Java 칸 규칙(타입·코드 값·min·max·maxLength)에 맞는 값인지
+    # 배열은 모양과 들어 있는 값만(빈 필수 항목 칸은 missing이 센다), 파일은 Python이 받지 않음
     kind = param.type
-    if value is None:
+    if value is None or kind == FILE:
         return False
+    if kind == ARRAY:
+        return _clean_array(param, value) == value
     if kind in ("date", "datetime", "time"):
         parse = {"date": date, "datetime": datetime, "time": time}[kind].fromisoformat
         try:
@@ -523,6 +625,44 @@ def _valid(param: CatalogParam, value: object) -> bool:
     return (low is None or value >= low) and (high is None or value <= high)
 
 
+def _clean_array(
+    param: CatalogItemParam, value: object, seen: dict[str, set[int]] | None = None
+) -> list[dict] | None:
+    """배열 칸 값에서 항목 칸 규칙 밖 값·모르는 칸을 뺀다(틀린 칸만 비움). 배열 모양이 아니면 None
+    - seen : 주면 번호 칸(…Sn)은 같은 턴 READ 결과 값만(LLM 값). None 값은 그대로 둔다"""
+    if not isinstance(value, list) or not all(isinstance(row, dict) for row in value):
+        return None
+    items = param.items or {}
+    cleaned: list[dict] = []
+    for row in value:
+        kept: dict = {}
+        for name, item_value in row.items():
+            rule = items.get(name)
+            if rule is None:
+                continue
+            if item_value is None:
+                kept[name] = None
+            elif rule.type == ARRAY:
+                inner = _clean_array(rule, item_value, seen)
+                if inner is not None:
+                    kept[name] = inner
+            elif _valid(rule, item_value) and (
+                seen is None or not is_id(name) or item_value in seen.get(name, set())
+            ):
+                kept[name] = item_value
+        cleaned.append(kept)
+    return cleaned
+
+
+def _usable(
+    param: CatalogParam, value: object, seen: dict[str, set[int]] | None = None
+) -> object | None:
+    # 카드 input에 쓸 값(배열은 틀린 항목 칸만 뺌). 쓸 수 없으면 None
+    if param.type == ARRAY:
+        return _clean_array(param, value, seen)
+    return value if _valid(param, value) else None
+
+
 def _valid_role(role: str, value: object) -> bool:
     parse = date.fromisoformat if role == "date:ymd" else time.fromisoformat
     try:
@@ -546,9 +686,9 @@ def card_input(
     - rows : 같은 턴 READ 결과 행. 수정 카드에서 날짜만 바꾸면 원래 시간을 씀(_keep_time)"""
     params = entry.params
     base = {
-        name: value
+        name: _usable(params[name], value)
         for name, value in (prior or {}).items()
-        if name in params and name != PET_SN and _valid(params[name], value)
+        if name in params and name != PET_SN and _usable(params[name], value) is not None
     }
     roles = entry.hook_roles
     usable = {
@@ -558,15 +698,74 @@ def card_input(
     }
     seen = seen or {}
     new = {
-        name: value
+        name: _usable(params[name], value, seen)
         for name, value in to_java(entry, usable, now).items()
         if name in params
         and name != PET_SN
-        and _valid(params[name], value)
+        and _usable(params[name], value, seen) is not None
         and (not is_id(name) or value in seen.get(name, set()))
     }
+    merged = base | new
+    for name in mapped_arrays(entry):
+        # 배열 첫 줄 : 돌려받은 카드의 줄에 이 메시지 값을 덮어씀, 줄이 없으면 빈 줄 하나(되물음)
+        old, fresh = base.get(name) or [], new.get(name) or []
+        first = (old[0] if old else {}) | (fresh[0] if fresh else {})
+        merged[name] = [first, *old[1:]]
+    merged |= entry.fixed
     given = {roles[name] for name in usable if name in roles}
-    return _keep_time(entry, base | new, given, new, rows or {}, prior or {})
+    return _keep_time(entry, merged, given, new, rows or {}, prior or {})
+
+
+def mapped_arrays(entry: CatalogEntry) -> list[str]:
+    """LLM 칸이 항목 칸으로 이어진 배열("lines[].expndAmt"의 lines)"""
+    found = [
+        java.partition(ITEM_MARK)[0] for java in entry.to_java_name.values() if ITEM_MARK in java
+    ]
+    return list(dict.fromkeys(found))
+
+
+def keep_prior_dates(
+    entry: CatalogEntry, values: dict, prior: dict, date_said: bool, today: date
+) -> dict:
+    """돌려받은 카드(prior, 같은 도구)가 있는데 이 메시지에 날짜 말이 없고 LLM 날짜가 오늘이면
+    그 날짜(date hook·date 칸)를 버려 카드 값을 유지한다
+    (설명의 "말하지 않았으면 오늘"이 회원이 카드에서 고친 날짜를 덮지 않게, 추가-1)
+    - 오늘이 아닌 날짜는 LLM이 계산한 것("하루 더 미뤄줘")이라 그대로 쓴다
+    - 카드에 그 칸 값이 없으면 LLM 값을 그대로 쓴다
+    - 시간이 오면 카드의 날짜에 그 시간"""
+    if date_said:
+        return values
+    roles = entry.hook_roles
+    today_iso = today.isoformat()
+    target = next((n for n, p in entry.params.items() if p.type == "datetime"), None)
+    original = None
+    if "date" in entry.hooks and target is not None and prior.get(target) is not None:
+        try:
+            original = datetime.fromisoformat(str(prior[target]))
+        except ValueError:
+            original = None
+    kept: dict = {}
+    dropped = False
+    for name, value in values.items():
+        if original is not None and roles.get(name) == "date:ymd" and str(value) == today_iso:
+            dropped = True
+            continue
+        java = entry.to_java_name.get(name)
+        param = _java_param(entry.params, java) if java else None
+        if (
+            param is not None
+            and param.type == "date"
+            and ITEM_MARK not in java
+            and prior.get(java) is not None
+            and str(value) == today_iso
+        ):
+            continue
+        kept[name] = value
+    ymd = next((n for n, r in roles.items() if r == "date:ymd"), None)
+    tm = next((n for n, r in roles.items() if r == "date:tm"), None)
+    if dropped and ymd is not None and tm in kept:
+        kept[ymd] = original.date().isoformat()
+    return kept
 
 
 def _keep_time(
@@ -599,12 +798,16 @@ def _keep_time(
     return merged | {target: moment.isoformat(), HR_INPUT: True}
 
 
-def missing_path_ids(entry: CatalogEntry, values: dict) -> list[str]:
-    """경로의 번호 칸(…Sn, petSn 제외) 중 빈 칸. 회원이 카드에서 고를 수 없어 카드를 안 띄움"""
+def missing_target_ids(entry: CatalogEntry, values: dict) -> list[str]:
+    """경로의 번호 칸과, 찾을 대상(target)이 있는 도구의 본문 필수 번호 칸(…Sn, petSn 빼고)의 빈 칸
+    회원이 카드에서 고를 수 없어 카드를 안 띄움(수정 대상·관찰 기록의 관찰 항목)
+    - target이 없는 도구(케어 완료 체크)는 본문 번호 칸이 비어도 카드를 띄운다(지금 동작)"""
     return [
         name
         for name, param in entry.params.items()
-        if param.loc == "path" and is_id(name) and values.get(name) is None
+        if (param.loc == "path" or (param.required and entry.target is not None))
+        and is_id(name)
+        and values.get(name) is None
     ]
 
 

@@ -386,6 +386,12 @@ _CYCLE_RULES = (
 _CLOCK = re.compile(r"(오전|오후|아침|저녁|밤|낮|새벽)?\s*(\d{1,2})\s*시\s*(반|(\d{1,2})\s*분)?")
 _HH_MM = re.compile(r"(?<![\d:])([01]?\d|2[0-3]):([0-5]\d)(?![\d:])")
 
+
+def mentions_date(text: str) -> bool:
+    """문장에 날짜 말("어제"·"10월 3일"·"다음 주 화요일" 등)이 있는지 (_DATE_RULES와 같은 규칙)"""
+    return any(re.search(pattern, text) for pattern, _ in _DATE_RULES)
+
+
 _HOSPITAL = re.compile(r"([가-힣A-Za-z0-9]+)\s?(동물병원|동물의료센터|메디컬센터|병원)")
 # 병원명 앞말로 보지 않는 말
 _NOT_HOSPITAL_PREFIX = re.compile(

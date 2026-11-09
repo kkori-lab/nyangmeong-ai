@@ -2,7 +2,7 @@ from datetime import date, datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
 from pydantic.alias_generators import to_camel
 
 MAX_MESSAGE_LENGTH = 1000
@@ -146,10 +146,9 @@ class ActionCode(_Camel):
     nm: str
 
 
-class ActionParam(_Camel):
-    """확인 카드 칸 : Java 도구 목록(GET /internal/ai/tools)의 칸 그대로"""
+class ActionItemParam(_Camel):
+    """확인 카드 칸 규칙 : 배열 항목 칸(in 없음). 요청 칸은 ActionParam"""
 
-    loc: str = Field(alias="in")
     type: str
     required: bool = False
     group: str | None = None
@@ -157,6 +156,19 @@ class ActionParam(_Camel):
     max_length: int | None = None
     min_value: int | None = Field(default=None, alias="min")
     max_value: int | None = Field(default=None, alias="max")
+    positive: bool | None = None
+    pattern: str | None = None
+    # 배열 칸(type array) : 항목 칸 규칙·최소 항목 수
+    items: dict[str, "ActionItemParam"] | None = None
+    min_items: int | None = None
+    # "uuid" : React가 [확인] 때 카드 하나에 한 번 만든다
+    generated: str | None = None
+
+
+class ActionParam(ActionItemParam):
+    """확인 카드 칸 : Java 도구 목록(GET /internal/ai/tools)의 칸 그대로"""
+
+    loc: str = Field(alias="in")
 
 
 class ActionRule(_Camel):
@@ -169,6 +181,16 @@ class ActionRule(_Camel):
 class ActionCall(_Camel):
     method: str
     path: str
+    # 파일 칸이 있는 도구(관찰 기록 추가) : multipart/form-data. 없으면 키를 내지 않는다
+    content_type: str | None = None
+
+    @model_serializer(mode="wrap")
+    def _drop_empty_type(self, handler):
+        data = handler(self)
+        if self.content_type is None:
+            data.pop("contentType", None)
+            data.pop("content_type", None)
+        return data
 
 
 class ActionCard(_Camel):
