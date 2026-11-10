@@ -37,6 +37,7 @@ Java가 만드는 API다(백엔드 저장소 기준). 키 헤더는 없다. 인�
 | GET | `/internal/ai/pets/{petSn}/health-report-input?baseYmd=` | **구현(2026-11-04 초안, 백엔드 `AiHealthReportController`, LJS 백엔드)** 메인 AI 건강분석 리포트의 분석 입력과 저장된 최근 리포트를 한 번에 준다. 쿠키로 그 반려동물을 양육하는 회원만(아니면 4xx, Python이 그대로 전달). `baseYmd`(KST 오늘) 포함 14일 기록을 자른다. 응답 `data {input, report, rfrshPsblYn: Boolean, autoRgnrPsblYn: Boolean}`. `input {petNm, petSeCd, vrtyNm, ageMm: Integer, nutrYn, goalBdwg, weights·meals·waters·walks [{ymd, rcdNvl}](DAILY_HLTH_RCD HLTC0014·0015·0016·0018), stools [{ymd, crsdSttsCdNm}](HLTC0017), latestCkupYmd, inspOutOfRange [{inspArtclNm, rsltNvl, unitNm, refLlmtNvl, refUplmtNvl}](가장 최근 검진 1회의 INSP_NVL 중 참고 범위 밖)}`. `report {rptTtl, tips: [String], inputHash: String(64), crtDt}`는 그 반려동물의 가장 최근 저장본, 없으면 null. `rfrshPsblYn`은 `baseYmd`에 새로고침(`rfrshYn: true` 저장)을 아직 안 했으면 true. `autoRgnrPsblYn`은 `baseYmd`에 자동 재생성(그날 첫 생성 뒤 `rfrshYn: false` 저장)이 5회 미만이면 true | MAN-006 | 백엔드 | - | - |
 | PUT | `/internal/ai/pets/{petSn}/health-report` | **구현(2026-11-04 초안, 백엔드 `AiHealthReportController`, LJS 백엔드)** 리포트 저장(반려동물·기준일당 최신 1건을 덮어써도 된다). 요청 `{baseYmd, rptTtl(≤20), tips: [String](≤3, 각 ≤40), inputHash: String(64), rfrshYn: Boolean}`. Java는 `rfrshYn`으로 새로고침 횟수를, 그날 이미 저장본이 있는데 `rfrshYn: false`면 자동 재생성 횟수를 센다. 200. 새 테이블(ERD 변경) | MAN-006 | 백엔드 | - | - |
 | GET | `/internal/ai/tools` | **확정(2026-11-06, 백엔드 PR #174 병합. 설계 `docs/design/tool-catalog.md` 3-2절)** AI 매니저 도구 목록. `@AiTool`을 붙인 컨트롤러 메서드와 요청 DTO의 검증 어노테이션(`@NotNull`·`@NotBlank`·`@Size` 등)·`@AiCode`·`@AiRequiredIf`를 읽어 만든다. 회원과 관계없는 목록이라 쿠키·키 없이 부른다. 응답 `data` AiToolCatalogResponse. Python은 기동 때 1회 부르고(2026-11-09부터 항상), 실패(연결 실패·5xx·4xx·모양 다름)하면 `data/tools.snapshot.json`으로 뜨고 코드 칸이 있는 도구는 싣지 않는다(`app/chat/catalog.py`). 400 응답은 지금 모양 그대로 `data: [{field, message}]`(Bean Validation 오류만 칸 이름이 있고, 서비스 검사 `INVALID_INPUT_VALUE`의 칸 이름은 다음 백엔드 마일스톤. 2026-11-05 백엔드 결정) | AIM-004-02, AIM-012-03(도구 목록 기능 ID는 기능명세서 추가 전) | 백엔드 | - | AiToolCatalogResponse |
+| GET | `/internal/ai/routes` | **확정(정본은 백엔드 `docs/api/ai.md`, 백엔드 `c0bf1f2` develop·main 병합)** 라우팅 매핑표(관리자 SCR-ADM-080, DB `AI_ROUT_MPNG`). 사용 중(`USE_YN='Y'`) 행만 `prrtSeq`·`aiRoutMpngSn` 순, 이동 방식이 라우팅 대상 아님·제외·보류(AIMC0034~0036)인 행도 준다. 쿠키로 로그인 회원이면 같은 표. Python은 대화 메시지 요청 때 받은 지 10초가 지났으면 그 요청의 쿠키로 다시 받는다(2026-11-10 결정, `app/chat/service.py` `RouteCache`). 실패(연결 실패·5xx·4xx·모양 다름)나 이동할 행이 없으면 마지막 성공본, 처음부터 실패면 `data/routes.snapshot.json`. `aiRoutMpngSn`이 LLM의 화면 번호(`screen_num`), `scrnParamCn` `cat=hospital`은 React에 `?cat=hospital`로, `…`가 든 자리표시 값은 파라미터 없음 | AIM-004-09, ADM-080-04 | 백엔드 | - | List<AiRouteResponse> |
 | (미정) | 미완료 메시지 완료 처리·최근 6턴·AI 설정값 조회 | 백엔드 `docs/api/ai.md`에 PATCH 설계만 있음. SCR-AIM-002에서 필요해지면 요청 | AIM-002 | 백엔드 | 미정 | 미정 |
 
 ## DTO
@@ -54,6 +55,19 @@ Java가 만드는 API다(백엔드 저장소 기준). 키 헤더는 없다. 인�
 | tools[].call | `{method, path, contentType?}` | Y | 컨트롤러 매핑(예: `POST /api/pets/{petSn}/care-schedules`). 파일 칸이 있는 API는 `contentType: multipart/form-data`(관찰 기록 추가) | tool-catalog 3-2 |
 | tools[].params.<Java 칸> | `{in, type, required?, group?, codes?, maxLength?, min?, max?, positive?, pattern?, items?, minItems?, generated?}` | Y | `in`: `path`·`query`·`body`. `type`: `string`·`long`·`int`·`decimal`·`boolean`·`date`·`time`·`datetime`·`code`·`array`·`file`(`datetime`은 `LocalDateTime` 칸 때문에 3-2절에 더함). `code`면 `group`(공통코드 그룹)과 `codes: [{cd, nm}]`(사용 중인 값). `min`·`max`는 `@Min`·`@Max`(예: `cycleDrctInptDayCnt` 1~9999, 백엔드 결정 2026-11-05). `array`면 `items`(항목 칸 이름 → 같은 모양의 규칙, `in` 없음, 중첩 배열 가능: `pets[].drugs[]`)와 `minItems`. `generated: "uuid"`는 클라이언트가 만드는 칸(`idmptDmndId`). Python은 항목 칸 코드 값까지 없으면 그 도구를 싣지 않는다(SCR-AIM-012 2단계 ③, `app/chat/catalog.py`) | tool-catalog 3-2 |
 | tools[].rules[] | `{requiredIf: {field, when, equals}}` | N | 조건부 필수. "병원이 아니면 일정명"처럼 같지 않음 조건은 값마다 한 줄(가짜 응답은 HLTC0058·0059·0060 세 줄) | tool-catalog 3-1 |
+
+### AiRouteResponse
+쓰는 API: GET /internal/ai/routes (정본 백엔드 `docs/api/ai.md`)
+| 필드 | 타입 | 필수 | 검증·설명 | 근거 |
+| --- | --- | --- | --- | --- |
+| aiRoutMpngSn | Long | Y | | AI_ROUT_MPNG.AI_ROUT_MPNG_SN |
+| trgtScrnNm | String | Y | | AI_ROUT_MPNG.TRGT_SCRN_NM |
+| scrnId | String | N | | AI_ROUT_MPNG.SCRN_ID |
+| scrnParamCn | String | N | 예 `cat=hospital` | AI_ROUT_MPNG.SCRN_PARAM_CN |
+| instKwrds | List<String> | Y | 지시어를 쉼표로 나눠 앞뒤 공백을 뺀 배열, 빈 값 제외. 지시어가 없으면 빈 배열 | AI_ROUT_MPNG.INST_KWRD_CN |
+| mvmnMthdCd | String | Y | AIMG09: AIMC0032 화면 이동, AIMC0033 모달 열기, AIMC0034 라우팅 대상 아님, AIMC0035 제외, AIMC0036 보류 | AI_ROUT_MPNG.MVMN_MTHD_CD |
+| rprsChipYn | boolean | Y | 대표 칩 | AI_ROUT_MPNG.RPRS_CHIP_YN |
+| prrtSeq | Integer | Y | 작을수록 먼저 | AI_ROUT_MPNG.PRRT_SEQ |
 
 ### ReceiptOcrRequest
 쓰는 API: POST /internal/v1/ocr/receipt (multipart/form-data)

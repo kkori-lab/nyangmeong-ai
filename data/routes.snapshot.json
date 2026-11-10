@@ -1,0 +1,616 @@
+[
+  {
+    "aiRoutMpngSn": 1,
+    "trgtScrnNm": "종합 건강기록",
+    "scrnId": "SCR-HLT-011",
+    "scrnParamCn": null,
+    "instKwrds": [
+      "건강기록",
+      "종합 건강기록",
+      "건강 종합",
+      "건강 이력",
+      "우리 애 상태"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": true,
+    "prrtSeq": 1
+  },
+  {
+    "aiRoutMpngSn": 2,
+    "trgtScrnNm": "플레이스 병원 화면",
+    "scrnId": "SCR-HOS-001",
+    "scrnParamCn": "cat=hospital",
+    "instKwrds": [
+      "병원",
+      "동물병원",
+      "진료",
+      "아파",
+      "병원 찾아줘"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": true,
+    "prrtSeq": 2
+  },
+  {
+    "aiRoutMpngSn": 3,
+    "trgtScrnNm": "플레이스",
+    "scrnId": "SCR-HOS-001",
+    "scrnParamCn": null,
+    "instKwrds": [
+      "플레이스"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": true,
+    "prrtSeq": 3
+  },
+  {
+    "aiRoutMpngSn": 4,
+    "trgtScrnNm": "펫이야기 목록",
+    "scrnId": "SCR-CMU-001-01",
+    "scrnParamCn": null,
+    "instKwrds": [
+      "커뮤니티",
+      "게시판",
+      "펫이야기",
+      "글 보고 싶어"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": true,
+    "prrtSeq": 4
+  },
+  {
+    "aiRoutMpngSn": 5,
+    "trgtScrnNm": "마이페이지 홈",
+    "scrnId": "SCR-MYP-001",
+    "scrnParamCn": null,
+    "instKwrds": [
+      "마이페이지",
+      "내 정보",
+      "내 페이지"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": true,
+    "prrtSeq": 5
+  },
+  {
+    "aiRoutMpngSn": 6,
+    "trgtScrnNm": "픽셀 캐릭터 관리",
+    "scrnId": "SCR-MYP-010",
+    "scrnParamCn": null,
+    "instKwrds": [
+      "캐릭터",
+      "픽셀",
+      "꾸미기",
+      "아이템"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": true,
+    "prrtSeq": 6
+  },
+  {
+    "aiRoutMpngSn": 7,
+    "trgtScrnNm": "공지사항 목록",
+    "scrnId": "SCR-CSC-001",
+    "scrnParamCn": null,
+    "instKwrds": [
+      "고객센터",
+      "문의",
+      "공지",
+      "공지사항"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": true,
+    "prrtSeq": 7
+  },
+  {
+    "aiRoutMpngSn": 8,
+    "trgtScrnNm": "메인",
+    "scrnId": "SCR-MAN-001",
+    "scrnParamCn": null,
+    "instKwrds": [
+      "메인",
+      "홈",
+      "처음으로",
+      "대시보드",
+      "통합대시보드",
+      "건강 대시보드"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": false,
+    "prrtSeq": 8
+  },
+  {
+    "aiRoutMpngSn": 9,
+    "trgtScrnNm": "설정",
+    "scrnId": "SCR-COM-008",
+    "scrnParamCn": null,
+    "instKwrds": [
+      "설정",
+      "알림 설정",
+      "알림 꺼줘",
+      "알림 켜줘",
+      "수신 해제"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": false,
+    "prrtSeq": 9
+  },
+  {
+    "aiRoutMpngSn": 10,
+    "trgtScrnNm": "채팅",
+    "scrnId": "SCR-COM-009",
+    "scrnParamCn": null,
+    "instKwrds": [
+      "채팅",
+      "메시지",
+      "쪽지",
+      "대화 확인"
+    ],
+    "mvmnMthdCd": "AIMC0033",
+    "rprsChipYn": false,
+    "prrtSeq": 10
+  },
+  {
+    "aiRoutMpngSn": 11,
+    "trgtScrnNm": "케어 캘린더",
+    "scrnId": "SCR-HLT-003",
+    "scrnParamCn": null,
+    "instKwrds": [
+      "케어 캘린더",
+      "캘린더",
+      "일정 보여줘",
+      "일정 등록",
+      "접종 일정",
+      "다음 접종",
+      "예방접종 예정",
+      "정기검진 일정",
+      "병원 예약"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": false,
+    "prrtSeq": 11
+  },
+  {
+    "aiRoutMpngSn": 12,
+    "trgtScrnNm": "케어 캘린더 토탈 케어리스트",
+    "scrnId": "SCR-HLT-003",
+    "scrnParamCn": null,
+    "instKwrds": [
+      "케어리스트",
+      "토탈 케어리스트",
+      "데일리케어",
+      "일상관리",
+      "정기관리",
+      "투약 체크",
+      "심장사상충",
+      "구충"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": false,
+    "prrtSeq": 12
+  },
+  {
+    "aiRoutMpngSn": 13,
+    "trgtScrnNm": "건강 일지",
+    "scrnId": "SCR-HLT-002",
+    "scrnParamCn": null,
+    "instKwrds": [
+      "건강 일지",
+      "일상 기록",
+      "오늘 기록",
+      "체중",
+      "식사량",
+      "음수량",
+      "배변",
+      "산책 기록",
+      "검진기록",
+      "검진 이력",
+      "진료 내역",
+      "지속 관찰",
+      "관찰 기록"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": false,
+    "prrtSeq": 13
+  },
+  {
+    "aiRoutMpngSn": 14,
+    "trgtScrnNm": "건강 일지 검진기록",
+    "scrnId": "SCR-HLT-002",
+    "scrnParamCn": null,
+    "instKwrds": [
+      "병원 영수증",
+      "약봉투",
+      "진료비 영수증",
+      "영수증으로 검진 등록"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": false,
+    "prrtSeq": 14
+  },
+  {
+    "aiRoutMpngSn": 15,
+    "trgtScrnNm": "종합 건강기록 처방 및 투약 이력",
+    "scrnId": "SCR-HLT-011",
+    "scrnParamCn": null,
+    "instKwrds": [
+      "처방약",
+      "약",
+      "복용 중인 약",
+      "투약 이력"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": false,
+    "prrtSeq": 15
+  },
+  {
+    "aiRoutMpngSn": 16,
+    "trgtScrnNm": "종합 건강기록 검사 결과",
+    "scrnId": "SCR-HLT-011",
+    "scrnParamCn": null,
+    "instKwrds": [
+      "검사 결과",
+      "혈액검사 결과",
+      "검사 수치",
+      "수치 추이",
+      "검사지"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": false,
+    "prrtSeq": 16
+  },
+  {
+    "aiRoutMpngSn": 17,
+    "trgtScrnNm": "플레이스 미용 화면",
+    "scrnId": "SCR-HOS-001",
+    "scrnParamCn": "cat=beauty",
+    "instKwrds": [
+      "미용",
+      "애견미용",
+      "미용실",
+      "털 깎"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": false,
+    "prrtSeq": 17
+  },
+  {
+    "aiRoutMpngSn": 18,
+    "trgtScrnNm": "플레이스 용품 화면",
+    "scrnId": "SCR-HOS-001",
+    "scrnParamCn": "cat=goods",
+    "instKwrds": [
+      "용품",
+      "사료 파는 곳",
+      "펫샵"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": false,
+    "prrtSeq": 18
+  },
+  {
+    "aiRoutMpngSn": 19,
+    "trgtScrnNm": "플레이스 동반 화면",
+    "scrnId": "SCR-HOS-001",
+    "scrnParamCn": "cat=pet-friendly",
+    "instKwrds": [
+      "동반",
+      "같이 갈 수 있는",
+      "애견동반 카페"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": false,
+    "prrtSeq": 19
+  },
+  {
+    "aiRoutMpngSn": 20,
+    "trgtScrnNm": "플레이스 호텔 화면",
+    "scrnId": "SCR-HOS-001",
+    "scrnParamCn": "cat=hotel",
+    "instKwrds": [
+      "호텔",
+      "맡길 곳",
+      "펫호텔"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": false,
+    "prrtSeq": 20
+  },
+  {
+    "aiRoutMpngSn": 21,
+    "trgtScrnNm": "동물병원 요약 카드",
+    "scrnId": "SCR-HOS-002",
+    "scrnParamCn": null,
+    "instKwrds": [],
+    "mvmnMthdCd": "AIMC0034",
+    "rprsChipYn": false,
+    "prrtSeq": 21
+  },
+  {
+    "aiRoutMpngSn": 22,
+    "trgtScrnNm": "펫이야기 글 상세",
+    "scrnId": "SCR-CMU-001-02",
+    "scrnParamCn": null,
+    "instKwrds": [],
+    "mvmnMthdCd": "AIMC0034",
+    "rprsChipYn": false,
+    "prrtSeq": 22
+  },
+  {
+    "aiRoutMpngSn": 23,
+    "trgtScrnNm": "실종센터",
+    "scrnId": "SCR-CMU-002",
+    "scrnParamCn": null,
+    "instKwrds": [
+      "실종",
+      "잃어버렸어",
+      "실종센터",
+      "찾아주세요",
+      "제보"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": false,
+    "prrtSeq": 23
+  },
+  {
+    "aiRoutMpngSn": 24,
+    "trgtScrnNm": "펫뉴스",
+    "scrnId": "SCR-CMU-003-01",
+    "scrnParamCn": null,
+    "instKwrds": [
+      "뉴스",
+      "펫뉴스",
+      "소식"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": false,
+    "prrtSeq": 24
+  },
+  {
+    "aiRoutMpngSn": 25,
+    "trgtScrnNm": "우리동네 펫돌봄",
+    "scrnId": "SCR-CMU-004",
+    "scrnParamCn": null,
+    "instKwrds": [
+      "펫돌봄",
+      "돌봄",
+      "펫시터",
+      "산책 도우미",
+      "맡아주실 분"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": false,
+    "prrtSeq": 25
+  },
+  {
+    "aiRoutMpngSn": 26,
+    "trgtScrnNm": "반려동물 등록·수정",
+    "scrnId": "SCR-MYP-002",
+    "scrnParamCn": null,
+    "instKwrds": [
+      "반려동물 등록",
+      "프로필 등록",
+      "우리 애 정보"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": false,
+    "prrtSeq": 26
+  },
+  {
+    "aiRoutMpngSn": 27,
+    "trgtScrnNm": "공동양육 관리",
+    "scrnId": "SCR-MYP-004",
+    "scrnParamCn": null,
+    "instKwrds": [
+      "공동양육",
+      "같이 키우",
+      "초대"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": false,
+    "prrtSeq": 27
+  },
+  {
+    "aiRoutMpngSn": 28,
+    "trgtScrnNm": "픽셀 캐릭터 상세",
+    "scrnId": "SCR-MYP-011",
+    "scrnParamCn": null,
+    "instKwrds": [],
+    "mvmnMthdCd": "AIMC0034",
+    "rprsChipYn": false,
+    "prrtSeq": 28
+  },
+  {
+    "aiRoutMpngSn": 29,
+    "trgtScrnNm": "케어미션 · 포인트",
+    "scrnId": "SCR-MYP-020",
+    "scrnParamCn": null,
+    "instKwrds": [
+      "포인트",
+      "케어미션",
+      "미션"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": false,
+    "prrtSeq": 29
+  },
+  {
+    "aiRoutMpngSn": 30,
+    "trgtScrnNm": "가계부",
+    "scrnId": "SCR-MYP-030",
+    "scrnParamCn": null,
+    "instKwrds": [
+      "가계부",
+      "지출",
+      "얼마 썼",
+      "병원비",
+      "한도",
+      "가계부 영수증"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": false,
+    "prrtSeq": 30
+  },
+  {
+    "aiRoutMpngSn": 31,
+    "trgtScrnNm": "가계부 전체 내역",
+    "scrnId": "SCR-MYP-031",
+    "scrnParamCn": null,
+    "instKwrds": [
+      "전체 내역",
+      "지출 내역 다 보여줘"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": false,
+    "prrtSeq": 31
+  },
+  {
+    "aiRoutMpngSn": 32,
+    "trgtScrnNm": "회원정보 수정",
+    "scrnId": "SCR-MYP-040",
+    "scrnParamCn": null,
+    "instKwrds": [
+      "회원정보",
+      "비밀번호 변경",
+      "닉네임 변경",
+      "탈퇴"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": false,
+    "prrtSeq": 32
+  },
+  {
+    "aiRoutMpngSn": 33,
+    "trgtScrnNm": "FAQ 목록",
+    "scrnId": "SCR-CSC-002-01",
+    "scrnParamCn": null,
+    "instKwrds": [
+      "자주하는 질문",
+      "FAQ",
+      "도움말"
+    ],
+    "mvmnMthdCd": "AIMC0032",
+    "rprsChipYn": false,
+    "prrtSeq": 33
+  },
+  {
+    "aiRoutMpngSn": 34,
+    "trgtScrnNm": "공지 상세",
+    "scrnId": "SCR-CSC-001-02",
+    "scrnParamCn": null,
+    "instKwrds": [],
+    "mvmnMthdCd": "AIMC0034",
+    "rprsChipYn": false,
+    "prrtSeq": 34
+  },
+  {
+    "aiRoutMpngSn": 35,
+    "trgtScrnNm": "랜딩페이지",
+    "scrnId": "SCR-MAN-002",
+    "scrnParamCn": null,
+    "instKwrds": [],
+    "mvmnMthdCd": "AIMC0034",
+    "rprsChipYn": false,
+    "prrtSeq": 35
+  },
+  {
+    "aiRoutMpngSn": 36,
+    "trgtScrnNm": "로그인 · 회원가입",
+    "scrnId": "SCR-ACC-001 / 002",
+    "scrnParamCn": null,
+    "instKwrds": [],
+    "mvmnMthdCd": "AIMC0034",
+    "rprsChipYn": false,
+    "prrtSeq": 36
+  },
+  {
+    "aiRoutMpngSn": 37,
+    "trgtScrnNm": "기본 레이아웃 · 드롭다운 3종",
+    "scrnId": "SCR-COM-002·004·005·006",
+    "scrnParamCn": null,
+    "instKwrds": [],
+    "mvmnMthdCd": "AIMC0034",
+    "rprsChipYn": false,
+    "prrtSeq": 37
+  },
+  {
+    "aiRoutMpngSn": 38,
+    "trgtScrnNm": "AI 매니저 새 창 런처",
+    "scrnId": "SCR-COM-007",
+    "scrnParamCn": null,
+    "instKwrds": [],
+    "mvmnMthdCd": "AIMC0034",
+    "rprsChipYn": false,
+    "prrtSeq": 38
+  },
+  {
+    "aiRoutMpngSn": 39,
+    "trgtScrnNm": "대화창 자신",
+    "scrnId": "SCR-AIM-0xx",
+    "scrnParamCn": null,
+    "instKwrds": [],
+    "mvmnMthdCd": "AIMC0034",
+    "rprsChipYn": false,
+    "prrtSeq": 39
+  },
+  {
+    "aiRoutMpngSn": 40,
+    "trgtScrnNm": "OCR 촬영 · 결과 확인 · 실패",
+    "scrnId": "SCR-AIM-008 / 009 / 010",
+    "scrnParamCn": null,
+    "instKwrds": [],
+    "mvmnMthdCd": "AIMC0034",
+    "rprsChipYn": false,
+    "prrtSeq": 40
+  },
+  {
+    "aiRoutMpngSn": 41,
+    "trgtScrnNm": "검진상세",
+    "scrnId": "SCR-HLT-005",
+    "scrnParamCn": null,
+    "instKwrds": [],
+    "mvmnMthdCd": "AIMC0034",
+    "rprsChipYn": false,
+    "prrtSeq": 41
+  },
+  {
+    "aiRoutMpngSn": 42,
+    "trgtScrnNm": "검사 수치 입력",
+    "scrnId": "SCR-HLT-007",
+    "scrnParamCn": null,
+    "instKwrds": [],
+    "mvmnMthdCd": "AIMC0034",
+    "rprsChipYn": false,
+    "prrtSeq": 42
+  },
+  {
+    "aiRoutMpngSn": 43,
+    "trgtScrnNm": "결번",
+    "scrnId": "SCR-HLT-000·001·004·006·008·009",
+    "scrnParamCn": null,
+    "instKwrds": [],
+    "mvmnMthdCd": "AIMC0034",
+    "rprsChipYn": false,
+    "prrtSeq": 43
+  },
+  {
+    "aiRoutMpngSn": 44,
+    "trgtScrnNm": "플레이스 (보류)",
+    "scrnId": "SCR-PLC-001 / 002",
+    "scrnParamCn": null,
+    "instKwrds": [],
+    "mvmnMthdCd": "AIMC0034",
+    "rprsChipYn": false,
+    "prrtSeq": 44
+  },
+  {
+    "aiRoutMpngSn": 45,
+    "trgtScrnNm": "관리자 도메인 전체",
+    "scrnId": "—",
+    "scrnParamCn": null,
+    "instKwrds": [],
+    "mvmnMthdCd": "AIMC0034",
+    "rprsChipYn": false,
+    "prrtSeq": 45
+  }
+]

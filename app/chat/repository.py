@@ -5,7 +5,12 @@ import httpx2
 from fastapi import Depends, Request
 from pydantic import BaseModel, Field, ValidationError
 
-from app.chat.schemas import ConversationDetail, ConversationMessage, ConversationSummary
+from app.chat.schemas import (
+    ConversationDetail,
+    ConversationMessage,
+    ConversationSummary,
+    RouteItem,
+)
 from app.core.auth import REQUESTED_WITH
 from app.core.backend import call_backend, external_error, get_backend_client
 from app.core.config import Settings, get_settings
@@ -14,6 +19,8 @@ from app.core.config import Settings, get_settings
 CONVERSATIONS_PATH = "/internal/ai/conversations"
 # Java 등록 맥락 내부 API (SCR-AIM-012 반려동물 결정·같은 이름 케어 항목 안내)
 REGISTER_CONTEXT_PATH = "/internal/ai/register-context"
+# Java 라우팅 매핑표 내부 API (FN-ADM-080-04, 관리자 수정이 다음 호출부터 반영)
+ROUTES_PATH = "/internal/ai/routes"
 REQUESTED_WITH_HEADER = "X-Requested-With"
 
 
@@ -192,3 +199,34 @@ def get_tool_reader(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> ToolReader:
     return JavaToolReader(client, settings, request.headers.get("cookie"))
+
+
+class RouteRepository(Protocol):
+    # FN-AIM-004-09 : 관리자가 고치는 라우팅 매핑표(SCR-ADM-080)
+    async def get_routes(self) -> list[RouteItem]: ...
+
+
+class JavaRouteRepository:
+    # 회원 판정은 Java(브라우저 Cookie) : 로그인 회원이면 같은 표
+    def __init__(self, client: httpx2.AsyncClient, settings: Settings, cookie: str | None) -> None:
+        self._client = client
+        self._settings = settings
+        self._headers = {REQUESTED_WITH_HEADER: REQUESTED_WITH}
+        if cookie:
+            self._headers["Cookie"] = cookie
+
+    async def get_routes(self) -> list[RouteItem]:
+        data = await call_backend(
+            self._client, self._settings, "GET", ROUTES_PATH, headers=self._headers
+        )
+        if not isinstance(data, list):
+            raise external_error()
+        return [_parse(RouteItem, item) for item in data]
+
+
+def get_route_repository(
+    request: Request,
+    client: Annotated[httpx2.AsyncClient, Depends(get_backend_client)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> RouteRepository:
+    return JavaRouteRepository(client, settings, request.headers.get("cookie"))

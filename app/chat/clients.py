@@ -190,13 +190,15 @@ class ClassifyOutput(BaseModel):
     guide_id: str | None = None
 
 
-@lru_cache
 def classify_system() -> str:
-    # 매핑표의 라우팅 대상 행만 : 고정 내용이라 매 요청 동일
+    return _classify_system(rules.routing_table())
+
+
+@lru_cache(maxsize=2)
+def _classify_system(table: tuple[rules.RouteRow, ...]) -> str:
+    # 매핑표의 라우팅 대상 행만 : 관리자가 매핑표를 바꿀 때까지 같은 글
     screens = "\n".join(
-        f"{row.no}. {row.name}: {', '.join(row.keywords)}"
-        for row in rules.routing_table()
-        if row.routable
+        f"{row.no}. {row.name}: {', '.join(row.keywords)}" for row in table if row.routable
     )
     return (
         "반려동물 케어 앱 AI 대화창의 사용자 입력을 하나로 분류한다.\n"
@@ -515,9 +517,13 @@ TOOL_RULES = (
 )
 
 
-@lru_cache
 def tool_system() -> str:
-    # 고정 내용 : 도구 정의와 함께 캐시(tools → system 순서로 캐시 앞부분)
+    return _tool_system(rules.routing_table())
+
+
+@lru_cache(maxsize=2)
+def _tool_system(table: tuple[rules.RouteRow, ...]) -> str:
+    # 매핑표가 같으면 같은 글 : 도구 정의와 함께 캐시(tools → system 순서로 캐시 앞부분)
     scope = classify_system().split("- ROUTE:", 1)[0].split("\n", 1)[1]
     guide_rules = GUIDE_RULES.removesuffix("\n\n안내서\n")
     return (

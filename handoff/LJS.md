@@ -1,9 +1,11 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-MAN-001 메인페이지 · AI 건강분석 리포트 Java 연결 — 끝 (2026-11-10). Java 내부 API(`34d7638`)와 계약 대조·계약 테스트, 저장본 `crtDt`를 `+09:00`으로. 검증 1회차 통과, 로컬 Java로 생성·저장본·새로고침 409·데이터 부족·남의 반려동물 403 사람 확인. 기록 있는 시험 반려동물은 회원 1(327·1·2·3·14)
+SCR-AIM-004 대화창 · 라우팅 매핑표 DB 기준 — 끝 (2026-11-10). 매핑표를 `routing.yaml` 대신 Java `GET /internal/ai/routes`(관리자 SCR-ADM-080)에서 대화 요청 때 받은 지 10초 지나면 다시 받음, Java 실패면 마지막 성공본·스냅샷 `data/routes.snapshot.json`, 안내서는 `scr_id`·`param`으로 이음. 검증 통과(1회차 실패는 화면 조건 고침), 관리자 PATCH로 지시어 추가·사용 안 함 반영 사람 확인
 
 ## 다음에 할 것
+- 관리자 프론트 라우팅 매핑표 연결 (관리자 프론트): `features/adminAiRoute/api.js`가 아직 가짜 응답이라 관리자 화면에서 고쳐도 저장 안 됨. Java `/api/admin/ai/routes`(GET·POST·PATCH·DELETE)는 있음. 연결되면 대화창 이동에 10초 안에 반영 (2026-11-10)
+- 백엔드 기준 데이터 (LJS 백엔드): `db/` base data의 `AI_ROUT_MPNG` "플레이스 (키워드에 따라 탭)" 행 지시어를 "플레이스"만, `SCRN_PARAM_CN`은 NULL로(미용·용품·호텔·동반은 탭 행에만). AI 라우팅 매핑표 DB 기준 전환과 함께 (2026-11-10 결정)
 - 로그 파일 배포 전 사람 할 일 (LJS, 다음 main 배포 전): 배포마다 서버 `.env.local`이 secret `ENV_FILE`로 통째로 덮어써지므로, 서버의 지금 `.env.local`·`.env`에 있는 키(`BACKEND_BASE_URL`, AI 키 3개, `CHAT_TOOL_*`, 타임아웃 등)를 빠짐없이 `ENV_FILE`에 옮기고 `LOG_DIR`(Java `app.log.dir`과 같은 폴더)를 추가. 서버에 `deploy` 그룹·SELinux 확인, 배포 사용자와 서비스 사용자가 다르면 600인 `.env.local`을 서비스가 못 읽으니 확인, 워크플로우 변경을 backend-90에 알림. 배포 뒤 폴더 `drwxrws---`·파일 `-rw-rw----`(그룹 deploy)와 요청 줄 확인. 필요하면 배포 전 `.env.local.bak` 백업 단계 추가 검토
 - 로컬 `LOG_DIR` 팀 기본값 (LJS, 사람 결정 대기): 로컬도 서버와 같은 경로로 쓸지. 정하면 `.env.local.example` 설명("개발 PC는 비움")과 디스코드 `.env.local` 값을 바꿈. Windows에서는 지금 드라이브 루트 아래로 풀림. Pylance가 Windows에서 `logs._chmod`의 `os.name` 분기 뒤를 회색 표시(동작 무관), 원하면 분기 삭제
 - 연결 남음: SCR-AIM-013 사진 의도 판단 프론트 연결 (LJS 프론트): `features/ai/api.js` `judgeImageIntent` 가짜 → `POST /ai/image-intent`(계약 `docs/api/chat.md` ImageIntentRequest·Response, 프론트 가정과 같은 모양). AI develop 병합 뒤 프론트 `/start`. 가계부 영수증 바로 등록·캐릭터/가계부 대화 이력은 다음 차수(SJM 저장 API·⑤ 팀 결정)

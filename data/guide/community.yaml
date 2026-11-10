@@ -1,6 +1,6 @@
 # 서비스 안내서 — 커뮤니티 (AI 매니저 사용법 안내, FN-AIM-002-02)
 # 청크 = task 하나. id는 바꾸지 않는다(평가 정답표 tests/chat/data/guide_labels.json이 id로 가리킴)
-# num·name·scr_id·param은 data/routing.yaml과 같다. 사람용 메모는 docs/guide-review.md
+# num·name·scr_id·param은 data/routes.snapshot.json과 같다(매핑표와는 scr_id·param으로 이음). 사람용 메모는 docs/guide-review.md
 version: draft-0.1
 updated: '2026-11-04'
 screens:
