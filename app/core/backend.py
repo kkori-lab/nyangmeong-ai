@@ -41,7 +41,11 @@ def failure_reason(error: Exception) -> str:
     """Java 호출 실패 이유 한 줄 : 제한 시간·연결·상태 코드·주소·본문 구분"""
     if isinstance(error, BackendError):
         return f"Java {error.status_code}"
-    cause = error.__cause__
+    return cause_reason(error.__cause__) or type(error).__name__
+
+
+def cause_reason(cause: BaseException | None) -> str | None:
+    """502로 바꾼 원인 예외 -> 이유 한 줄 (모르는 원인이면 None)"""
     if isinstance(cause, _FailureCause):
         return str(cause)
     if isinstance(cause, httpx2.TimeoutException):
@@ -50,7 +54,9 @@ def failure_reason(error: Exception) -> str:
         return f"연결 실패 {type(cause).__name__}"
     if isinstance(cause, httpx2.HTTPError):
         return f"통신 실패 {type(cause).__name__}"
-    return type(error).__name__
+    if isinstance(cause, (httpx2.InvalidURL, OverflowError)):
+        return f"주소 꼴 틀림 {type(cause).__name__}"
+    return None
 
 
 def create_backend_client() -> httpx2.AsyncClient:
