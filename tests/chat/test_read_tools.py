@@ -728,3 +728,38 @@ def test_결과_답변에서_tool_use를_여럿_내면_마지막_요청에_모�
     asyncio.run(run())
 
     assert _unanswered_tool_uses(fake.requests[1]) == set()
+
+
+def _definition(name: str) -> dict:
+    return next(d for d in tools.tool_definitions() if d["name"] == name)
+
+
+@pytest.mark.parametrize("name", ["get_health_indicators", "list_daily_health_records"])
+def test_health_read_description_has_units(name: str) -> None:
+    """건강 READ 도구 설명 : 지표 단위와 반올림 규칙 (2026-11-09 실측 683.024)"""
+    description = _definition(name)["description"]
+    for unit in ("체중 kg", "식사량 g", "음수량 ml", "산책 분"):
+        assert unit in description
+    assert "반올림" in description
+
+
+def test_health_indicators_description_has_creatinine_unit() -> None:
+    assert "unitNm" in _definition("get_health_indicators")["description"]
+
+
+def test_tool_system_hides_guide_numbers() -> None:
+    """도구 흐름 시스템 글 : 안내서 번호·'안내서'라는 말을 답에 쓰지 않는 규칙"""
+    from app.chat.clients import tool_system
+
+    system = tool_system()
+    assert "[13-1]" in system
+    assert "'안내서'라는 말을 쓰지 않는다" in system
+
+
+def test_tool_system_no_apology_for_server_ask() -> None:
+    """도구 흐름 시스템 글 : 서버 되물음을 자기 실수로 보고 사과하지 않는 규칙"""
+    from app.chat.clients import tool_system
+
+    system = tool_system()
+    assert "어느 아이의" in system
+    assert "사과·해명 없이" in system
