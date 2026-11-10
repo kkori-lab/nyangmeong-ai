@@ -1,6 +1,6 @@
 {
-  "version": "snapshot",
-  "structureVersion": "c2084c7c5cfb0553367ec0b369ba2ac6fd18d76b49e1af9c5a770d5892a8c2e8",
+  "version": "ca8f6a782dc3a4e485716b1863dbae1512380efb3dd2043b8786877a3727c4d2",
+  "structureVersion": "53d84ba346ee611e6d64f08ddfbb7ae3e9e2452bfe7d463bc583fe90f4965649",
   "tools": [
     {
       "name": "draft_care_completion",
@@ -338,7 +338,6 @@
       "call": {"method": "GET", "path": "/api/pets/{petSn}/care-items"},
       "params": {
         "petSn": {"in": "path", "type": "long", "required": true},
-        "mainExpsrYn": {"in": "query", "type": "boolean"},
         "careArtclNm": {"in": "query", "type": "string"}
       },
       "rules": []

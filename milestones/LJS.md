@@ -341,6 +341,13 @@
 - 결과 (2026-11-10): 계약 대조·Java 응답 꼴 계약 테스트, 저장본 `crtDt` KST(`+09:00`). 검증 1회차 통과, 로컬 Java로 사람 확인
 - 연결 남음: FN-MAN-006 메인 위젯 `/ai/pets/{petSn}/health-report` 호출 (`AiReportCard.jsx` 샘플 교체, 프론트)
 
+## SCR-AIM-004 대화창 · 케어 항목 메인 표시 칸 제거 (백엔드 5f7a18e에 맞춤, 추가 요청) — 끝
+- 기능: 백엔드가 메인 표시(★) 기능을 지워(JAJ 5f7a18e, 2026-11-10 사람 확정, 백엔드 `docs/api/issues.md` 20번) `GET /api/pets/{petSn}/care-items`에 `mainExpsrYn` 조건이 없다. Java 목록으로 뜨면 `list_care_items`가 실리지 않으므로 AI 쪽 칸·스냅샷·문서를 Java에 맞춘다. 기능 ID 추가 없음(위 `끝` 절에서 센 기능)
+- 기다리는 것: 없음
+- 완료 조건: `/start` 기획의 완료 조건을 따른다.
+- 결과 (2026-11-10): 검증 1회차 통과, 로컬 Java 기동 로그에서 `list_care_items` 실림(30개)·`Java에 없는 칸`·`structureVersion 다름` 경고 없음을 사람 확인
+- 연결 남음: 없음
+
 ## 제외
 - FN-AIM-001-01~04,06, FN-AIM-002-01,05~06, FN-AIM-004-03~07, FN-AIM-005-03~06, FN-AIM-011-01~02,04~06,17~18,20, FN-AIM-012-09,15 (27건): 프론트 몫 (LJS 프론트: 대화창 화면)
 - FN-AIM-012-12~14,17 (4건): Java 몫 (JAJ: 일정·케어 항목 저장, 알림 연계)

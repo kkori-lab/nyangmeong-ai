@@ -87,13 +87,23 @@ def test_READ_도구를_고르면_경로와_query로_Java를_부르고_결과로
 
 
 def test_참거짓_조건은_소문자_글자로_보내야_한다(client, java):
+    use_agent(client, FakeToolAgent("list_expenses", {"common": True}))
+    reader = use_reader(client, FakeToolReader())
+    room = room_of(client, java)
+
+    events(send(client, room, "공용 지출 알려 줘"))
+
+    assert reader.calls == [("/api/expenses", {"common": "true"})]
+
+
+def test_케어_항목_목록은_메인_표시_조건을_보내지_않아야_한다(client, java):
     use_agent(client, FakeToolAgent("list_care_items", {"main_expsr_yn": True}))
     reader = use_reader(client, FakeToolReader())
     room = room_of(client, java, pet_sn=CHOCO)
 
-    events(send(client, room, "메인에 보이는 케어 뭐 있어?"))
+    events(send(client, room, "등록된 케어 뭐 있어?"))
 
-    assert reader.calls == [("/api/pets/1/care-items", {"mainExpsrYn": "true"})]
+    assert reader.calls == [("/api/pets/1/care-items", {})]
 
 
 def test_도구_결과에서_메모_같은_내용_칸은_중첩까지_지워야_한다(client, java):

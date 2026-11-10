@@ -495,9 +495,6 @@ list_care_items:
     care_artcl_nm:
       java: careArtclNm
       description: 케어 항목 이름(일부만 말해도 됨)
-    main_expsr_yn:
-      java: mainExpsrYn
-      description: 메인 화면에 보이는 항목만 볼 때 true
 
 list_care_completions:
   hooks: [pet]

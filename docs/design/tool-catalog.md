@@ -27,7 +27,7 @@
 | 도메인 | 도구 후보 | Java API |
 | --- | --- | --- |
 | 반려동물·캐릭터 | 내 반려동물 목록·상세, 공동양육자, 받은 초대, 오늘의 케어 미션, 포인트·내역, 캐릭터·보유 아이템 | `GET /api/pets`, `/api/pets/{petSn}`, `/api/pets/{petSn}/caregivers`, `GET /api/caregiver-invitations`, `GET /api/pets/{petSn}/daily-missions`, `GET /api/members/me/points`, `GET /api/point-ledgers`, `GET /api/pixel-characters`, `/{pixelCharSn}/held-items` |
-| 건강 | 일정, 케어 항목·완료, 건강 일지, 검진·처방약·검사 수치·기타검사, 반복 예방, 건강 지표, 관찰(메인 노출 여부는 `list_care_items`의 `mainExpsrYn`. `/care-item-exposures`는 PUT만 있어 읽기 아님, 2026-11-06 백엔드 확인) | `/api/pets/{petSn}/care-schedules`, `/care-items`, `/care-completions`, `/daily-health-records`, `/checkups`, `/prescriptions`, `/inspection-values`, `/etc-inspections`, `/repeat-preventions`, `/health-indicators`, `/observation-items`, `/observation-cycles` |
+| 건강 | 일정, 케어 항목·완료, 건강 일지, 검진·처방약·검사 수치·기타검사, 반복 예방, 건강 지표, 관찰(메인 표시(★) 기능은 2026-11-10 백엔드에서 제거되어 `list_care_items`에 메인 표시 조건이 없다) | `/api/pets/{petSn}/care-schedules`, `/care-items`, `/care-completions`, `/daily-health-records`, `/checkups`, `/prescriptions`, `/inspection-values`, `/etc-inspections`, `/repeat-preventions`, `/health-indicators`, `/observation-items`, `/observation-cycles` |
 | 가계부 | 지출 목록·합계·월별·통계·반려동물별, 영수증 상세 | `GET /api/expenses`, `/totals`, `/months`, `/statistics`, `/pets`, `/api/receipts/{recptSn}` |
 | 커뮤니티·플레이스 | 글 목록·인기·건강 팁·상세·댓글, 실종 신고, 돌봄 모집, 뉴스, 장소·즐겨찾기 | `GET /api/posts`, `/popular-photo`, `/health-tips`, `/{pstSn}`, `/{pstSn}/comments`, `GET /api/lost-reports`, `GET /api/care-recruitments`, `GET /api/news`, `GET /api/places`, `GET /api/place-bookmarks` |
 | 고객센터 | 자주 묻는 질문 | `GET /api/faqs` |
