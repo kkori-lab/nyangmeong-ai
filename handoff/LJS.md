@@ -1,7 +1,7 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-끝: SCR-AIM-011 공통 · 배포 서버 로그 파일 기록 (2026-11-09, 검증 1회차 통과·사람 확인). `LOG_DIR`이 있으면 `ai_YYYY-MM-DD.log` 날짜별 이어 쓰기(30일 보관, 파일 660·앱이 만든 폴더 2770), 대상 `app`·`uvicorn.error`·`gunicorn.error`, 요청마다 `METHOD 경로 -> 상태 (ms)`(SSE는 끝까지, 쿼리 미기록). 배포 워크플로우가 매번 secret `ENV_FILE`로 `.env`·`.env.local`을 덮어쓰고(600) 로그 폴더를 `<서비스 사용자>:deploy` 2770으로 준비
+SCR-MAN-001 메인페이지 · AI 건강분석 리포트 Java 연결 — 끝 (2026-11-10). Java 내부 API(`34d7638`)와 계약 대조·계약 테스트, 저장본 `crtDt`를 `+09:00`으로. 검증 1회차 통과, 로컬 Java로 생성·저장본·새로고침 409·데이터 부족·남의 반려동물 403 사람 확인. 기록 있는 시험 반려동물은 회원 1(327·1·2·3·14)
 
 ## 다음에 할 것
 - 로그 파일 배포 전 사람 할 일 (LJS, 다음 main 배포 전): 배포마다 서버 `.env.local`이 secret `ENV_FILE`로 통째로 덮어써지므로, 서버의 지금 `.env.local`·`.env`에 있는 키(`BACKEND_BASE_URL`, AI 키 3개, `CHAT_TOOL_*`, 타임아웃 등)를 빠짐없이 `ENV_FILE`에 옮기고 `LOG_DIR`(Java `app.log.dir`과 같은 폴더)를 추가. 서버에 `deploy` 그룹·SELinux 확인, 배포 사용자와 서비스 사용자가 다르면 600인 `.env.local`을 서비스가 못 읽으니 확인, 워크플로우 변경을 backend-90에 알림. 배포 뒤 폴더 `drwxrws---`·파일 `-rw-rw----`(그룹 deploy)와 요청 줄 확인. 필요하면 배포 전 `.env.local.bak` 백업 단계 추가 검토
@@ -15,9 +15,7 @@
 - 지출 등록 후속 (LJS·SJM): `lines[0].petSn`을 비우면 공용 지출로 저장되는지 SJM에 확인. 중복 확인(`/api/expenses/duplicate-check`, 설계 4-4 `duplicate_expense`)은 도구 목록에 없어 안 함 — React가 [확인] 전에 부를지·Python hook으로 할지 정한다
 - `draft_receipt_save` 대기 (LJS): 저장 전 OCR 영수증 번호를 주는 READ가 없어 싣지 않음(카탈로그는 중첩 배열을 읽음). SCR-AIM-013 ⑤ 팀 결정 뒤 마일스톤 대기 절로
 - 프론트(LJS) 알리기: ②·③·④ 카드분과 추가-1(돌려받은 카드 날짜 유지)이 develop에 병합되면 알림. 사진 의도 판단(SCR-AIM-013) 계약 `POST /ai/image-intent`도 병합 뒤 함께 알림
-- `docs/api/chat.md` 맞추기 (LJS): AI 메시지 `cnvrsCn`·SSE `delta`는 Markdown(GFM)이라고 적기(프론트 끝 PR #288: `react-markdown`+`remark-gfm`, HTML·이미지 안 그림, 고지는 맨 끝 `
-
-※` 문단만 떼어 표시 — 마지막 문단 유지), ActionCard `params`는 값 없는 키가 null로 나옴(문서는 "없는 키는 생략", ①부터, `ActionParam`), `input`의 "datetime 칸에 날짜만 오면…"에 수정 카드는 원래 시간을 쓴다는 것(추가-3) 미반영
+- `docs/api/chat.md` 맞추기 (LJS): AI 메시지 `cnvrsCn`·SSE `delta`는 Markdown(GFM)이라고 적기(프론트 끝 PR #288: `react-markdown`+`remark-gfm`, HTML·이미지 안 그림, 고지는 맨 끝 빈 줄 뒤 `※` 문단만 떼어 표시 — 마지막 문단 유지), ActionCard `params`는 값 없는 키가 null로 나옴(문서는 "없는 키는 생략", ①부터, `ActionParam`), `input`의 "datetime 칸에 날짜만 오면…"에 수정 카드는 원래 시간을 쓴다는 것(추가-3) 미반영
 - 공용 하네스 PR: `scripts/tool_eval.py`(추가-1, READ·ACTION 세기·유형 `수정`)는 end-check가 공용 하네스로 분류해 이번 커밋에서 뺌 — PR로 따로
 - 실제 LLM에서 "코코 오늘 체중 4.2kg 기록해줘"에 `rcd_ymd`를 비워 `missing ["rcdDt"]`가 된 적 있음(2026-11-09 검증, 1/2). 날짜를 말하지 않았으면 서버가 오늘로 채울지 정한다(지금 결정은 "날짜만 오면"만) (LJS). 돌려받은 카드가 있으면 LLM의 "오늘"은 버림(추가-1)
 - 기존 흐름 코드 삭제 (LJS, 별도 마일스톤 후보): `judge`·분류 LLM·답변 LLM 단독 호출은 앱에서 안 탐. `test_messages`·`test_register`·`test_intent`·`test_guide` 등이 `conftest.py`의 도구 가짜 미주입(기존 흐름)으로 돌아 테스트를 도구 흐름 기준으로 옮겨야 지울 수 있다. 등록 칸 추출 LLM은 초안 이어 쓰기에 계속 씀
@@ -32,8 +30,7 @@
 - 연결 남음: FN-AIM-010-06 프론트 [직접 입력] 영수증 (LJS 프론트, 맨 먼저): `ReceiptUploadModal.jsx` `onError`에서 `setFailedRecptSn(error.data?.recptSn ?? null)`, 넘기는 키 `rcptSn` 이름 맞춤, 다시 촬영·닫기 때 초기화. AI PR과 프론트 PR을 함께. 저장 뒤 영수증 상태 저장완료로 바꾸는지 확인(LJS 백엔드, `CheckupService.create`는 연결만). 결과 보고 실패·20초 가드로 끊긴 경우는 `recptSn`이 없어 연결 없는 기록(그대로 두기로 함)
 - 연결 남음: FN-ADM-070-02 관리자 프론트 아이템 등록 (관리자 프론트): [굽기 지시 만들기](`POST /ai/items/bake-hints`)·[시험해 보기](`POST /ai/items/trial-preview`), 등록 뒤 `POST /ai/items/{itemSn}/bake`를 `lastYn` true까지 반복(한 번 30~40초, 매 호출 전 토큰 갱신, 502면 멈춤)
 - 연결 남음: FN-MYP-010-16 프론트 꾸미기 [장착] (SJM): Java `PUT equipped-items` 성공 뒤 `POST /ai/characters/{pixelCharSn}/equipped-image` `{itemSns}`
-- 연결 남음: FN-MAN-006 Java 리포트 내부 API 2개 (LJS 백엔드): `GET /internal/ai/pets/{petSn}/health-report-input?baseYmd=`, `PUT /internal/ai/pets/{petSn}/health-report`(`inputHash`·`rfrshYn`, 새로고침 1회·자동 재생성 5회). 새 테이블이라 ERD 변경, 계약 초안 `docs/api/internal.md`, 백엔드 `docs/api/issues.md` 4번을 닫는다
-- 연결 남음: FN-MAN-006 메인 위젯 (프론트): `AiReportCard.jsx`가 `GET /ai/pets/{petSn}/health-report`. `rptTtl`을 "{petNm}는 지금 ___"에, `tips`·`notice`, `staleYn`·`dataLackYn` 안내, `rfrshPsblYn`으로 새로고침(`POST .../refresh`, 409 `HEALTH_REPORT_REFRESH_LIMIT`), 은/는 받침, 3~6초 로딩
+- 연결 남음: FN-MAN-006 메인 위젯 (프론트, Java 내부 API 연결은 2026-11-10 끝·로컬 확인): `AiReportCard.jsx`가 `GET /ai/pets/{petSn}/health-report`. `rptTtl`을 "{petNm}는 지금 ___"에, `tips`·`notice`, `staleYn`·`dataLackYn` 안내, `rfrshPsblYn`으로 새로고침(`POST .../refresh`, 409 `HEALTH_REPORT_REFRESH_LIMIT`), 은/는 받침, 3~6초 로딩
 - 연결 남음: FN-MYP-031-03·05 프론트 가계부 (SJM): `recognizeReceipt` 가짜 → `POST /ai/receipts`(`ocrRqstSrcCd=AIMC0027`, `petSn` 없음), `data.ocr`의 `ckupYmd`·`recptAmt` → `expndYmd`·`expndAmt`, 0건은 값이 모두 null인 200, 504·502는 "영수증을 읽지 못했어요"
 - 병합 대기: FN-MYP-031-05·03 Java 백엔드 PR #124(backend-95). 병합 전까지 develop에서 가계부 출처 인식은 Java가 거절. 병합 뒤 실제 가계부 영수증 1건으로 확인 (LJS 백엔드)
 - 병합 순서: 백엔드 PR #149(대표 이미지 저장·관리자 쿠키 시트 허용·`CharacterSpec.FACE` `(96, 32, 320, 320)`) 먼저 → AI `LJS` PR. 각자 로컬 DB에 `PIXEL_CHAR.WEAR_IMG_FILE_SN` ALTER(v0.13 (1)) (LJS 백엔드)

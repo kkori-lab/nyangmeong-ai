@@ -118,8 +118,15 @@ def _from_saved(
         data_lack_yn=False,
         stale_yn=stale,
         rfrsh_psbl_yn=rfrsh_psbl_yn,
-        crt_dt=saved.crt_dt,
+        crt_dt=_with_kst(saved.crt_dt),
     )
+
+
+def _with_kst(value: datetime | None) -> datetime | None:
+    # Java crtDt는 LocalDateTime(시간대 없음, KST) : 새로 생성한 응답과 같은 +09:00 꼴로
+    if value is None or value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=rules.KST)
 
 
 def _data_lack(pet_sn: int, base_ymd: date) -> HealthReportResponse:

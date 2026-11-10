@@ -10,7 +10,7 @@ from app.core.backend import call_backend, external_error, get_backend_client
 from app.core.config import Settings, get_settings
 from app.healthreport.schemas import HealthReportSaveRequest, HealthReportSource
 
-# Java 건강분석 리포트 내부 API (LJS 백엔드, 아직 없음 : 계약은 docs/api/internal.md)
+# Java 건강분석 리포트 내부 API (LJS 백엔드 AiHealthReportController : 계약은 docs/api/internal.md)
 PETS_PATH = "/internal/ai/pets"
 REQUESTED_WITH_HEADER = "X-Requested-With"
 

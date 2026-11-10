@@ -1,3 +1,5 @@
+import json
+import re
 from datetime import date
 
 import httpx2
@@ -325,3 +327,87 @@ def test_새로고침에_X_Requested_With가_없으면_403(client, gen, repo) ->
     assert res.status_code == 403
     assert res.json()["code"] == "FORBIDDEN"
     assert gen.calls == []
+
+
+# Java 실제 응답 꼴 : BigDecimal 숫자, LocalDate, 시간대 없는 LocalDateTime
+JAVA_INPUT = {
+    "petNm": "나비",
+    "petSeCd": "CAT",
+    "vrtyNm": "코리안숏헤어",
+    "ageMm": 38,
+    "nutrYn": True,
+    "goalBdwg": 5.00,
+    "weights": [{"ymd": "2026-10-28", "rcdNvl": 5.30}, {"ymd": "2026-11-03", "rcdNvl": 5.2}],
+    "meals": [{"ymd": "2026-11-03", "rcdNvl": 80}],
+    "waters": [{"ymd": "2026-11-03", "rcdNvl": 200.0}],
+    "walks": [],
+    "stools": [{"ymd": "2026-11-03", "crsdSttsCdNm": "정상"}],
+    "latestCkupYmd": "2026-10-01",
+    "inspOutOfRange": [
+        {
+            "inspArtclNm": "ALT",
+            "rsltNvl": 120,
+            "unitNm": "U/L",
+            "refLlmtNvl": 10,
+            "refUplmtNvl": 100,
+        }
+    ],
+}
+
+
+def java_app(monkeypatch, gen, payload: dict, seen: list[httpx2.Request]):
+    def backend(request: httpx2.Request) -> httpx2.Response:
+        if request.url.path == "/internal/auth/check":
+            return fake_auth_check(request)
+        seen.append(request)
+        if request.method == "PUT":
+            return httpx2.Response(200, json={"status": "success", "data": None})
+        return httpx2.Response(200, json={"status": "success", "data": payload})
+
+    monkeypatch.setenv("BACKEND_BASE_URL", "http://backend.test")
+    get_settings.cache_clear()
+    app = create_app()
+    client_ = httpx2.AsyncClient(transport=httpx2.MockTransport(backend))
+    app.dependency_overrides[get_backend_client] = lambda: client_
+    app.dependency_overrides[get_report_generator] = lambda: gen
+    app.dependency_overrides[get_base_ymd] = lambda: BASE_YMD
+    return app
+
+
+def test_Java_응답_꼴을_읽고_저장_요청은_Java_저장_DTO_필드(monkeypatch, gen) -> None:
+    seen: list[httpx2.Request] = []
+    payload = {"input": JAVA_INPUT, "report": None, "rfrshPsblYn": True, "autoRgnrPsblYn": True}
+
+    res = get(TestClient(java_app(monkeypatch, gen, payload, seen)))
+
+    assert res.status_code == 200
+    assert gen.calls[0].goal_bdwg == 5.0
+    assert gen.calls[0].insp_out_of_range[0].insp_artcl_nm == "ALT"
+    put = [r for r in seen if r.method == "PUT"]
+    assert len(put) == 1
+    assert put[0].url.path == "/internal/ai/pets/3/health-report"
+    body = json.loads(put[0].content)
+    assert set(body) == {"baseYmd", "rptTtl", "tips", "inputHash", "rfrshYn"}
+    assert body["baseYmd"] == "2026-11-04"
+    assert body["rfrshYn"] is False
+    assert re.fullmatch(r"[0-9a-f]{64}", body["inputHash"])
+    assert 1 <= len(body["tips"]) <= 3
+
+
+def test_시간대_없는_저장본_crtDt는_응답에서_KST(monkeypatch, gen) -> None:
+    seen: list[httpx2.Request] = []
+    parsed = HealthReportInput.model_validate(JAVA_INPUT)
+    report = {
+        "rptTtl": "건강해요",
+        "tips": ["잘 지내고 있어요"],
+        "inputHash": rules.input_hash(BASE_YMD, parsed),
+        "crtDt": "2026-11-04T09:00:00",
+    }
+    payload = {"input": JAVA_INPUT, "report": report, "rfrshPsblYn": True, "autoRgnrPsblYn": True}
+
+    res = get(TestClient(java_app(monkeypatch, gen, payload, seen)))
+
+    assert res.status_code == 200
+    assert res.json()["data"]["crtDt"] == "2026-11-04T09:00:00+09:00"
+    assert gen.calls == []
+    assert [r.method for r in seen] == ["GET"]
