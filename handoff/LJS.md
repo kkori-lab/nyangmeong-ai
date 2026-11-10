@@ -1,7 +1,7 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-004 대화창 · 라우팅 매핑표 DB 기준 — 끝 (2026-11-10). 매핑표를 `routing.yaml` 대신 Java `GET /internal/ai/routes`(관리자 SCR-ADM-080)에서 대화 요청 때 받은 지 10초 지나면 다시 받음, Java 실패면 마지막 성공본·스냅샷 `data/routes.snapshot.json`, 안내서는 `scr_id`·`param`으로 이음. 검증 통과(1회차 실패는 화면 조건 고침), 관리자 PATCH로 지시어 추가·사용 안 함 반영 사람 확인
+SCR-AIM-004 대화창 · 음수량·식사량 READ 답변 품질 — 끝 (2026-11-10). 건강 READ 도구 설명에 단위(체중 kg·식사량 g·음수량 ml·산책 분·크레아티닌 `unitNm`)와 반올림(체중만 소수 한 자리), `TOOL_RULES`에 안내서 번호 금지·서버 되물음 뒤 사과 금지. 검증 2회차 통과(1회차는 식사량 소수 노출). 글 되물음 뒤 사과는 실제 장면을 못 만들어 규칙 테스트로만 확인
 
 ## 다음에 할 것
 - 관리자 프론트 라우팅 매핑표 연결 (관리자 프론트): `features/adminAiRoute/api.js`가 아직 가짜 응답이라 관리자 화면에서 고쳐도 저장 안 됨. Java `/api/admin/ai/routes`(GET·POST·PATCH·DELETE)는 있음. 연결되면 대화창 이동에 10초 안에 반영 (2026-11-10)
@@ -12,7 +12,6 @@ SCR-AIM-004 대화창 · 라우팅 매핑표 DB 기준 — 끝 (2026-11-10). 매
 - 연결 남음: SCR-AIM-012 ①~④ ACTION 카드 폼·[확인] 실행·`action-result` 호출 (프론트 범용 카드, LJS 프론트). 계약은 2026-11-09 프론트 세션에 전달, 프론트는 지금 마일스톤 뒤 `/start`에서 `docs/api/chat.md`를 정본으로. ② 수정 카드: PATCH·경로 칸 2개, `input`은 바꿀 칸만(원래 값은 프론트가 읽음), 바꾼 칸이 없을 때 [확인] 막을지 프론트가 정함. 여러 줄 지출 `expndAmt` PATCH 뜻(SJM). Java 400은 `data: [{field, message}]` 칸만 다시 고치게, `data`가 비면 카드 전체 오류로. ③: `params`의 `array`(`items`·`minItems`)·`file`·`generated: "uuid"`(React가 카드 하나에 한 번), `call.contentType`(multipart), `missing`의 `lines[0].expndAmt` 꼴, 관찰 기록은 사진 첨부 뒤 multipart로 실행·`action-result`에는 파일을 보내지 않음(2026-11-09 프론트 세션에 전달). ④(2026-11-09 전달, 프론트 받음): 일정·케어 항목도 범용 카드, `notice` 표시, `schdlSrcCd` 안 채움, 옛 등록 카드·`registerToHealth` 제거 — AI develop 병합 알림 뒤 프론트 `/start`. 다 옮기면 AI도 옛 `draft`·`register-result`·REGISTER 지움(기존 흐름 코드 삭제와 함께)
 - 반려동물 칩 (프론트 LJS, 사람 결정 대기): 칩은 목록 필터·새 대화 태그인데, 열린 방은 그대로 두고 메시지에 칩의 `petSn`을 실어 보냄(AI는 버리고 방 태그 기준 — 2026-11-09 프론트에 답함). 제안: 칩이 열린 방 태그와 다르면 방을 닫고 새 대화 화면으로(프론트 찬성). 사람이 정하면 프론트에 전달
 - 건강 READ 여러 마리 후속 (LJS): `uv run python -m scripts.tool_eval` 재측정(T54 "전체 반려동물 체중 알려줘" 추가, 외부 API라 검증에서 안 돌림). "이름만 다시 말하기" 문항은 `scripts/tool_eval.py`에 앞 턴 이력 칸이 없어 공용 하네스 PR 후보. 펫 태그가 목록에 없을 때 모든 아이로 가는 경우는 테스트 없음. 체중 기록이 없는 아이(엘리자베스 등)는 등록 몸무게 `petBdwg`를 못 말함 — 반려동물 READ를 열 때. 읽기 반려동물 결정 규칙(FN-AIM-004-19 후보)은 DMS 모음에도
-- 음수량·식사량 READ 답변 품질 (LJS, 2026-11-09 로컬 실측): 서버가 만든 반려동물 되물음 글을 LLM이 자기가 지어낸 말로 보고 사과함(이름 표시는 위 다음 작업), 지표 단위 없음(683.024), 답변에 "안내서 [13-1]" 노출
 - 배포 서버에서 식사량·음수량 질문에 "일시적으로 답변할 수 없어요" (LJS, 2026-11-09 보고, 원인 미확정): 로컬은 첫 글자 4.9~5.6초로 정상. 후보는 반려동물 조회(`register-context`) 실패 `AnswerError("read_pets")`, 첫 글자 10초 초과(반려동물 조회·Java 읽기·답변 LLM이 모두 그 안), 예상 못 한 예외(`대화 응답 처리 실패` 로그). 앞의 둘은 로그가 없어 구분 불가 — 실패 이유 로그 추가 후보. 서버에서 `journalctl -u ai-backend`·`systemctl cat ai-backend`(`.env` 읽는지)·`.env.local` 유무 확인
 - 지출 등록 후속 (LJS·SJM): `lines[0].petSn`을 비우면 공용 지출로 저장되는지 SJM에 확인. 중복 확인(`/api/expenses/duplicate-check`, 설계 4-4 `duplicate_expense`)은 도구 목록에 없어 안 함 — React가 [확인] 전에 부를지·Python hook으로 할지 정한다
 - `draft_receipt_save` 대기 (LJS): 저장 전 OCR 영수증 번호를 주는 READ가 없어 싣지 않음(카탈로그는 중첩 배열을 읽음). SCR-AIM-013 ⑤ 팀 결정 뒤 마일스톤 대기 절로
