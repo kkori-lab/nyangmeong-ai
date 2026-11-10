@@ -56,3 +56,25 @@ def test_응답이_JSON이_아니면_그_이유를_남겨야_한다():
 
 def test_원인이_없는_예외는_예외_이름을_남겨야_한다():
     assert failure_reason(RuntimeError("x")) == "RuntimeError"
+
+
+@pytest.mark.parametrize("error", [httpx2.InvalidURL("Invalid port: 'abc'"), OverflowError("port")])
+def test_주소_꼴이_틀리면_502로_바꾸고_주소_꼴_틀림을_남겨야_한다(error):
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        raise error
+
+    client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+    with pytest.raises(AppError) as caught:
+        asyncio.run(call_backend(client, _settings(), "GET", "/internal/x"))
+
+    assert caught.value.http_code == 502
+    assert failure_reason(caught.value) == f"주소 꼴 틀림 {type(error).__name__}"
+
+
+def test_포트가_문자인_실제_주소로_부르면_502여야_한다():
+    client = httpx2.AsyncClient(timeout=TIMEOUT_SEC)
+    with pytest.raises(AppError) as caught:
+        asyncio.run(call_backend(client, _settings("http://localhost:abc"), "GET", "/internal/x"))
+
+    assert caught.value.http_code == 502
+    assert failure_reason(caught.value) == "주소 꼴 틀림 InvalidURL"

@@ -73,6 +73,9 @@ async def _send(
         res = await client.request(method, f"{base_url}{path}", **kwargs)
     except httpx2.HTTPError as error:
         raise external_error() from error
+    except (httpx2.InvalidURL, OverflowError) as error:
+        # 주소 꼴이 틀림(포트 문자·괄호 깨짐, Linux 포트 범위 밖) : 주소 값은 로그에 넣지 않는다
+        raise external_error() from _FailureCause(f"주소 꼴 틀림 {type(error).__name__}")
     if 400 <= res.status_code < 500:
         raise BackendError.of(res)
     if not res.is_success:

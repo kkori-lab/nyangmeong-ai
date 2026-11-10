@@ -54,7 +54,8 @@ async def _check(
     headers = {"Cookie": cookie} if cookie else {}
     try:
         res = await client.get(f"{base_url}{AUTH_CHECK_PATH}", headers=headers)
-    except httpx2.HTTPError:
+    except (httpx2.HTTPError, httpx2.InvalidURL, OverflowError):
+        # InvalidURL·OverflowError : 주소 꼴이 틀림(backend._send와 같게 502)
         raise external_error() from None
 
     if res.status_code in (401, 403):
