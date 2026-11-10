@@ -6,9 +6,11 @@
 - Java 실패면 data/tools.snapshot.json(코드 값 없음)으로 뜨고, 코드 칸이 있는 도구는 싣지 않는다
 """
 
+import asyncio
 import json
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from functools import lru_cache
@@ -19,7 +21,7 @@ import httpx2
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 
-from app.core.backend import BackendError, call_backend
+from app.core.backend import BackendError, call_backend, failure_reason
 from app.core.config import Settings
 from app.core.response import AppError
 
@@ -27,6 +29,11 @@ logger = logging.getLogger(__name__)
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 CATALOG_PATH = "/internal/ai/tools"
+# 도구 목록만 Java 공통 3초보다 길게 : 재시작 직후 첫 호출 17.7초(2026-11-09 배포 서버)
+CATALOG_TIMEOUT_SEC = 20.0
+# 기동 때 실패하면 뒤에서 다시 받기 : 30초 간격 10번(약 5분)
+RETRY_INTERVAL_SEC = 30.0
+RETRY_ATTEMPTS = 10
 PET_SN = "petSn"
 HR_INPUT = "hrInptYn"
 YEAR_MONTH = "yearMonth"
@@ -846,18 +853,31 @@ class JavaToolCatalogClient:
         self.settings = settings
 
     async def fetch(self) -> ToolCatalogResponse:
-        data = await call_backend(self.client, self.settings, "GET", CATALOG_PATH)
+        data = await call_backend(
+            self.client, self.settings, "GET", CATALOG_PATH, timeout=CATALOG_TIMEOUT_SEC
+        )
         return ToolCatalogResponse.model_validate(data)
 
 
-async def load(client: ToolCatalogClient) -> Catalog:
-    # 4-2절 1·2번 : Java 실패면 스냅샷, 구조가 다르면 경고 후 Java 응답
-    snapshot = read_snapshot()
+def _reason(error: Exception) -> str:
+    if isinstance(error, ValidationError):
+        first = error.errors()[0] if error.errors() else {}
+        where = ".".join(str(part) for part in first.get("loc", ())) or "-"
+        return f"응답 모양 다름 {where}"
+    reason = failure_reason(error)
+    if reason.startswith("제한 시간 초과"):
+        return f"{reason}, {CATALOG_TIMEOUT_SEC:g}초"
+    return reason
+
+
+async def _fetch(client: ToolCatalogClient) -> tuple[ToolCatalogResponse | None, str]:
     try:
-        response = await client.fetch()
+        return await client.fetch(), ""
     except (AppError, BackendError, ValidationError) as error:
-        logger.warning("도구 목록: Java 받기 실패(%s), 스냅샷으로", type(error).__name__)
-        return build(snapshot, "snapshot")
+        return None, _reason(error)
+
+
+def _from_java(response: ToolCatalogResponse, snapshot: ToolCatalogResponse) -> Catalog:
     if response.structure_version != snapshot.structure_version:
         logger.warning(
             "도구 목록: structureVersion 다름(Java %s, 스냅샷 %s)",
@@ -867,9 +887,17 @@ async def load(client: ToolCatalogClient) -> Catalog:
     return build(response, "java")
 
 
-async def install(client: ToolCatalogClient) -> Catalog:
-    # 다시 받기는 기동 때 1회(9절 결정 남음)
-    catalog = await load(client)
+async def load(client: ToolCatalogClient) -> Catalog:
+    # 4-2절 1·2번 : Java 실패면 스냅샷, 구조가 다르면 경고 후 Java 응답
+    snapshot = read_snapshot()
+    response, reason = await _fetch(client)
+    if response is None:
+        logger.warning("도구 목록: Java 받기 실패(%s), 스냅샷으로", reason)
+        return build(snapshot, "snapshot")
+    return _from_java(response, snapshot)
+
+
+def _log_installed(catalog: Catalog) -> None:
     logger.info(
         "도구 목록: %s %s, %d개 %s",
         catalog.source,
@@ -877,4 +905,32 @@ async def install(client: ToolCatalogClient) -> Catalog:
         len(catalog.entries),
         ",".join(catalog.entries),
     )
+
+
+async def install(client: ToolCatalogClient) -> Catalog:
+    # 기동 때 1회. 실패해 스냅샷이면 retry로 뒤에서 다시 받는다(4-2절 5번)
+    catalog = await load(client)
+    _log_installed(catalog)
     return catalog
+
+
+async def retry(
+    client: ToolCatalogClient,
+    use: Callable[[Catalog], None],
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    attempts: int = RETRY_ATTEMPTS,
+    interval_sec: float = RETRY_INTERVAL_SEC,
+) -> Catalog | None:
+    """스냅샷으로 뜬 뒤 Java 목록 다시 받기 : 성공하면 바꾸고 멈춤, 다 실패하면 스냅샷 유지"""
+    for attempt in range(1, attempts + 1):
+        await sleep(interval_sec)
+        response, reason = await _fetch(client)
+        if response is None:
+            logger.warning("도구 목록: 다시 받기 %d/%d 실패(%s)", attempt, attempts, reason)
+            continue
+        catalog = _from_java(response, read_snapshot())
+        use(catalog)
+        _log_installed(catalog)
+        return catalog
+    logger.warning("도구 목록: 다시 받기 %d번 모두 실패, 스냅샷 유지", attempts)
+    return None

@@ -1,5 +1,6 @@
+import asyncio
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 
@@ -18,10 +19,19 @@ from app.ocr import router as ocr_router
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.backend_client = create_backend_client()
-    # 도구 목록(docs/design/tool-catalog.md 4-2절) : 기동 때 1회
-    client = catalog.JavaToolCatalogClient(app.state.backend_client, get_settings())
-    tools.use_catalog(await catalog.install(client))
+    # 도구 목록(docs/design/tool-catalog.md 4-2절) : 기동 때 1회, 실패면 뒤에서 다시 받기
+    settings = get_settings()
+    client = catalog.JavaToolCatalogClient(app.state.backend_client, settings)
+    installed = await catalog.install(client)
+    tools.use_catalog(installed)
+    retry = None
+    if installed.source == "snapshot" and settings.backend_base_url:
+        retry = asyncio.create_task(catalog.retry(client, tools.use_catalog))
     yield
+    if retry is not None:
+        retry.cancel()
+        with suppress(asyncio.CancelledError):
+            await retry
     await app.state.backend_client.aclose()
 
 
