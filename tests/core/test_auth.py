@@ -129,6 +129,29 @@ def test_Java_주소가_비어_있으면_부르지_않고_502() -> None:
     assert res.status_code == 502
 
 
+@pytest.mark.parametrize("error", [httpx2.InvalidURL("Invalid port: 'abc'"), OverflowError("port")])
+def test_Java_주소_꼴이_틀리면_502(error: Exception) -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        raise error
+
+    res = _client(handler).get("/ai/me")
+
+    assert res.status_code == 502
+    assert res.json()["code"] == "EXTERNAL_API_ERROR"
+
+
+def test_포트가_문자인_실제_주소면_502() -> None:
+    app = _client(lambda r: httpx2.Response(200)).app
+    settings = Settings(_env_file=None, backend_base_url="http://localhost:abc")
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_backend_client] = lambda: httpx2.AsyncClient()
+
+    res = TestClient(app).get("/ai/me")
+
+    assert res.status_code == 502
+    assert res.json()["code"] == "EXTERNAL_API_ERROR"
+
+
 # FN-ADM-001-01 : 관리자 확인
 def _authority(code: object) -> Callable[[httpx2.Request], httpx2.Response]:
     return lambda r: httpx2.Response(200, json={"data": {"mbrSn": 1, "mbrAuthrtCd": code}})

@@ -457,3 +457,14 @@ def test_빈_칸_LLM_이름은_Java_칸을_LLM_칸으로_되돌려야_한다():
     names = catalog.missing_llm(schedule, {})
 
     assert names == ["schdl_knd_cd", "schdl_ymd"]
+
+
+def test_Java_주소_꼴이_틀려도_예외_없이_스냅샷으로_떠야_한다(caplog):
+    settings = Settings(_env_file=None, backend_base_url="http://localhost:abc")
+    client = catalog.JavaToolCatalogClient(httpx2.AsyncClient(), settings)
+
+    with caplog.at_level(logging.WARNING, logger="app.chat.catalog"):
+        loaded = asyncio.run(catalog.load(client))
+
+    assert loaded.source == "snapshot"
+    assert "주소 꼴 틀림 InvalidURL" in caplog.text
