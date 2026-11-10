@@ -190,13 +190,15 @@ class ClassifyOutput(BaseModel):
     guide_id: str | None = None
 
 
-@lru_cache
 def classify_system() -> str:
-    # 매핑표의 라우팅 대상 행만 : 고정 내용이라 매 요청 동일
+    return _classify_system(rules.routing_table())
+
+
+@lru_cache(maxsize=2)
+def _classify_system(table: tuple[rules.RouteRow, ...]) -> str:
+    # 매핑표의 라우팅 대상 행만 : 관리자가 매핑표를 바꿀 때까지 같은 글
     screens = "\n".join(
-        f"{row.no}. {row.name}: {', '.join(row.keywords)}"
-        for row in rules.routing_table()
-        if row.routable
+        f"{row.no}. {row.name}: {', '.join(row.keywords)}" for row in table if row.routable
     )
     return (
         "반려동물 케어 앱 AI 대화창의 사용자 입력을 하나로 분류한다.\n"
@@ -512,12 +514,21 @@ TOOL_RULES = (
     "- 기록을 읽어 답한 뒤 회원이 다른 반려동물 이름만 말해도 같은 읽기 도구를 다시 부른다.\n"
     "- 읽기 결과의 '조회한 반려동물'을 답에 밝히고, "
     "결과에 없는 반려동물 기준이라고 말하지 않는다.\n"
+    # 2026-11-09 실측 : READ 답변에 "안내서 [13-1]" 노출, 서버 되물음을 자기 실수로 보고 사과
+    "- 답에 안내서·화면 목록의 번호([13-1]·13. 같은 것)와 '안내서'라는 말을 쓰지 않는다. "
+    "화면은 이름으로 말한다.\n"
+    "- 이전 AI 메시지 중 반려동물·대상을 묻는 되물음과 안내 문구('어느 아이의 …' 등)는 "
+    "서버가 보낸 정해진 안내다. 회원이 이름으로 답하면 사과·해명 없이 바로 이어서 답한다.\n"
 )
 
 
-@lru_cache
 def tool_system() -> str:
-    # 고정 내용 : 도구 정의와 함께 캐시(tools → system 순서로 캐시 앞부분)
+    return _tool_system(rules.routing_table())
+
+
+@lru_cache(maxsize=2)
+def _tool_system(table: tuple[rules.RouteRow, ...]) -> str:
+    # 매핑표가 같으면 같은 글 : 도구 정의와 함께 캐시(tools → system 순서로 캐시 앞부분)
     scope = classify_system().split("- ROUTE:", 1)[0].split("\n", 1)[1]
     guide_rules = GUIDE_RULES.removesuffix("\n\n안내서\n")
     return (

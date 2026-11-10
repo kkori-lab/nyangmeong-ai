@@ -132,6 +132,18 @@ class MoveType(StrEnum):
     MODAL = "MODAL"  # 본창에서 모달 열기(SCR-COM-009)
 
 
+class RouteItem(BaseModel):
+    # Java GET /internal/ai/routes 응답 원소(AiRouteResponse, 백엔드 c0bf1f2)
+    ai_rout_mpng_sn: int = Field(alias="aiRoutMpngSn")
+    trgt_scrn_nm: str = Field(alias="trgtScrnNm")
+    scrn_id: str | None = Field(default=None, alias="scrnId")
+    scrn_param_cn: str | None = Field(default=None, alias="scrnParamCn")
+    inst_kwrds: list[str] = Field(default_factory=list, alias="instKwrds")
+    mvmn_mthd_cd: str = Field(alias="mvmnMthdCd")
+    rprs_chip_yn: bool = Field(default=False, alias="rprsChipYn")
+    prrt_seq: int = Field(alias="prrtSeq")
+
+
 class Intent(_Camel):
     kind: IntentKind
     # ROUTE일 때만. 화면 ID → 프론트 경로 변환은 프론트 담당

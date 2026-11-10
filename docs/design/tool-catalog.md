@@ -27,7 +27,7 @@
 | 도메인 | 도구 후보 | Java API |
 | --- | --- | --- |
 | 반려동물·캐릭터 | 내 반려동물 목록·상세, 공동양육자, 받은 초대, 오늘의 케어 미션, 포인트·내역, 캐릭터·보유 아이템 | `GET /api/pets`, `/api/pets/{petSn}`, `/api/pets/{petSn}/caregivers`, `GET /api/caregiver-invitations`, `GET /api/pets/{petSn}/daily-missions`, `GET /api/members/me/points`, `GET /api/point-ledgers`, `GET /api/pixel-characters`, `/{pixelCharSn}/held-items` |
-| 건강 | 일정, 케어 항목·완료, 건강 일지, 검진·처방약·검사 수치·기타검사, 반복 예방, 건강 지표, 관찰(메인 노출 여부는 `list_care_items`의 `mainExpsrYn`. `/care-item-exposures`는 PUT만 있어 읽기 아님, 2026-11-06 백엔드 확인) | `/api/pets/{petSn}/care-schedules`, `/care-items`, `/care-completions`, `/daily-health-records`, `/checkups`, `/prescriptions`, `/inspection-values`, `/etc-inspections`, `/repeat-preventions`, `/health-indicators`, `/observation-items`, `/observation-cycles` |
+| 건강 | 일정, 케어 항목·완료, 건강 일지, 검진·처방약·검사 수치·기타검사, 반복 예방, 건강 지표, 관찰(메인 표시(★) 기능은 2026-11-10 백엔드에서 제거되어 `list_care_items`에 메인 표시 조건이 없다) | `/api/pets/{petSn}/care-schedules`, `/care-items`, `/care-completions`, `/daily-health-records`, `/checkups`, `/prescriptions`, `/inspection-values`, `/etc-inspections`, `/repeat-preventions`, `/health-indicators`, `/observation-items`, `/observation-cycles` |
 | 가계부 | 지출 목록·합계·월별·통계·반려동물별, 영수증 상세 | `GET /api/expenses`, `/totals`, `/months`, `/statistics`, `/pets`, `/api/receipts/{recptSn}` |
 | 커뮤니티·플레이스 | 글 목록·인기·건강 팁·상세·댓글, 실종 신고, 돌봄 모집, 뉴스, 장소·즐겨찾기 | `GET /api/posts`, `/popular-photo`, `/health-tips`, `/{pstSn}`, `/{pstSn}/comments`, `GET /api/lost-reports`, `GET /api/care-recruitments`, `GET /api/news`, `GET /api/places`, `GET /api/place-bookmarks` |
 | 고객센터 | 자주 묻는 질문 | `GET /api/faqs` |
@@ -144,7 +144,10 @@
 3. Java 목록과 `tool_prompts.yaml`을 이름으로 합친다. 한쪽에만 있는 도구는 싣지 않고 경고한다.
 4. 도구마다 `pydantic.create_model`로 검증 모델을 만든다. 이 모델로 Anthropic `input_schema`를 만들되 `required`는 빼고,
    `code` 칸은 `enum`(코드 값)과 설명(코드 이름)을 붙인다. 지금 `tools.py`의 손으로 쓴 모델과 설명 속 코드 값은 이것으로 바뀐다.
-5. 결과는 메모리에 둔다(`@lru_cache`, `routing_table()`과 같은 방식). 다시 받는 주기는 기동 때 1회 + 정해진 간격(결정 남음).
+5. 결과는 메모리에 둔다(`@lru_cache`, `routing_table()`과 같은 방식). 다시 받는 주기는 기동 때 1회다. 기동 때 실패해 스냅샷으로 떴으면
+   뒤에서 30초 간격으로 최대 10번(약 5분) 다시 받고, 받으면 바꾸고 멈춘다(기동은 기다리지 않음, 2026-11-10).
+   이 호출만 제한 시간 20초(Java 공통 3초, 재시작 직후 첫 호출 17.7초 기준). 실패 로그에 이유(제한 시간 초과·연결 실패·상태 코드·
+   주소 비어 있음·JSON 아님·응답 모양 다름)를 남긴다.
 
 ### 4-3. 한 턴
 
@@ -223,7 +226,7 @@
 ## 9. 결정 남음
 
 - 도메인 고르기 방법(분류 LLM에 도메인 칸 추가 vs 룰 앞단 vs 두 단계 도구 선택)
-- 목록을 다시 받는 주기(기동 때만 vs 몇 분마다)와 Java 장애 때 카드 도구를 끌지
+- 정상으로 받은 뒤에도 몇 분마다 다시 받을지(기동 실패 때 다시 받기는 4-2절 5번)와 Java 장애 때 카드 도구를 끌지
 - 읽기 결과가 길 때(지출 목록 수백 건) 자르는 기준: Java 쪽 페이지 크기 vs Python 요약
 - 2단계 실행을 React가 할지, 확인 토큰을 받아 서버가 할지(지금 원칙은 React)
 - `@AiTool` 표시를 붙일 API 목록 최종(2절은 후보). PATCH 여부는 3-3절에서 정함(백엔드 PUT 10개 중 2-2절 대상은 월 지출 한도뿐)

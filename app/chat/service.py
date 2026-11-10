@@ -32,6 +32,7 @@ from app.chat.repository import (
     ConversationRepository,
     PetInfo,
     RegisterContextRepository,
+    RouteRepository,
     ToolReader,
 )
 from app.chat.schemas import (
@@ -64,6 +65,46 @@ from app.core.image import validate_upload
 from app.core.response import AppError
 
 logger = logging.getLogger(__name__)
+
+# FN-AIM-004-09 : 매핑표를 다시 받는 간격 (2026-11-10 LJS 결정, 관리자 수정은 최대 10초 뒤 반영)
+ROUTE_TTL_SEC = 10.0
+
+
+class RouteCache:
+    """[라우팅 매핑표 캐시]
+    - 대화 요청 때 받은 지 10초가 지났으면 그 요청의 쿠키로 다시 받음(타이머 없음, 워커마다)
+    - Java 실패면 마지막 성공본, 처음부터 실패면 스냅샷(rules.routing_table)"""
+
+    def __init__(
+        self, ttl_sec: float = ROUTE_TTL_SEC, clock: Callable[[], float] = time.monotonic
+    ) -> None:
+        self.ttl_sec = ttl_sec
+        self.clock = clock
+        self._checked_at: float | None = None
+
+    def reset(self) -> None:
+        self._checked_at = None
+        rules.use_routes(None)
+
+    async def refresh(self, routes: RouteRepository) -> None:
+        now = self.clock()
+        if self._checked_at is not None and now - self._checked_at < self.ttl_sec:
+            return
+        # 실패해도 다음 확인은 10초 뒤 : Java가 느릴 때 요청마다 기다리지 않게
+        self._checked_at = now
+        try:
+            rows = rules.route_rows(await routes.get_routes())
+        except (AppError, BackendError) as error:
+            logger.warning("라우팅 매핑표 받기 실패: %s", type(error).__name__)
+            return
+        # 이동할 행이 없으면 navigate enum이 비어 LLM 요청이 깨짐 : 앞의 표 유지
+        if not any(row.routable for row in rows):
+            logger.warning("라우팅 매핑표에 이동할 행 없음: %d행", len(rows))
+            return
+        rules.use_routes(rows)
+
+
+route_cache = RouteCache()
 
 # FN-AIM-011-11 : 생성 제목 30자 이내 (Java 저장 상한 200보다 짧게, 2026-10-30 LJS 결정)
 MAX_TITLE_LENGTH = 30
@@ -239,8 +280,7 @@ def _guide_judged(text: str, classified: Classified) -> Judged | None:
 def _guide_shortcut(chunk_id: str, classified: Classified) -> Intent | None:
     # FN-AIM-002-04 : 첫 청크 화면이 라우팅 대상이면 그 화면, 아니면 분류의 연관 화면
     chunk = rules.find_guide(chunk_id)
-    num = chunk.num if chunk else None
-    row = next((r for r in rules.routing_table() if r.no == num and r.routable), None)
+    row = rules.find_route(chunk.scr_id, chunk.param) if chunk and chunk.scr_id else None
     return row.to_intent() if row is not None else _shortcut_of(classified)
 
 
@@ -292,7 +332,11 @@ def _tool_judged(
         if decision.text is not None:
             # FN-AIM-002-03 : 인사·잡담에 대한 바로 답은 고지 없음(추가 요청 2026-11-09)
             notice = not rules.is_small_talk(text)
-            return Judged(Intent(kind=IntentKind.SEARCH), stream=decision.text, notice=notice)
+            # FN-AIM-002-04 : 질문 글이 룰 키워드에 걸리면 그 행을 바로가기로, 인사·잡담 제외
+            shortcut = _keyword_shortcut(text) if notice else None
+            return Judged(
+                Intent(kind=IntentKind.SEARCH), shortcut, stream=decision.text, notice=notice
+            )
         return Judged(Intent(kind=IntentKind.FALLBACK))
     if call.args is None:
         logger.info("도구 인자 거부: %s", call.name)
@@ -329,7 +373,11 @@ def _tool_judged(
             text, context, agent, decision, entry, max_tokens, today, read, cards, domains
         )
         return Judged(
-            Intent(kind=IntentKind.SEARCH), stream=stream, cards=cards, read_domains=domains
+            Intent(kind=IntentKind.SEARCH),
+            _read_shortcut(entry, text),
+            stream=stream,
+            cards=cards,
+            read_domains=domains,
         )
     ids = tuple(tools.guide_ids(call, text))
     if not ids:
@@ -535,6 +583,17 @@ async def _read_answer(
 def guide_text(ids: tuple[str, ...]) -> str | None:
     chunks = [chunk for chunk in map(rules.find_guide, ids) if chunk is not None]
     return "\n\n".join(chunk.text for chunk in chunks) or None
+
+
+def _keyword_shortcut(text: str) -> Intent | None:
+    row = rules.match_route(text)
+    return None if row is None else row.to_intent()
+
+
+def _read_shortcut(entry: catalog.CatalogEntry, text: str) -> Intent | None:
+    # FN-AIM-002-04 : 첫 READ 도구의 화면, 매핑표에 그 행이 없으면 질문 글 룰 키워드
+    row = rules.find_route(entry.screen, None) if entry.screen else None
+    return row.to_intent() if row is not None else _keyword_shortcut(text)
 
 
 def _shortcut_of(classified: Classified) -> Intent | None:
@@ -806,6 +865,8 @@ async def _search_answer(
         text += DISCLAIMER
     message = await _save(repo, turn.room_sn, text, complete)
     action = cards[0] if cards else None
+    # FN-AIM-002-04 : 확인 카드가 같이 나가는 턴은 바로가기 없음
+    shortcut = None if action is not None else shortcut
     emit(("done", AnswerDone(message=message, shortcut=shortcut, action=action)))
     return body if complete else None
 

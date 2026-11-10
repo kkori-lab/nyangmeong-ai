@@ -406,6 +406,7 @@ draft_pet_update:
 # 앞 결과의 번호 칸(careArtclSn·ckupRcdSn·obsrvCyclSn)도 같은 이유로 LLM 칸에 두지 않는다
 
 get_health_indicators:
+  screen: SCR-HLT-002
   hooks: [pet]
   description: |
     반려동물의 건강 지표(체중·식사량·음수량·산책 추이, 크레아티닌)를 읽어 와 답한다.
@@ -417,8 +418,12 @@ get_health_indicators:
       건강 기록 화면으로 가자는 말("건강 기록 열어 줘")은 navigate.
     인자: 반려동물은 고르지 않는다(서버가 문장 속 이름, 없으면 대화의 반려동물로 정하고 여러 마리도 읽는다).
     말하는 법: 받은 수치만 쓴다. 진단하지 않고, 걱정되는 변화는 수의사 상담을 권한다.
+      수치에는 단위를 붙인다: 체중 kg, 식사량 g, 음수량 ml, 산책 분, 크레아티닌은 결과의 unitNm.
+      체중만 소수 한 자리까지 쓴다. 식사량·음수량·산책은 추이·목록의 값까지 모두 소수점 없이
+      정수로 반올림한다(식사량 61.4 → 약 61g, 음수량 683.024 → 약 683ml).
 
 list_daily_health_records:
+  screen: SCR-HLT-002
   hooks: [pet]
   description: |
     날짜별 건강 일지(체중·식사량·음수량·배변상태·산책 기록)를 읽어 와 답한다.
@@ -429,6 +434,9 @@ list_daily_health_records:
     쓰지 않을 때: 전체 추이·요약은 get_health_indicators.
     인자: 기간은 시스템의 오늘 날짜 기준으로 계산한다. 말하지 않은 칸은 비운다.
     말하는 법: 받은 기록만 쓴다. 기록이 없으면 없다고 말한다.
+      수치에는 단위를 붙인다: 체중 kg, 식사량 g, 음수량 ml, 산책 분.
+      체중만 소수 한 자리까지 쓴다. 식사량·음수량·산책은 모든 값을 소수점 없이
+      정수로 반올림한다(식사량 61.4 → 약 61g, 음수량 683.024 → 약 683ml).
   params:
     daily_rcd_idct_cd:
       java: dailyRcdIdctCd
@@ -444,6 +452,7 @@ list_daily_health_records:
       description: 가져올 기록 수
 
 list_care_schedules:
+  screen: SCR-HLT-003
   hooks: [pet]
   description: |
     캘린더 일정(병원·미용·케어 등)을 읽어 와 답한다. 아무것도 저장하지 않는다.
@@ -473,6 +482,7 @@ list_care_schedules:
       description: 가져올 일정 수
 
 list_care_items:
+  screen: SCR-HLT-003
   hooks: [pet]
   description: |
     반복 케어 항목(산책·발톱 깎기·예방약 등)과 다음 예정일·마지막 한 날을 읽어 와 답한다.
@@ -489,11 +499,9 @@ list_care_items:
     care_artcl_nm:
       java: careArtclNm
       description: 케어 항목 이름(일부만 말해도 됨)
-    main_expsr_yn:
-      java: mainExpsrYn
-      description: 메인 화면에 보이는 항목만 볼 때 true
 
 list_care_completions:
+  screen: SCR-HLT-003
   hooks: [pet]
   description: |
     케어 항목을 완료한 기록(언제 무엇을 했는지)을 읽어 와 답한다. 아무것도 저장하지 않는다.
@@ -515,6 +523,7 @@ list_care_completions:
       description: 케어 항목 번호. list_care_items 결과의 careArtclSn만, 모르면 비운다
 
 list_checkups:
+  screen: SCR-HLT-002
   hooks: [pet]
   description: |
     병원 검진 기록(날짜·병원·검진유형)을 읽어 와 답한다. 아무것도 저장하지 않는다.
@@ -539,6 +548,7 @@ list_checkups:
       description: 한 페이지 기록 수
 
 list_inspection_values:
+  screen: SCR-HLT-011
   hooks: [pet]
   description: |
     혈액검사 수치(항목·결과값·단위·참고 범위)를 읽어 와 답한다. 아무것도 저장하지 않는다.
@@ -557,6 +567,7 @@ list_inspection_values:
       description: 검진 기록 번호. list_checkups 결과의 ckupRcdSn만, 모르면 비운다
 
 list_prescriptions:
+  screen: SCR-HLT-011
   hooks: [pet]
   description: |
     처방약(약 이름·복용 기간·하루 횟수·상태)을 읽어 와 답한다. 아무것도 저장하지 않는다.
@@ -575,6 +586,7 @@ list_prescriptions:
       description: 검진 기록 번호. list_checkups 결과의 ckupRcdSn만, 모르면 비운다
 
 list_repeat_preventions:
+  screen: SCR-HLT-011
   hooks: [pet]
   description: |
     반복 예방(예방접종·심장사상충·구충 등)과 다음 예정일을 읽어 와 답한다. 아무것도 저장하지 않는다.
@@ -590,6 +602,7 @@ list_repeat_preventions:
       description: 검진 기록 번호. list_checkups 결과의 ckupRcdSn만, 모르면 비운다
 
 list_observation_items:
+  screen: SCR-HLT-002
   hooks: [pet]
   description: |
     관찰 항목(혹·상처 등 지켜보는 부위, 처음·마지막 관찰과 크기 변화)을 읽어 와 답한다.
@@ -606,6 +619,7 @@ list_observation_items:
       description: 관찰 상태
 
 get_checkup:
+  screen: SCR-HLT-002
   hooks: [pet]
   description: |
     검진 기록 한 건(날짜·병원·검진유형·영수증 번호)을 읽어 와 답한다. 아무것도 저장하지 않는다.
@@ -621,6 +635,7 @@ get_checkup:
       description: 검진 기록 번호(list_checkups 결과의 ckupRcdSn)
 
 list_etc_inspections:
+  screen: SCR-HLT-011
   hooks: [pet]
   description: |
     검진 한 건의 기타 검사(혈액검사 밖의 검사 이름)를 읽어 와 답한다. 아무것도 저장하지 않는다.
@@ -636,6 +651,7 @@ list_etc_inspections:
       description: 검진 기록 번호(list_checkups 결과의 ckupRcdSn)
 
 list_observation_cycles:
+  screen: SCR-HLT-002
   hooks: [pet]
   description: |
     관찰 항목 하나의 회차별 기록(날짜·크기·변화)을 읽어 와 답한다. 아무것도 저장하지 않는다.
@@ -654,6 +670,7 @@ list_observation_cycles:
       description: 관찰 회차 번호. 앞 결과의 obsrvCyclSn만, 모르면 비운다
 
 list_expenses:
+  screen: SCR-MYP-031
   hooks: [pet_filter]
   description: |
     가계부 지출 목록(날짜·카테고리·반려동물·상세·사용처·금액·영수증 번호)을 읽어 와 답한다.
@@ -686,6 +703,7 @@ list_expenses:
       description: 한 페이지 기록 수
 
 get_expense_total:
+  screen: SCR-MYP-030
   hooks: [pet_filter]
   description: |
     조건에 맞는 지출 건수와 합계 금액을 읽어 와 답한다. 아무것도 저장하지 않는다.
@@ -710,6 +728,7 @@ get_expense_total:
       description: 지출 카테고리
 
 get_expense_statistics:
+  screen: SCR-MYP-030
   description: |
     한 달 지출 통계(합계·월 한도·지난달 합계·날짜별·카테고리별·반려동물별·큰 지출)를 읽어 와 답한다.
     아무것도 저장하지 않는다.
@@ -725,6 +744,7 @@ get_expense_statistics:
       description: 연월 YYYY-MM
 
 list_expense_months:
+  screen: SCR-MYP-030
   description: |
     지출 기록이 있는 연월 목록을 읽어 와 답한다. 아무것도 저장하지 않는다.
 
@@ -734,6 +754,7 @@ list_expense_months:
     말하는 법: 받은 연월만 쓴다.
 
 list_expense_pets:
+  screen: SCR-MYP-030
   description: |
     가계부에 지출이 걸린 반려동물 목록(연동 해제·삭제된 반려동물 포함)을 읽어 와 답한다.
     아무것도 저장하지 않는다.
@@ -744,6 +765,7 @@ list_expense_pets:
     말하는 법: 받은 이름만 쓴다.
 
 get_receipt:
+  screen: SCR-MYP-030
   description: |
     영수증 한 장의 분석 결과(병원·날짜·금액·항목·약)를 읽어 와 답한다. 아무것도 저장하지 않는다.
 

@@ -65,13 +65,13 @@ def _schema(name: str, model: type[BaseModel]) -> dict:
     return schema
 
 
-@lru_cache
-def _builtin_definition(name: str) -> dict:
-    # 고정 내용 : 매 요청 같은 정의라 system과 함께 캐시
+@lru_cache(maxsize=8)
+def _builtin_definition(name: str, table: tuple[rules.RouteRow, ...]) -> dict:
+    # 매핑표가 같으면 같은 정의 : system과 함께 캐시
     schema = _schema(name, BUILTIN_MODELS[name])
     props = schema.get("properties", {})
     if name == NAVIGATE:
-        props["screen_num"]["enum"] = [row.no for row in _routable_rows()]
+        props["screen_num"]["enum"] = [row.no for row in table if row.routable]
     if name == SEARCH_GUIDE:
         props["chunk_id"]["anyOf"] = [
             {"type": "string", "enum": [chunk.id for chunk in rules.guide_chunks()]},
@@ -83,11 +83,12 @@ def _builtin_definition(name: str) -> dict:
 def tool_definitions() -> tuple[dict, ...]:
     # 순서 고정(캐시 앞부분) : navigate, search_guide, Java 목록 도구, decline
     entries = _catalog.entries.values() if _catalog is not None else ()
+    table = rules.routing_table()
     return (
-        _builtin_definition(NAVIGATE),
-        _builtin_definition(SEARCH_GUIDE),
+        _builtin_definition(NAVIGATE, table),
+        _builtin_definition(SEARCH_GUIDE, table),
         *(entry.definition for entry in entries),
-        _builtin_definition(DECLINE),
+        _builtin_definition(DECLINE, table),
     )
 
 

@@ -129,6 +129,29 @@ def test_Java_주소가_비어_있으면_부르지_않고_502() -> None:
     assert res.status_code == 502
 
 
+@pytest.mark.parametrize("error", [httpx2.InvalidURL("Invalid port: 'abc'"), OverflowError("port")])
+def test_Java_주소_꼴이_틀리면_502(error: Exception) -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        raise error
+
+    res = _client(handler).get("/ai/me")
+
+    assert res.status_code == 502
+    assert res.json()["code"] == "EXTERNAL_API_ERROR"
+
+
+def test_포트가_문자인_실제_주소면_502() -> None:
+    app = _client(lambda r: httpx2.Response(200)).app
+    settings = Settings(_env_file=None, backend_base_url="http://localhost:abc")
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_backend_client] = lambda: httpx2.AsyncClient()
+
+    res = TestClient(app).get("/ai/me")
+
+    assert res.status_code == 502
+    assert res.json()["code"] == "EXTERNAL_API_ERROR"
+
+
 # FN-ADM-001-01 : 관리자 확인
 def _authority(code: object) -> Callable[[httpx2.Request], httpx2.Response]:
     return lambda r: httpx2.Response(200, json={"data": {"mbrSn": 1, "mbrAuthrtCd": code}})
@@ -166,3 +189,94 @@ def test_require_member는_권한과_관계없이_통과() -> None:
     res = _client(_authority("USRC0001")).get("/ai/me")
 
     assert res.status_code == 200
+
+
+# 인증 확인 502 이유 로그
+AUTH_LOGGER = "app.core.auth"
+COOKIE = "access_token=secret-token-value"
+
+
+def _warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [r.getMessage() for r in caplog.records if r.name == AUTH_LOGGER]
+
+
+def _raise(error: Exception) -> Callable[[httpx2.Request], httpx2.Response]:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        raise error
+
+    return handler
+
+
+@pytest.mark.parametrize(
+    ("handler", "reason"),
+    [
+        (_raise(httpx2.ConnectError("down")), "연결 실패 ConnectError"),
+        (_raise(httpx2.ReadTimeout("slow")), "제한 시간 초과 ReadTimeout"),
+        (_raise(httpx2.RemoteProtocolError("bad")), "통신 실패 RemoteProtocolError"),
+        (_raise(httpx2.InvalidURL("Invalid port: 'abc'")), "주소 꼴 틀림 InvalidURL"),
+        (_raise(OverflowError("port")), "주소 꼴 틀림 OverflowError"),
+        (lambda r: httpx2.Response(500, json={"code": "INTERNAL_ERROR"}), "Java 500"),
+        (lambda r: httpx2.Response(200, content=b"not json"), "응답 형식 틀림"),
+        (lambda r: httpx2.Response(200, json={"data": {}}), "응답 형식 틀림"),
+    ],
+)
+def test_502로_바꾸면_이유를_한_줄_남기고_주소와_쿠키는_남기지_않는다(
+    handler: Callable[[httpx2.Request], httpx2.Response],
+    reason: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level("WARNING", logger=AUTH_LOGGER)
+
+    res = _client(handler).get("/ai/me", headers={"Cookie": COOKIE})
+
+    assert res.status_code == 502
+    assert res.json()["code"] == "EXTERNAL_API_ERROR"
+    assert _warnings(caplog) == [f"인증 확인 실패({reason}), 502"]
+    assert "backend.test" not in caplog.text
+    assert "secret-token-value" not in caplog.text
+
+
+def test_주소가_비면_주소_비어_있음을_남긴다(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level("WARNING", logger=AUTH_LOGGER)
+
+    res = _client(lambda r: httpx2.Response(200), base_url="").get("/ai/me")
+
+    assert res.status_code == 502
+    assert _warnings(caplog) == ["인증 확인 실패(주소 비어 있음), 502"]
+
+
+def test_포트가_문자인_실제_주소면_주소_값_없이_이유를_남긴다(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level("WARNING", logger=AUTH_LOGGER)
+    app = _client(lambda r: httpx2.Response(200)).app
+    settings = Settings(_env_file=None, backend_base_url="http://localhost:abc")
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_backend_client] = lambda: httpx2.AsyncClient()
+
+    res = TestClient(app).get("/ai/me")
+
+    assert res.status_code == 502
+    assert _warnings(caplog) == ["인증 확인 실패(주소 꼴 틀림 InvalidURL), 502"]
+    assert "localhost:abc" not in caplog.text
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_Java_401_403을_그대로_넘길_때는_로그를_남기지_않는다(
+    status: int, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level("WARNING", logger=AUTH_LOGGER)
+
+    res = _client(lambda r: httpx2.Response(status, content=EXPIRED_BODY)).get("/ai/me")
+
+    assert res.status_code == status
+    assert _warnings(caplog) == []
+
+
+def test_통과하면_로그를_남기지_않는다(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level("WARNING", logger=AUTH_LOGGER)
+
+    res = _client(lambda r: httpx2.Response(200, json={"data": {"mbrSn": 7}})).get("/ai/me")
+
+    assert res.status_code == 200
+    assert _warnings(caplog) == []

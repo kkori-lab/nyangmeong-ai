@@ -1,9 +1,10 @@
+import logging
 from typing import Annotated
 
 import httpx2
 from fastapi import Depends, Request
 
-from app.core.backend import BackendError, external_error, get_backend_client
+from app.core.backend import BackendError, cause_reason, external_error, get_backend_client
 from app.core.config import Settings, get_settings
 from app.core.response import AppError
 
@@ -12,6 +13,8 @@ REQUESTED_WITH = "XMLHttpRequest"
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 # FN-ADM-001-01 : 관리자 권한 코드
 ADMIN_AUTHORITY = "USRC0005"
+
+logger = logging.getLogger(__name__)
 
 
 def require_requested_with(request: Request) -> None:
@@ -49,21 +52,28 @@ async def _check(
 ) -> tuple[int, str | None]:
     base_url = settings.backend_base_url.rstrip("/")
     if not base_url:
-        raise external_error()
+        raise _fail("주소 비어 있음")
     cookie = request.headers.get("cookie")
     headers = {"Cookie": cookie} if cookie else {}
     try:
         res = await client.get(f"{base_url}{AUTH_CHECK_PATH}", headers=headers)
-    except httpx2.HTTPError:
-        raise external_error() from None
+    except (httpx2.HTTPError, httpx2.InvalidURL, OverflowError) as error:
+        # InvalidURL·OverflowError : 주소 꼴이 틀림(backend._send와 같게 502)
+        raise _fail(cause_reason(error) or type(error).__name__) from None
 
     if res.status_code in (401, 403):
         raise BackendError.of(res)
     if res.status_code != 200:
-        raise external_error()
+        raise _fail(f"Java {res.status_code}")
     try:
         data = res.json()["data"]
         authority = data.get("mbrAuthrtCd")
         return int(data["mbrSn"]), authority if isinstance(authority, str) else None
     except (ValueError, KeyError, TypeError, AttributeError):
-        raise external_error() from None
+        raise _fail("응답 형식 틀림") from None
+
+
+def _fail(reason: str) -> AppError:
+    # 502 이유 한 줄 : 주소 값·쿠키·응답 본문은 남기지 않는다
+    logger.warning("인증 확인 실패(%s), 502", reason)
+    return external_error()

@@ -1,3 +1,5 @@
+import logging
+import re
 from http.cookiejar import CookieJar, DefaultCookiePolicy
 from typing import Any
 
@@ -6,6 +8,8 @@ from fastapi import Request
 
 from app.core.config import Settings
 from app.core.response import AppError
+
+logger = logging.getLogger(__name__)
 
 # Java 내부 API 제한 시간(초)
 TIMEOUT_SEC = 3.0
@@ -33,6 +37,32 @@ class BackendError(Exception):
         )
 
 
+class _FailureCause(Exception):
+    """502로 바꾼 Java 호출 실패의 원인(로그용, 응답에는 나가지 않음)"""
+
+
+def failure_reason(error: Exception) -> str:
+    """Java 호출 실패 이유 한 줄 : 제한 시간·연결·상태 코드·주소·본문 구분"""
+    if isinstance(error, BackendError):
+        return f"Java {error.status_code}"
+    return cause_reason(error.__cause__) or type(error).__name__
+
+
+def cause_reason(cause: BaseException | None) -> str | None:
+    """502로 바꾼 원인 예외 -> 이유 한 줄 (모르는 원인이면 None)"""
+    if isinstance(cause, _FailureCause):
+        return str(cause)
+    if isinstance(cause, httpx2.TimeoutException):
+        return f"제한 시간 초과 {type(cause).__name__}"
+    if isinstance(cause, httpx2.ConnectError):
+        return f"연결 실패 {type(cause).__name__}"
+    if isinstance(cause, httpx2.HTTPError):
+        return f"통신 실패 {type(cause).__name__}"
+    if isinstance(cause, (httpx2.InvalidURL, OverflowError)):
+        return f"주소 꼴 틀림 {type(cause).__name__}"
+    return None
+
+
 def create_backend_client() -> httpx2.AsyncClient:
     # 요청끼리 공유하므로 Java의 Set-Cookie를 저장하지 않는다 : 다른 회원 요청에 섞임 방지
     jar = CookieJar(policy=DefaultCookiePolicy(allowed_domains=[]))
@@ -48,16 +78,34 @@ async def _send(
 ) -> httpx2.Response:
     base_url = settings.backend_base_url.rstrip("/")
     if not base_url:
-        raise external_error()
+        cause = _FailureCause("주소 비어 있음")
+        raise _fail(method, path, cause) from cause
     try:
         res = await client.request(method, f"{base_url}{path}", **kwargs)
-    except httpx2.HTTPError:
-        raise external_error() from None
+    except httpx2.HTTPError as error:
+        raise _fail(method, path, error) from error
+    except (httpx2.InvalidURL, OverflowError) as error:
+        # 주소 꼴이 틀림(포트 문자·괄호 깨짐, Linux 포트 범위 밖) : 주소 값은 로그에 넣지 않는다
+        cause = _FailureCause(f"주소 꼴 틀림 {type(error).__name__}")
+        raise _fail(method, path, cause) from cause
     if 400 <= res.status_code < 500:
         raise BackendError.of(res)
     if not res.is_success:
-        raise external_error()
+        cause = _FailureCause(f"Java {res.status_code}")
+        raise _fail(method, path, cause) from cause
     return res
+
+
+def _fail(method: str, path: str, cause: BaseException) -> AppError:
+    """502로 바꾸며 이유 한 줄을 남긴다 : 주소 값·쿠키·본문·query·경로 숫자는 남기지 않는다"""
+    reason = cause_reason(cause) or type(cause).__name__
+    logger.warning("Java 호출 실패(%s), 502 %s %s", reason, method, _masked(path))
+    return external_error()
+
+
+def _masked(path: str) -> str:
+    """경로의 숫자 구간(회원·반려동물 번호 등) -> {n}, query는 뺀다"""
+    return re.sub(r"/\d+(?=/|$)", "/{n}", path.split("?", 1)[0])
 
 
 async def fetch_backend_bytes(
@@ -66,7 +114,8 @@ async def fetch_backend_bytes(
     """Java 내부 API에서 파일 내려받기 (4xx 그대로 전달, 그 외 실패·빈 본문 502)"""
     res = await _send(client, settings, "GET", path, **kwargs)
     if not res.content:
-        raise external_error()
+        cause = _FailureCause("빈 본문")
+        raise _fail("GET", path, cause) from cause
     return res.content
 
 
@@ -80,7 +129,8 @@ async def call_backend(
     try:
         return res.json().get("data")
     except (ValueError, AttributeError):
-        raise external_error() from None
+        cause = _FailureCause("응답 JSON 아님")
+        raise _fail(method, path, cause) from cause
 
 
 def external_error() -> AppError:
