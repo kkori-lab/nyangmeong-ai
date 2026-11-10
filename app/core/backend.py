@@ -1,3 +1,5 @@
+import logging
+import re
 from http.cookiejar import CookieJar, DefaultCookiePolicy
 from typing import Any
 
@@ -6,6 +8,8 @@ from fastapi import Request
 
 from app.core.config import Settings
 from app.core.response import AppError
+
+logger = logging.getLogger(__name__)
 
 # Java 내부 API 제한 시간(초)
 TIMEOUT_SEC = 3.0
@@ -74,19 +78,34 @@ async def _send(
 ) -> httpx2.Response:
     base_url = settings.backend_base_url.rstrip("/")
     if not base_url:
-        raise external_error() from _FailureCause("주소 비어 있음")
+        cause = _FailureCause("주소 비어 있음")
+        raise _fail(method, path, cause) from cause
     try:
         res = await client.request(method, f"{base_url}{path}", **kwargs)
     except httpx2.HTTPError as error:
-        raise external_error() from error
+        raise _fail(method, path, error) from error
     except (httpx2.InvalidURL, OverflowError) as error:
         # 주소 꼴이 틀림(포트 문자·괄호 깨짐, Linux 포트 범위 밖) : 주소 값은 로그에 넣지 않는다
-        raise external_error() from _FailureCause(f"주소 꼴 틀림 {type(error).__name__}")
+        cause = _FailureCause(f"주소 꼴 틀림 {type(error).__name__}")
+        raise _fail(method, path, cause) from cause
     if 400 <= res.status_code < 500:
         raise BackendError.of(res)
     if not res.is_success:
-        raise external_error() from _FailureCause(f"Java {res.status_code}")
+        cause = _FailureCause(f"Java {res.status_code}")
+        raise _fail(method, path, cause) from cause
     return res
+
+
+def _fail(method: str, path: str, cause: BaseException) -> AppError:
+    """502로 바꾸며 이유 한 줄을 남긴다 : 주소 값·쿠키·본문·query·경로 숫자는 남기지 않는다"""
+    reason = cause_reason(cause) or type(cause).__name__
+    logger.warning("Java 호출 실패(%s), 502 %s %s", reason, method, _masked(path))
+    return external_error()
+
+
+def _masked(path: str) -> str:
+    """경로의 숫자 구간(회원·반려동물 번호 등) -> {n}, query는 뺀다"""
+    return re.sub(r"/\d+(?=/|$)", "/{n}", path.split("?", 1)[0])
 
 
 async def fetch_backend_bytes(
@@ -95,7 +114,8 @@ async def fetch_backend_bytes(
     """Java 내부 API에서 파일 내려받기 (4xx 그대로 전달, 그 외 실패·빈 본문 502)"""
     res = await _send(client, settings, "GET", path, **kwargs)
     if not res.content:
-        raise external_error()
+        cause = _FailureCause("빈 본문")
+        raise _fail("GET", path, cause) from cause
     return res.content
 
 
@@ -109,7 +129,8 @@ async def call_backend(
     try:
         return res.json().get("data")
     except (ValueError, AttributeError):
-        raise external_error() from _FailureCause("응답 JSON 아님")
+        cause = _FailureCause("응답 JSON 아님")
+        raise _fail(method, path, cause) from cause
 
 
 def external_error() -> AppError:

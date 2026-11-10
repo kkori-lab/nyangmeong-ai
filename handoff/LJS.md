@@ -1,10 +1,9 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-004 대화창 · 인증 확인 502 이유 로그 — 끝 (2026-11-10). `auth._check`가 502로 바꿀 때 `인증 확인 실패(<이유>), 502` 한 줄(주소·쿠키·본문 없음), 이유 문구는 `backend.cause_reason`과 공유. 검증 1회차 통과, 사람 확인
+SCR-AIM-004 대화창 · 요청 중 Java 호출 502 이유 로그 — 끝 (2026-11-10). `core/backend`가 Java 호출 실패를 502로 바꾸는 모든 곳에서 `Java 호출 실패(<이유>), 502 <메서드> <경로>` 한 줄(경로 숫자 `{n}`, query·주소·쿠키·본문 없음), 빈 본문 원인 추가. 저장소가 응답 모양을 보고 직접 던지는 502·AI 벤더 502는 안 찍음. 검증 1회차 통과, 사람 확인
 
 ## 다음에 할 것
-- 요청 중 Java 호출 502 이유 로그 (LJS, 필요하면): `call_backend`·`fetch_backend_bytes`의 `_FailureCause`를 로그로 찍는 곳은 기동 때 도구 목록(`catalog`)뿐이라, 대화 저장 등 요청 중 502는 이유가 안 남음. 서비스마다 잡는 곳이 달라 따로 정함. 원인 미확정인 배포 서버 오류 조사 때 함께 (2026-11-10)
 - 관리자 프론트 라우팅 매핑표 연결 (관리자 프론트): `features/adminAiRoute/api.js`가 아직 가짜 응답이라 관리자 화면에서 고쳐도 저장 안 됨. Java `/api/admin/ai/routes`(GET·POST·PATCH·DELETE)는 있음. 연결되면 대화창 이동에 10초 안에 반영 (2026-11-10)
 - 백엔드 기준 데이터 (LJS 백엔드): `db/` base data의 `AI_ROUT_MPNG` "플레이스 (키워드에 따라 탭)" 행 지시어를 "플레이스"만, `SCRN_PARAM_CN`은 NULL로(미용·용품·호텔·동반은 탭 행에만). AI 라우팅 매핑표 DB 기준 전환과 함께 (2026-11-10 결정)
 - 로그 파일 배포 전 사람 할 일 (LJS, 다음 main 배포 전): 배포마다 서버 `.env.local`이 secret `ENV_FILE`로 통째로 덮어써지므로, 서버의 지금 `.env.local`·`.env`에 있는 키(`BACKEND_BASE_URL`, AI 키 3개, `CHAT_TOOL_*`, 타임아웃 등)를 빠짐없이 `ENV_FILE`에 옮기고 `LOG_DIR`(Java `app.log.dir`과 같은 폴더)를 추가. 서버에 `deploy` 그룹·SELinux 확인, 배포 사용자와 서비스 사용자가 다르면 600인 `.env.local`을 서비스가 못 읽으니 확인, 워크플로우 변경을 backend-90에 알림. 배포 뒤 폴더 `drwxrws---`·파일 `-rw-rw----`(그룹 deploy)와 요청 줄 확인. 필요하면 배포 전 `.env.local.bak` 백업 단계 추가 검토
