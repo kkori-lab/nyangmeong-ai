@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 
-from app.chat.schemas import Intent, IntentKind, MoveType
+from app.chat.schemas import Intent, IntentKind, MoveType, RouteItem
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 
@@ -43,22 +43,54 @@ def _load(name: str) -> dict:
         return yaml.safe_load(f)
 
 
-@lru_cache
-def routing_table() -> tuple[RouteRow, ...]:
-    # FN-AIM-004-09 : 매핑표는 data/routing.yaml(부록 A)이 기준
-    rows = _load("routing.yaml")["rows"]
+# AIMG09 이동 방식 : 이 둘 밖(라우팅 대상 아님·제외·보류·모르는 코드)은 이동 안 함
+MOVE_TYPES = {"AIMC0032": MoveType.PAGE, "AIMC0033": MoveType.MODAL}
+# 부록 A의 "키워드에 따라 탭" 같은 자리표시 파라미터
+PARAM_PLACEHOLDER = "…"
+
+_routes: tuple[RouteRow, ...] | None = None
+
+
+def _route_param(value: str | None) -> str | None:
+    # Java는 "cat=hospital", React에 주는 꼴은 "?cat=hospital"
+    value = (value or "").strip()
+    if not value or PARAM_PLACEHOLDER in value:
+        return None
+    return value if value.startswith("?") else f"?{value}"
+
+
+def route_rows(items: list[RouteItem]) -> tuple[RouteRow, ...]:
+    # FN-AIM-004-01 : 같은 길이 키워드는 위쪽 행 우선이라 prrtSeq 순서 유지
+    ordered = sorted(items, key=lambda item: (item.prrt_seq, item.ai_rout_mpng_sn))
     return tuple(
         RouteRow(
-            no=row["num"],
-            name=row["name"],
-            scr_id=row["scr_id"],
-            param=row.get("param"),
-            move_type=MoveType(row.get("move_type", MoveType.PAGE)),
-            routable=row.get("routable", True),
-            keywords=tuple(row.get("keywords", ())),
+            no=item.ai_rout_mpng_sn,
+            name=item.trgt_scrn_nm,
+            scr_id=item.scrn_id or "",
+            param=_route_param(item.scrn_param_cn),
+            move_type=MOVE_TYPES.get(item.mvmn_mthd_cd, MoveType.PAGE),
+            routable=item.mvmn_mthd_cd in MOVE_TYPES and bool(item.scrn_id),
+            keywords=tuple(k.strip() for k in item.inst_kwrds if k.strip()),
         )
-        for row in rows
+        for item in ordered
     )
+
+
+@lru_cache
+def snapshot_routes() -> tuple[RouteRow, ...]:
+    # Java에 닿지 못할 때의 매핑표 : data/routes.snapshot.json(Java 응답 모양)
+    raw = json.loads((DATA_DIR / "routes.snapshot.json").read_text(encoding="utf-8"))
+    return route_rows([RouteItem.model_validate(item) for item in raw])
+
+
+def use_routes(rows: tuple[RouteRow, ...] | None) -> None:
+    global _routes
+    _routes = rows
+
+
+def routing_table() -> tuple[RouteRow, ...]:
+    # FN-AIM-004-09 : 매핑표는 Java(관리자 SCR-ADM-080)에서 받은 표, 받기 전·실패면 스냅샷
+    return _routes if _routes is not None else snapshot_routes()
 
 
 @lru_cache
@@ -147,11 +179,14 @@ ENTRY_LABELS = {"pc": "PC", "mobile": "모바일", "other": "그 밖"}
 class GuideChunk:
     """[안내서 청크]
     - task 하나 -> 답변 근거 글(text)과 M1 검색어
-    - num은 routing.yaml 행 번호, 공통 task는 None"""
+    - num은 안내서 화면 번호(스냅샷 매핑표 번호와 같음), 공통 task는 None
+    - 매핑표와는 scr_id·param으로 이음 : 관리자가 행을 바꿔도 번호와 무관"""
 
     id: str
     num: int | None
     screen: str | None
+    scr_id: str | None
+    param: str | None
     title: str
     text: str
     task_terms: tuple[str, ...]
@@ -175,11 +210,14 @@ def _guide_text(chunk_id: str, task: dict, screen: dict | None) -> str:
 
 
 def _guide_chunk(task: dict, screen: dict | None, keywords: dict) -> GuideChunk:
-    screen_terms = (screen["name"], *keywords.get(screen["num"], ())) if screen else ()
+    key = (screen["scr_id"], screen.get("param")) if screen else None
+    screen_terms = (screen["name"], *keywords.get(key, ())) if screen else ()
     return GuideChunk(
         id=task["id"],
         num=screen["num"] if screen else None,
         screen=screen["name"] if screen else None,
+        scr_id=screen["scr_id"] if screen else None,
+        param=screen.get("param") if screen else None,
         title=task["task"],
         text=_guide_text(task["id"], task, screen),
         task_terms=(task["task"], *(task.get("faq_keywords") or ())),
@@ -187,10 +225,18 @@ def _guide_chunk(task: dict, screen: dict | None, keywords: dict) -> GuideChunk:
     )
 
 
-@lru_cache
 def guide_chunks() -> tuple[GuideChunk, ...]:
+    return _guide_chunks(routing_table())
+
+
+@lru_cache(maxsize=2)
+def _guide_chunks(table: tuple[RouteRow, ...]) -> tuple[GuideChunk, ...]:
     # FN-AIM-002-02 : 사용법 안내서(data/guide/*.yaml). 순서 = 공통 task, 화면 num 순
-    keywords = {row.no: row.keywords for row in routing_table()}
+    # 화면 검색어 = 같은 화면(scr_id·param) 행들의 지시어
+    keywords: dict[tuple[str, str | None], tuple[str, ...]] = {}
+    for row in table:
+        key = (row.scr_id, row.param)
+        keywords[key] = (*keywords.get(key, ()), *row.keywords)
     common: list[dict] = []
     screens: list[dict] = []
     for path in sorted(GUIDE_DIR.glob("*.yaml")):
@@ -212,11 +258,15 @@ def _guide_key(text: str) -> str:
     return _compact(text).lower()
 
 
-@lru_cache
 def _guide_index() -> dict[str, tuple[tuple[int, float], ...]]:
+    return _guide_index_of(guide_chunks())
+
+
+@lru_cache(maxsize=2)
+def _guide_index_of(chunks: tuple[GuideChunk, ...]) -> dict[str, tuple[tuple[int, float], ...]]:
     # 검색어 -> (청크 순번, 가중치). 2글자 미만 검색어 제외
     index: dict[str, list[tuple[int, float]]] = {}
-    for pos, chunk in enumerate(guide_chunks()):
+    for pos, chunk in enumerate(chunks):
         for terms, weight in (
             (chunk.task_terms, TASK_TERM_WEIGHT),
             (chunk.screen_terms, SCREEN_TERM_WEIGHT),

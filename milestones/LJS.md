@@ -323,6 +323,13 @@
 - 기다리는 것: 없음 (서버 Java `permit-all-paths`에 `/internal/ai/tools` 추가는 2026-11-09 사람이 함)
 - 완료 조건: `/start` 기획의 완료 조건을 따른다.
 
+## SCR-AIM-004 대화창 · 라우팅 매핑표 DB 기준 (`routing.yaml` → Java `GET /internal/ai/routes`, 추가 요청) — 끝
+- 기능: FN-AIM-004-09 매핑표를 문서 사본(`data/routing.yaml`, 명세 v0.9 부록 A) 대신 관리자가 고치는 DB(`AI_ROUT_MPNG`, SCR-ADM-080)에서 받는다. 관리자 수정이 대화창 룰 라우팅·navigate·사용법 바로가기에 반영되게(2026-11-10 사람 결정). 기능 ID 추가 없음(FN-AIM-004-09·FN-ADM-080-04는 앞 `끝` 절에서 센 기능)
+- 기다리는 것: 없음 (Java `GET /internal/ai/routes`는 백엔드 `c0bf1f2` develop 병합)
+- 완료 조건: `/start` 기획의 완료 조건을 따른다.
+- 결과 (2026-11-10): 검증 2회차 통과(1회차는 화면 조건이 확인 불가라 고침), 로컬 Java·관리자 PATCH로 사람 확인
+- 연결 남음: 없음 (관리자 프론트 `adminAiRoute` 가짜 응답 연결은 관리자 프론트 몫, 핸드오프 "다음에 할 것")
+
 ## SCR-MAN-001 메인페이지 · AI 건강분석 리포트 Java 연결 (가짜 → 실제 Java, 추가 요청) — 끝
 - 기능: FN-MAN-006 리포트 분석 서버를 Java 내부 API(`GET /internal/ai/pets/{petSn}/health-report-input`·`PUT /internal/ai/pets/{petSn}/health-report`, 백엔드 `34d7638` develop 병합)에 실제로 연결해 확인한다. 기능 ID 추가 없음(위 `끝` 절에서 센 기능)
 - 기다리는 것: 없음

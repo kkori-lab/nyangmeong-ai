@@ -5,7 +5,8 @@ import httpx2
 import pytest
 from fastapi.testclient import TestClient
 
-from app.chat import clients, tools
+from app.chat import clients, service, tools
+from app.chat.rules import DATA_DIR
 from app.core.backend import get_backend_client
 from app.core.config import get_settings
 from app.main import create_app
@@ -20,6 +21,7 @@ from tests.chat.fakes import (
 AJAX = {"X-Requested-With": "XMLHttpRequest"}
 CONVERSATIONS = "/internal/ai/conversations"
 REGISTER_CONTEXT = "/internal/ai/register-context"
+ROUTES = "/internal/ai/routes"
 ROLE_USER = "AIMC0024"
 
 
@@ -62,6 +64,13 @@ class FakeJava:
         ]
         # register-context 실패 흉내 : 응답 상태 코드, 0이면 연결 실패
         self.context_status: int | None = None
+        # GET /internal/ai/routes 응답(기본 = 스냅샷), 실패 흉내는 routes_status(0이면 연결 실패)
+        self.routes: list[dict] = json.loads(
+            (DATA_DIR / "routes.snapshot.json").read_text(encoding="utf-8")
+        )
+        self.routes_status: int | None = None
+        # 매핑표 요청은 requests와 따로 기록 : 대화 API 요청 순서 검사에 섞이지 않게
+        self.route_requests: list[httpx2.Request] = []
         # 제목 수정(PATCH) 실패 흉내 : 응답 상태 코드
         self.title_status: int | None = None
 
@@ -90,10 +99,22 @@ class FakeJava:
         }
         return room_sn
 
+    def _routes(self, request: httpx2.Request) -> httpx2.Response:
+        self.route_requests.append(request)
+        if member_of(request) is None:
+            return httpx2.Response(401, json=UNAUTHORIZED)
+        if self.routes_status == 0:
+            raise httpx2.ConnectError("down")
+        if self.routes_status is not None:
+            return httpx2.Response(self.routes_status, json={"status": "error"})
+        return _ok(self.routes)
+
     def __call__(self, request: httpx2.Request) -> httpx2.Response:
         path = request.url.path
         if path == "/internal/auth/check":
             return fake_auth_check(request)
+        if path == ROUTES:
+            return self._routes(request)
         self.requests.append(request)
         mbr_sn = member_of(request)
         if mbr_sn is None:
@@ -152,6 +173,14 @@ def _ok(data, status: int = 200) -> httpx2.Response:
     if data is not None:
         body["data"] = data
     return httpx2.Response(status, json=body)
+
+
+@pytest.fixture(autouse=True)
+def route_table():
+    # 매핑표 캐시는 프로세스 공용 : 테스트마다 비워 스냅샷부터
+    service.route_cache.reset()
+    yield
+    service.route_cache.reset()
 
 
 @pytest.fixture(autouse=True)
