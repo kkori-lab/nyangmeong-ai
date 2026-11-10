@@ -150,6 +150,8 @@ class ToolPrompt(BaseModel):
     params: dict[str, PromptParam] = {}
     # Java 칸 -> 늘 넣는 값(지출 등록의 입력 방법 등). 불러올 때 Java 규칙으로 검사
     fixed: dict[str, str | int | bool] = {}
+    # READ : 답변의 연관 바로가기 화면 ID(FN-AIM-002-04, 매핑표의 라우팅 가능 행으로 찾음)
+    screen: str | None = None
 
 
 # hook(설계 4-4절) : 이름 -> 만드는 Java 칸. 반려동물·같은 이름 경고는 지금 service.py 흐름이 처리
@@ -210,6 +212,7 @@ class CatalogEntry:
     bounds: dict[str, tuple[int | None, int | None]] = field(default_factory=dict)
     target: str | None = None
     fixed: dict[str, object] = field(default_factory=dict)
+    screen: str | None = None
 
 
 @dataclass(frozen=True)
@@ -364,6 +367,7 @@ def _entry(tool: CatalogTool, prompt: ToolPrompt) -> CatalogEntry:
         bounds=bounds,
         target=prompt.target,
         fixed=dict(prompt.fixed),
+        screen=prompt.screen,
     )
 
 
