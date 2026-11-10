@@ -332,7 +332,11 @@ def _tool_judged(
         if decision.text is not None:
             # FN-AIM-002-03 : 인사·잡담에 대한 바로 답은 고지 없음(추가 요청 2026-11-09)
             notice = not rules.is_small_talk(text)
-            return Judged(Intent(kind=IntentKind.SEARCH), stream=decision.text, notice=notice)
+            # FN-AIM-002-04 : 질문 글이 룰 키워드에 걸리면 그 행을 바로가기로, 인사·잡담 제외
+            shortcut = _keyword_shortcut(text) if notice else None
+            return Judged(
+                Intent(kind=IntentKind.SEARCH), shortcut, stream=decision.text, notice=notice
+            )
         return Judged(Intent(kind=IntentKind.FALLBACK))
     if call.args is None:
         logger.info("도구 인자 거부: %s", call.name)
@@ -369,7 +373,11 @@ def _tool_judged(
             text, context, agent, decision, entry, max_tokens, today, read, cards, domains
         )
         return Judged(
-            Intent(kind=IntentKind.SEARCH), stream=stream, cards=cards, read_domains=domains
+            Intent(kind=IntentKind.SEARCH),
+            _read_shortcut(entry, text),
+            stream=stream,
+            cards=cards,
+            read_domains=domains,
         )
     ids = tuple(tools.guide_ids(call, text))
     if not ids:
@@ -575,6 +583,17 @@ async def _read_answer(
 def guide_text(ids: tuple[str, ...]) -> str | None:
     chunks = [chunk for chunk in map(rules.find_guide, ids) if chunk is not None]
     return "\n\n".join(chunk.text for chunk in chunks) or None
+
+
+def _keyword_shortcut(text: str) -> Intent | None:
+    row = rules.match_route(text)
+    return None if row is None else row.to_intent()
+
+
+def _read_shortcut(entry: catalog.CatalogEntry, text: str) -> Intent | None:
+    # FN-AIM-002-04 : 첫 READ 도구의 화면, 매핑표에 그 행이 없으면 질문 글 룰 키워드
+    row = rules.find_route(entry.screen, None) if entry.screen else None
+    return row.to_intent() if row is not None else _keyword_shortcut(text)
 
 
 def _shortcut_of(classified: Classified) -> Intent | None:
@@ -846,6 +865,8 @@ async def _search_answer(
         text += DISCLAIMER
     message = await _save(repo, turn.room_sn, text, complete)
     action = cards[0] if cards else None
+    # FN-AIM-002-04 : 확인 카드가 같이 나가는 턴은 바로가기 없음
+    shortcut = None if action is not None else shortcut
     emit(("done", AnswerDone(message=message, shortcut=shortcut, action=action)))
     return body if complete else None
 
