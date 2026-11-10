@@ -1,9 +1,11 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-004 대화창 · 음수량·식사량 READ 답변 품질 — 끝 (2026-11-10). 건강 READ 도구 설명에 단위(체중 kg·식사량 g·음수량 ml·산책 분·크레아티닌 `unitNm`)와 반올림(체중만 소수 한 자리), `TOOL_RULES`에 안내서 번호 금지·서버 되물음 뒤 사과 금지. 검증 2회차 통과(1회차는 식사량 소수 노출). 글 되물음 뒤 사과는 실제 장면을 못 만들어 규칙 테스트로만 확인
+SCR-AIM-004 대화창 · 도구 목록 받기 제한 시간·다시 시도·실패 이유 로그 — 끝 (2026-11-10). `/internal/ai/tools`만 제한 시간 20초, 기동 실패면 30초 간격 10번 다시 받기(기동은 기다리지 않음, 종료 때 취소), 실패 로그에 이유(제한 시간·연결·상태 코드·주소·JSON·응답 모양). 검증 1회차 통과, 로컬 Java를 늦게 켜 다시 받기 성공(29개)을 사람 확인
 
 ## 다음에 할 것
+- `list_care_items`가 Java 목록 기준으로 안 실림 (LJS): 로컬 Java 목록에 `mainExpsrYn` 칸이 없어 `도구 목록: list_care_items Java에 없는 칸 main_expsr_yn->mainExpsrYn, 싣지 않음`(스냅샷으로 뜰 때만 실림). `data/tool_prompts.yaml`을 Java에 맞출지 Java에 칸을 되살릴지 백엔드와 확인. 스냅샷 `structureVersion`도 Java와 달라 스냅샷 갱신 후보 (2026-11-10)
+- `BACKEND_BASE_URL`이 틀린 꼴(포트 65535 초과 등)이면 기동이 멈춤 (LJS, 사람 결정 대기): `_send`가 httpx 오류만 잡아 `OverflowError`가 올라옴. 이번 변경 전부터 같음. 스냅샷으로 뜨게 할지 정하면 추가 요청으로 (2026-11-10)
 - 관리자 프론트 라우팅 매핑표 연결 (관리자 프론트): `features/adminAiRoute/api.js`가 아직 가짜 응답이라 관리자 화면에서 고쳐도 저장 안 됨. Java `/api/admin/ai/routes`(GET·POST·PATCH·DELETE)는 있음. 연결되면 대화창 이동에 10초 안에 반영 (2026-11-10)
 - 백엔드 기준 데이터 (LJS 백엔드): `db/` base data의 `AI_ROUT_MPNG` "플레이스 (키워드에 따라 탭)" 행 지시어를 "플레이스"만, `SCRN_PARAM_CN`은 NULL로(미용·용품·호텔·동반은 탭 행에만). AI 라우팅 매핑표 DB 기준 전환과 함께 (2026-11-10 결정)
 - 로그 파일 배포 전 사람 할 일 (LJS, 다음 main 배포 전): 배포마다 서버 `.env.local`이 secret `ENV_FILE`로 통째로 덮어써지므로, 서버의 지금 `.env.local`·`.env`에 있는 키(`BACKEND_BASE_URL`, AI 키 3개, `CHAT_TOOL_*`, 타임아웃 등)를 빠짐없이 `ENV_FILE`에 옮기고 `LOG_DIR`(Java `app.log.dir`과 같은 폴더)를 추가. 서버에 `deploy` 그룹·SELinux 확인, 배포 사용자와 서비스 사용자가 다르면 600인 `.env.local`을 서비스가 못 읽으니 확인, 워크플로우 변경을 backend-90에 알림. 배포 뒤 폴더 `drwxrws---`·파일 `-rw-rw----`(그룹 deploy)와 요청 줄 확인. 필요하면 배포 전 `.env.local.bak` 백업 단계 추가 검토

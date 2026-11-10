@@ -33,6 +33,26 @@ class BackendError(Exception):
         )
 
 
+class _FailureCause(Exception):
+    """502로 바꾼 Java 호출 실패의 원인(로그용, 응답에는 나가지 않음)"""
+
+
+def failure_reason(error: Exception) -> str:
+    """Java 호출 실패 이유 한 줄 : 제한 시간·연결·상태 코드·주소·본문 구분"""
+    if isinstance(error, BackendError):
+        return f"Java {error.status_code}"
+    cause = error.__cause__
+    if isinstance(cause, _FailureCause):
+        return str(cause)
+    if isinstance(cause, httpx2.TimeoutException):
+        return f"제한 시간 초과 {type(cause).__name__}"
+    if isinstance(cause, httpx2.ConnectError):
+        return f"연결 실패 {type(cause).__name__}"
+    if isinstance(cause, httpx2.HTTPError):
+        return f"통신 실패 {type(cause).__name__}"
+    return type(error).__name__
+
+
 def create_backend_client() -> httpx2.AsyncClient:
     # 요청끼리 공유하므로 Java의 Set-Cookie를 저장하지 않는다 : 다른 회원 요청에 섞임 방지
     jar = CookieJar(policy=DefaultCookiePolicy(allowed_domains=[]))
@@ -48,15 +68,15 @@ async def _send(
 ) -> httpx2.Response:
     base_url = settings.backend_base_url.rstrip("/")
     if not base_url:
-        raise external_error()
+        raise external_error() from _FailureCause("주소 비어 있음")
     try:
         res = await client.request(method, f"{base_url}{path}", **kwargs)
-    except httpx2.HTTPError:
-        raise external_error() from None
+    except httpx2.HTTPError as error:
+        raise external_error() from error
     if 400 <= res.status_code < 500:
         raise BackendError.of(res)
     if not res.is_success:
-        raise external_error()
+        raise external_error() from _FailureCause(f"Java {res.status_code}")
     return res
 
 
@@ -80,7 +100,7 @@ async def call_backend(
     try:
         return res.json().get("data")
     except (ValueError, AttributeError):
-        raise external_error() from None
+        raise external_error() from _FailureCause("응답 JSON 아님")
 
 
 def external_error() -> AppError:
