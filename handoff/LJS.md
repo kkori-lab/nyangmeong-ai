@@ -1,11 +1,13 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-004 대화창 · 여러 아이 일정 READ 후속 (결과 날짜 요일·READ 시간 로그 호출 수, 추가 요청) — 끝 (2026-11-11). READ 결과의 `YYYY-MM-DD`로 시작하는 값에 ` (요일)`을 붙임(`rules.read_result_text`, 시스템 프롬프트 변경 없음), `READ 도구 시간` 로그를 `Java N번`(실제 요청 수)으로. 검증 1회차 통과, 사람 확인
+SCR-AIM-004 대화창 · 도구 도메인 싣기 결정·설명 없던 도구 전부 열기 (추가 요청) — 끝 (2026-11-11). 도구를 도메인별로 나누지 않고 모두 싣기로 정함(설계 1절), `tool_prompts.yaml`에 반려동물 10·커뮤니티 8·플레이스 1 READ 설명, 일부러 안 싣는 도구는 `skip: <이유>`(info 로그). 검증 1회차 통과, 사람 확인
 
 ## 다음에 할 것
+- 백엔드 PR #227 병합 뒤 (LJS, 추가-1·2 연결 남음): Java `GET /internal/ai/tools`로 `data/tools.snapshot.json` 갱신(코드 값 제외, `structureVersion 다름` 경고 해소), `list_care_schedules` skip 삭제(Java 목록에서 빠짐). 같은 PR로 `list_places` 좌표 6칸·`list_place_bookmarks` `plcClsfCd`가 선택이 됨 — `list_places` skip을 풀고 설명(좌표·sort 칸은 LLM에 안 보임, "근처"는 navigate)·테스트·tool_eval 문항, `list_place_bookmarks` 설명의 "분류를 모르면 navigate" 고침은 `/start`로 기획
+- 스냅샷 자동화 (LJS·백엔드, 설계 8절 6번): 지금은 손으로 찍음. 백엔드 develop 병합 때 Java 목록을 받아 스냅샷을 쓰고 `structureVersion`이 바뀌면 PR + check.sh — `/start`로 기획
+- 도구 확장 후속 (LJS): `uv run python -m scripts.tool_eval` 재측정(T57~T73 추가, 외부 API), 정답 수·쓰기 잘못 고름 0·첫 글자 시간이 떨어지면 tool search(BM25) 절. 커뮤니티 설명은 KSJ, 플레이스는 YAY 확인. `list_faqs`는 운영 FAQ 문항이 정해지면 다시(지금 시드는 같은 질문 8개 복사본)
 - 여러 아이 일정 READ 남은 메모 (LJS): tool_eval T45·T55·T56 재측정 결과 줄은 이 세션에 기록되지 않음 — 다음 재측정 때 마일스톤 결과에 적는다. 반려동물 몸무게(`petBdwg` 등) `scale 3`은 PR #221 범위 밖(담당자에게 전달됨). 옛 등록 카드(`draft`·REGISTER·등록 칸 추출 LLM)는 프론트 범용 카드 전환 뒤 삭제. Python은 도구 목록을 기동 때 1회만 받으므로 Java를 다시 띄우면 Python도 다시 띄운다
-- 도구 도메인 고르기·설명 빠진 22개 (LJS, backend-79 요청 2026-11-11): Java 도구 52개를 다 싣지 않고 도메인별로 싣는 방법(설계 `docs/design/tool-catalog.md` 9절 "결정 남음")부터 `/start`로 기획. 분류 LLM은 이미 지워 "분류 LLM 도메인 칸" 안은 자리가 없음, 스냅샷에 도구별 `domain` 칸이 이미 있음(회신함). 22개 설명은 도메인 담당자 확인(반려동물 LJS/SJM, 커뮤니티 KSJ, 고객센터 YAY). Java 쪽(`@AiRequiredIf`·`@AiOneOf` 칸 이름 검사)은 백엔드 세션이 맡음
 - 연결 남음: FN-ADM-070-02 관리자 프론트 아이템 등록 (관리자 프론트): 사진을 고르면 [픽셀로 만들기] `POST /ai/items/pixel-image`(form `image`·`regnCd`·`itemNm`, 응답 `image/png`, 30~40초·이미지 1장 과금) → 미리보기 → [이 그림 쓰기]면 그 PNG를 Java 아이템 등록 이미지로(원본 사진 그대로 쓰는 선택도 남김, 2026-11-11). [굽기 지시 만들기](`POST /ai/items/bake-hints`)·[시험해 보기](`POST /ai/items/trial-preview`), 등록 뒤 `POST /ai/items/{itemSn}/bake`를 `lastYn` true까지 반복(한 번 30~40초, 매 호출 전 토큰 갱신, 502면 멈춤)
 - 연관 바로가기 프론트 확인 (LJS 프론트): 도구 흐름 글 답변(READ·바로 답)에도 `done.shortcut`(Intent ROUTE)이 온다. 버튼으로 그리는지, 확인 카드와 함께는 안 온다는 것 알림. 키워드에 안 걸리는 건강 지식 답("예방접종 언제 맞아?")은 바로가기 없음 — 필요하면 도구 고르기 LLM이 관련 화면을 고르게(도구 정의 변경). 등록 요청꼴 문장에 LLM이 글로 답해도 키워드 바로가기가 붙을 수 있음(검증 메모) (2026-11-10)
 - 배포 서버에서 식사량·음수량 질문에 "일시적으로 답변할 수 없어요" (LJS, 2026-11-09 보고, 원인 미확정): 로컬은 첫 글자 4.9~5.6초로 정상. 후보는 반려동물 조회(`register-context`) 실패 `AnswerError("read_pets")`, 첫 글자 10초 초과(반려동물 조회·Java 읽기·답변 LLM이 모두 그 안), 예상 못 한 예외(`대화 응답 처리 실패` 로그). 실패 이유 로그는 2026-11-11 추가(`답변 실패: 첫 글자 전 <이유>`·`READ 반려동물 목록 실패: <이유>`·`도구 고르기 시간 초과`) — 배포 뒤 서버에서 같은 질문을 다시 해 이 로그로 가린다. 서버에서 `journalctl -u ai-backend`·`systemctl cat ai-backend`(`.env` 읽는지)·`.env.local` 유무 확인

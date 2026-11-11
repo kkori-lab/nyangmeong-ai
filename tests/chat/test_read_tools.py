@@ -863,3 +863,59 @@ def test_tool_system_no_apology_for_server_ask() -> None:
     system = tool_system()
     assert "어느 아이의" in system
     assert "사과·해명 없이" in system
+
+
+# 반려동물·커뮤니티 READ(2026-11-11)
+
+
+def test_반려동물_상세는_펫_태그_방의_아이_번호로_Java를_한_번_불러야_한다(client, java):
+    use_agent(client, FakeToolAgent("get_pet", {}))
+    reader = use_reader(client, FakeToolReader({"petSn": CHOCO, "petBdwg": 4.2}))
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    events(send(client, room, "등록 몸무게 몇이야?"))
+
+    assert reader.calls == [(f"/api/pets/{CHOCO}", {})]
+
+
+def test_글_상세는_앞_글_목록에_없는_번호면_Java를_부르지_않아야_한다(client, java):
+    agent = use_agent(
+        client, FakeToolAgent("list_posts", {}, follow_tool="get_post", follow_raw={"pst_sn": 99})
+    )
+    reader = use_reader(client, FakeToolReader([{"pstSn": 7, "pstTtl": "산책 코스 추천"}]))
+    room = room_of(client, java)
+
+    events(send(client, room, "최근 글 내용 알려 줘"))
+
+    assert reader.calls == [("/api/posts", {})]
+    assert agent.results[1] == rules.READ_FAILED
+
+
+def test_글_상세는_앞_글_목록의_번호로_불러야_한다(client, java):
+    use_agent(
+        client, FakeToolAgent("list_posts", {}, follow_tool="get_post", follow_raw={"pst_sn": 7})
+    )
+    reader = use_reader(client, FakeToolReader([{"pstSn": 7, "pstTtl": "산책 코스 추천"}]))
+    room = room_of(client, java)
+
+    events(send(client, room, "최근 글 내용 알려 줘"))
+
+    assert reader.calls == [("/api/posts", {}), ("/api/posts/7", {})]
+
+
+def test_캐릭터_상세는_앞_캐릭터_목록의_번호로_불러야_한다(client, java):
+    use_agent(
+        client,
+        FakeToolAgent(
+            "list_pixel_characters",
+            {},
+            follow_tool="get_pixel_character",
+            follow_raw={"pixel_char_sn": 3},
+        ),
+    )
+    reader = use_reader(client, FakeToolReader([{"pixelCharSn": 3, "petNm": "초코"}]))
+    room = room_of(client, java)
+
+    events(send(client, room, "내 캐릭터 지금 뭐 입고 있어?"))
+
+    assert reader.calls == [("/api/pixel-characters", {}), ("/api/pixel-characters/3", {})]

@@ -54,3 +54,20 @@
 {"id": "T54", "type": "지식", "q": "전체 반려동물 체중 알려줘", "intent": "모든 아이의 체중 추이 읽기", "tool": "get_health_indicators"}
 {"id": "T55", "type": "지식", "q": "우리 애들 이번 주 일정 뭐 있어?", "intent": "여러 아이 일정 한 번에 읽기", "tool": "list_my_care_schedules"}
 {"id": "T56", "type": "지식", "q": "코코랑 보리 다음 병원 언제야?", "intent": "두 아이의 다음 병원 일정 읽기", "tool": "list_my_care_schedules"}
+{"id": "T57", "type": "지식", "q": "우리 애들 누구누구 있어?", "intent": "내 반려동물 목록 읽기", "tool": "list_pets"}
+{"id": "T58", "type": "지식", "q": "코코 생일 언제야?", "intent": "한 아이 등록 정보 읽기", "tool": "get_pet"}
+{"id": "T59", "type": "헷갈림", "q": "코코 등록할 때 넣은 몸무게 몇이었지?", "intent": "체중 기록이 아닌 등록 몸무게 읽기", "tool": "get_pet"}
+{"id": "T60", "type": "지식", "q": "내 포인트 얼마야?", "intent": "포인트 잔액 읽기", "tool": "get_points"}
+{"id": "T61", "type": "헷갈림", "q": "이번 달 포인트 어디서 받았어?", "intent": "지출이 아닌 포인트 내역 읽기", "tool": "list_point_ledgers"}
+{"id": "T62", "type": "헷갈림", "q": "오늘 케어미션 뭐야?", "intent": "케어 항목이 아닌 오늘 미션 읽기", "tool": "list_daily_missions"}
+{"id": "T63", "type": "지식", "q": "코코 공동양육자 누구야?", "intent": "공동양육자 목록 읽기", "tool": "list_caregivers"}
+{"id": "T64", "type": "지식", "q": "내가 보낸 공동양육 초대 수락됐어?", "intent": "보낸 초대 상태 읽기", "tool": "list_sent_caregiver_invitations"}
+{"id": "T65", "type": "이동", "q": "캐릭터 꾸미러 가자", "intent": "캐릭터 꾸미기 화면 열기", "tool": "navigate", "scr_id": "SCR-MYP-010"}
+{"id": "T66", "type": "지식", "q": "상점에 모자 뭐 있어?", "intent": "캐릭터 목록을 먼저 읽고 상점 아이템 읽기", "tool": "list_pixel_characters"}
+{"id": "T67", "type": "지식", "q": "자유게시판 최근 글 보여줘", "intent": "게시판 글 목록 읽기", "tool": "list_posts"}
+{"id": "T68", "type": "지식", "q": "최근 실종 신고 올라온 거 있어?", "intent": "실종 신고 목록 읽기", "tool": "list_lost_reports"}
+{"id": "T69", "type": "지식", "q": "이번 주말 펫돌봄 모집 있어?", "intent": "펫돌봄 모집 목록 읽기", "tool": "list_care_recruitments"}
+{"id": "T70", "type": "지식", "q": "요즘 펫 뉴스 뭐 있어?", "intent": "펫뉴스 목록 읽기", "tool": "list_news"}
+{"id": "T71", "type": "지식", "q": "즐겨찾기한 동물병원 어디였지?", "intent": "병원 분류 즐겨찾기 읽기", "tool": "list_place_bookmarks"}
+{"id": "T72", "type": "이동", "q": "실종 신고 글 올리고 싶어", "intent": "쓰기 도구가 없어 실종 신고 화면으로", "tool": "navigate", "scr_id": "SCR-CMU-002"}
+{"id": "T73", "type": "헷갈림", "q": "공동양육자 초대 어떻게 해?", "intent": "초대 목록이 아닌 사용법", "tool": "search_guide", "scr_id": "SCR-MYP-004"}

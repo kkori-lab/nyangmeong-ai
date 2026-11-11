@@ -20,7 +20,14 @@ from typing import Literal, Protocol
 
 import httpx2
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    create_model,
+    model_validator,
+)
 
 from app.core.backend import BackendError, call_backend, failure_reason
 from app.core.config import Settings
@@ -149,13 +156,22 @@ class ToolPrompt(BaseModel):
     label: str | None = None
     # 수정 도구 : 바꿀 대상을 찾지 못했을 때 안내 글의 대상 이름
     target: str | None = None
-    description: str
+    # skip 항목은 설명 없이 이유만
+    description: str = ""
     hooks: list[str] = []
     params: dict[str, PromptParam] = {}
     # Java 칸 -> 늘 넣는 값(지출 등록의 입력 방법 등). 불러올 때 Java 규칙으로 검사
     fixed: dict[str, str | int | bool] = {}
     # READ : 답변의 연관 바로가기 화면 ID(FN-AIM-002-04, 매핑표의 라우팅 가능 행으로 찾음)
     screen: str | None = None
+    # 일부러 싣지 않는 Java 도구 : 이유만 둔다. 경고 대신 info 로그(2026-11-11)
+    skip: str | None = None
+
+    @model_validator(mode="after")
+    def _needs_description(self) -> "ToolPrompt":
+        if self.skip is None and not self.description.strip():
+            raise ValueError("description 또는 skip이 필요합니다")
+        return self
 
 
 # hook(설계 4-4절) : 이름 -> 만드는 Java 칸. 반려동물·같은 이름 경고는 지금 service.py 흐름이 처리
@@ -251,6 +267,12 @@ def build(
     java_names = {tool.name for tool in response.tools}
     for tool in response.tools:
         prompt = prompts.get(tool.name)
+        if prompt is not None and prompt.skip is not None:
+            extra = sorted(prompt.model_fields_set - {"skip"})
+            if extra:
+                logger.warning("도구 목록: %s skip 항목에 다른 칸 %s", tool.name, ",".join(extra))
+            logger.info("도구 목록: %s 싣지 않음(%s)", tool.name, prompt.skip)
+            continue
         if prompt is None or prompt.builtin:
             logger.warning("도구 목록: %s 설명 없음, 싣지 않음", tool.name)
             continue
