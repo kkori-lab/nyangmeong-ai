@@ -1,7 +1,7 @@
 """tool calling 1단계 평가(docs/design/tool-calling.md 7-1절). 실제 Anthropic 호출(비용이 든다)
 
 돌리기: uv run python -m scripts.tool_eval [--sonnet] [--answer]
-- 지금 흐름(service.judge)과 도구 흐름(service.judge_tools)을 같은 세트로 잰다
+- 도구 흐름(service.judge_tools)을 잰다(옛 판정 service.judge는 2026-11-11 삭제)
 - 도구 목록 : 테스트와 같은 가짜 Java 목록(스냅샷 + 코드 값), Java는 부르지 않는다
 - 문항별 결과 : .cache/tool_eval/<시각>.jsonl (git 제외)
 pytest 수집 제외(tests/ 밖), 테스트·CI에서 미호출(AGENTS.md 5번)
@@ -18,13 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from app.chat import rules, service, tools
-from app.chat.clients import (
-    AnthropicIntentClassifier,
-    AnthropicRegisterExtractor,
-    AnthropicToolAgent,
-    ClassifyError,
-    ToolDecision,
-)
+from app.chat.clients import AnthropicToolAgent, ToolDecision
 from app.chat.repository import get_ai_settings
 from app.chat.schemas import IntentKind
 from app.core.config import get_settings
@@ -62,23 +56,6 @@ class Result:
     error: str | None = None
 
 
-class _RecordingMessages:
-    # 지금 흐름 분류기의 토큰 집계용 : messages.parse 응답의 usage를 기록
-    def __init__(self, messages: Any, usage: Usage) -> None:
-        self._messages = messages
-        self._usage = usage
-
-    async def parse(self, **kwargs):
-        response = await self._messages.parse(**kwargs)
-        self._usage.add(response.usage)
-        return response
-
-
-class _RecordingClient:
-    def __init__(self, client: Any, usage: Usage) -> None:
-        self.messages = _RecordingMessages(client.messages, usage)
-
-
 def _register_kind(values: dict) -> str:
     return tools.DRAFT_CARE_ITEM if values.get("care_zone_cd") else tools.DRAFT_SCHEDULE
 
@@ -88,34 +65,6 @@ def _search_tool(judged: service.Judged) -> tuple[str, dict]:
         scr_id = judged.shortcut.scr_id if judged.shortcut else None
         return tools.SEARCH_GUIDE, {"scr_id": scr_id}
     return "answer", {}
-
-
-async def run_current(client, model: str, q: str, today) -> Result:
-    # 7-1절 대응표 : ROUTE → navigate, 안내서 SEARCH → search_guide, 그 밖 SEARCH → 글 답변,
-    # REGISTER → 카드 종류, FALLBACK → decline
-    usage = Usage()
-    classifier = AnthropicIntentClassifier(_RecordingClient(client, usage), model)  # type: ignore[arg-type]
-    started = time.monotonic()
-    try:
-        judged = await service.judge(q, False, classifier)
-    except ClassifyError as error:
-        return Result("error", usage=usage, error=error.reason)
-    ms = (time.monotonic() - started) * 1000
-    kind = judged.intent.kind
-    if kind is IntentKind.ROUTE:
-        return Result(tools.NAVIGATE, {"scr_id": judged.intent.scr_id}, usage, ms)
-    if kind is IntentKind.SEARCH:
-        name, args = _search_tool(judged)
-        return Result(name, args, usage, ms)
-    if kind is IntentKind.REGISTER:
-        # build_card와 같은 길 : 규칙 추출 → 필수 칸이 비면 AI 추출(판정 토큰·지연에는 안 셈)
-        values = rules.parse_register(q, today, []).values()
-        if service._missing(values):
-            raw = await AnthropicRegisterExtractor(client, model).extract(q, today)
-            for name, value in rules.clean_ai_fields(raw).values().items():
-                values.setdefault(name, value)
-        return Result(_register_kind(values), values, usage, ms)
-    return Result(tools.DECLINE, {"unclear": not judged.out_of_scope}, usage, ms)
 
 
 class _DecisionRecorder(AnthropicToolAgent):
@@ -189,8 +138,10 @@ def score(row: dict, result: Result) -> dict:
         args_ok = all(result.args.get(k) == v for k, v in row.get("args", {}).items())
     else:
         args_ok = True
-    # 쓰기 도구 잘못 : 등록이 아닌 질문에 등록 도구, 또는 일정↔케어 뒤바뀜
-    write_wrong = result.tool in tools.REGISTER_TOOLS and not tool_ok
+    # 쓰기 도구 잘못 : 쓰기가 아닌 질문에 쓰기 도구, 또는 쓰기 도구끼리 뒤바뀜
+    # 쓰기 도구 = 옛 등록 도구 + 확인 카드(ACTION) 도구 전부
+    is_write = result.tool in tools.REGISTER_TOOLS or tools.card_entry(result.tool) is not None
+    write_wrong = is_write and not tool_ok
     declined = row["tool"] == tools.DECLINE and result.tool == tools.DECLINE
     return {
         "tool_ok": tool_ok,
@@ -259,10 +210,6 @@ async def main() -> None:
     today = rules.today_kst()
 
     flows = [
-        (
-            f"지금 흐름({settings.llm_model})",
-            lambda q: run_current(client, settings.llm_model, q, today),
-        ),
         (
             f"도구 {settings.llm_model}",
             lambda q: run_tools(client, settings.llm_model, q, today, options.answer),

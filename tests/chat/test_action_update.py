@@ -3,7 +3,7 @@
 import pytest
 
 from app.chat import rules
-from app.chat.service import ACTION_SHOWN, ACTION_TARGET_MISSING, DISCLAIMER
+from app.chat.service import ACTION_SHOWN, ACTION_TARGET_MISSING
 from tests.chat.fakes import FakeToolAgent
 from tests.chat.test_action import action_result, send
 from tests.chat.test_messages import MessageJava, deltas, events
@@ -37,7 +37,7 @@ def test_일정_목록을_읽은_뒤_고른_일정_수정은_목록의_번호와
 ):
     agent = read_then(
         client,
-        "list_care_schedules",
+        "list_my_care_schedules",
         [{"schdlSn": 31, "schdlNm": "예방접종", "schdlDt": "2026-10-01T15:00:00"}],
         "draft_schedule_update",
         {"schdl_sn": 31, "schdl_ymd": "2026-10-03", "schdl_tm": "15:00"},
@@ -67,7 +67,7 @@ def test_일정_목록을_읽은_뒤_고른_일정_수정은_목록의_번호와
 def test_목록에_없는_번호로_고른_수정은_카드_없이_LLM에_찾지_못함을_돌려줘야_한다(client, java):
     agent = read_then(
         client,
-        "list_care_schedules",
+        "list_my_care_schedules",
         [{"schdlSn": 31}],
         "draft_schedule_update",
         {"schdl_sn": 99, "schdl_nm": "검진"},
@@ -78,7 +78,8 @@ def test_목록에_없는_번호로_고른_수정은_카드_없이_LLM에_찾지
 
     assert agent.results[1] == ACTION_TARGET_MISSING
     assert evs[-1][1]["action"] is None
-    assert deltas(evs) == "안내서대로 답할게요." + DISCLAIMER
+    # 일정 조회는 고지 READ가 아님(2026-11-11, 도구 notice)
+    assert deltas(evs) == "안내서대로 답할게요."
 
 
 def test_케어_항목_수정은_requiredIf로_직접_입력_주기의_일수를_물어야_한다(client, java):

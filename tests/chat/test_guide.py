@@ -1,31 +1,18 @@
 import asyncio
 import json
+from datetime import date
 from pathlib import Path
 
 import pytest
 import yaml
 
 from app.chat import clients, rules
-from app.chat.clients import (
-    ANSWER_SYSTEM,
-    GUIDE_RULES,
-    AnthropicIntentClassifier,
-    Classified,
-    ClassifiedKind,
-    classify_system,
-)
+from app.chat.clients import GUIDE_RULES
 from app.chat.schemas import IntentKind
-from app.chat.service import DISCLAIMER, guide_text, judge
+from app.chat.service import DISCLAIMER, guide_text, judge_tools
 from tests.chat.conftest import as_member
-from tests.chat.test_llm_clients import (
-    MODEL,
-    FakeAnthropic,
-    answer,
-    classify,
-    replying,
-    streaming,
-)
-from tests.chat.test_messages import FixedClassifier, MessageJava, events, names, send
+from tests.chat.fakes import FakeToolAgent
+from tests.chat.test_messages import MessageJava, deltas, events, names, send
 
 DATA = Path(__file__).parent / "data"
 PIXEL_QUESTION = "픽셀 캐릭터 생성 어디서 해?"
@@ -47,16 +34,19 @@ def guide_tasks() -> list[dict]:
     return tasks + [task for screen in guide_screens() for task in screen["tasks"]]
 
 
-def guide_result(guide_id: str | None = None, related_num: int | None = None) -> FakeAnthropic:
-    return replying(json.dumps({"kind": "GUIDE", "guide_id": guide_id, "related_num": related_num}))
-
-
 def routing_row(scr_id: str) -> rules.RouteRow:
     return next(r for r in rules.routing_table() if r.scr_id == scr_id and r.routable)
 
 
-def judged(text: str, classified: Classified):
-    return asyncio.run(judge(text, False, FixedClassifier(classified)))
+def judged(text: str, agent: FakeToolAgent):
+    # 도구 흐름 판정 : 가짜 도구 고르기가 고른 도구로
+    context = [{"role": "user", "content": text}]
+    return asyncio.run(judge_tools(text, context, agent, 4500, date(2026, 11, 11), 5.0))
+
+
+def guided(text: str, chunk_id: str | None = None):
+    # search_guide 도구로 목차 청크를 고른(또는 안 고른) 경우
+    return judged(text, FakeToolAgent("search_guide", {"chunk_id": chunk_id}))
 
 
 # FN-AIM-002-02 안내서 데이터
@@ -190,55 +180,11 @@ def test_평가_정답표의_청크_id는_안내서에_있다():
             assert rules.find_guide(chunk_id) is not None, chunk_id
 
 
-# FN-AIM-004-02 분류 보강, 2단계 목차 선택
-
-
-def test_분류_프롬프트에_GUIDE와_안내서_목차가_들어간다():
-    system = classify_system()
-    assert "- GUIDE:" in system
-    assert "guide_id" in system
-    for chunk in rules.guide_chunks():
-        assert f"\n- {chunk.id} {chunk.screen or '공통'} · {chunk.title}" in system
-
-
-def test_키워드_힌트에도_위치·사용법_질문은_GUIDE():
-    row = routing_row("SCR-MYP-010")
-    fake = guide_result("6-1")
-    asyncio.run(AnthropicIntentClassifier(fake.client(), MODEL).classify("캐릭터 어디서 해?", row))
-    hint = fake.requests[0]["system"][1]["text"]
-    assert "위치·사용법을 묻는 질문" in hint
-    assert "GUIDE" in hint
-
-
-def test_분류가_GUIDE면_목차_번호와_연관_화면을_돌려준다():
-    row = routing_row("SCR-MYP-010")
-    result = classify(guide_result("6-1", row.no))
-    assert result == Classified(
-        ClassifiedKind.GUIDE,
-        related_scr_id=row.scr_id,
-        related_param=row.param,
-        guide_id="6-1",
-    )
-
-
-@pytest.mark.parametrize("guide_id", ["99-9", "", None])
-def test_목차에_없는_번호는_버린다(guide_id):
-    assert classify(guide_result(guide_id)) == Classified(ClassifiedKind.GUIDE)
-
-
-def test_분류_요청은_고정_system을_캐시_블록으로_보낸다():
-    # 후속(2026-11-05) : 규칙·목차 블록 하나에 캐시 표시, 힌트가 없으면 블록 하나
-    fake = guide_result("6-1")
-    classify(fake, PIXEL_QUESTION)
-    body = fake.requests[0]
-    assert body["system"] == [
-        {"type": "text", "text": classify_system(), "cache_control": {"type": "ephemeral"}}
-    ]
-    assert "cache_control" not in body
+# FN-AIM-002-02 안내서 청크 고르기(search_guide 도구 + M1)
 
 
 def test_GUIDE면_M1_결과를_쓰고_SEARCH로_내보낸다():
-    result = judged(PIXEL_QUESTION, Classified(ClassifiedKind.GUIDE))
+    result = guided(PIXEL_QUESTION)
     assert result.intent.kind is IntentKind.SEARCH
     assert result.guide_ids == tuple(rules.search_guide(PIXEL_QUESTION))
     assert "6-1" in result.guide_ids
@@ -248,7 +194,7 @@ def test_M1_결과가_있어도_목차에서_고른_청크가_맨_앞():
     # 후속 2(2026-11-05) : M1이 엉뚱한 청크를 잡아도 목차 선택을 버리지 않는다(R03·R08·R19)
     m1 = rules.search_guide(PIXEL_QUESTION)
     assert m1 and "28-1" not in m1
-    result = judged(PIXEL_QUESTION, Classified(ClassifiedKind.GUIDE, guide_id="28-1"))
+    result = guided(PIXEL_QUESTION, "28-1")
     assert result.intent.kind is IntentKind.SEARCH
     assert result.guide_ids == ("28-1", *m1[: rules.GUIDE_TOP_K - 1])
 
@@ -256,7 +202,7 @@ def test_M1_결과가_있어도_목차에서_고른_청크가_맨_앞():
 def test_목차_선택이_M1_결과에_있으면_중복_없이_맨_앞():
     m1 = rules.search_guide(PIXEL_QUESTION)
     picked = m1[-1]
-    result = judged(PIXEL_QUESTION, Classified(ClassifiedKind.GUIDE, guide_id=picked))
+    result = guided(PIXEL_QUESTION, picked)
     assert result.guide_ids[0] == picked
     assert len(result.guide_ids) == len(set(result.guide_ids)) == len(m1)
     assert set(result.guide_ids) == set(m1)
@@ -264,32 +210,32 @@ def test_목차_선택이_M1_결과에_있으면_중복_없이_맨_앞():
 
 @pytest.mark.parametrize("guide_id", [None, "99-9"])
 def test_목차_선택이_없거나_없는_번호면_M1_결과_그대로(guide_id):
-    result = judged(PIXEL_QUESTION, Classified(ClassifiedKind.GUIDE, guide_id=guide_id))
+    result = guided(PIXEL_QUESTION, guide_id)
     assert result.guide_ids == tuple(rules.search_guide(PIXEL_QUESTION))
 
 
 def test_합친_청크는_최대_3개():
     for guide_id in ("28-1", "C-1", "27-1"):
-        result = judged(PIXEL_QUESTION, Classified(ClassifiedKind.GUIDE, guide_id=guide_id))
+        result = guided(PIXEL_QUESTION, guide_id)
         assert len(result.guide_ids) <= rules.GUIDE_TOP_K
         assert result.guide_ids[0] == guide_id
 
 
 def test_GUIDE이고_M1_결과가_없으면_목차에서_고른_청크를_쓴다():
-    result = judged("ㅁㄴㅇㄹ", Classified(ClassifiedKind.GUIDE, guide_id="27-1"))
+    result = guided("ㅁㄴㅇㄹ", "27-1")
     assert result.intent.kind is IntentKind.SEARCH
     assert result.guide_ids == ("27-1",)
 
 
 def test_GUIDE인데_M1도_목차_선택도_없으면_범위_안내():
-    result = judged("ㅁㄴㅇㄹ", Classified(ClassifiedKind.GUIDE))
+    result = guided("ㅁㄴㅇㄹ")
     assert result.intent.kind is IntentKind.FALLBACK
     assert result.out_of_scope is True
     assert result.guide_ids == ()
 
 
-def test_SEARCH는_안내서를_쓰지_않는다():
-    result = judged("고양이가 토해요", Classified(ClassifiedKind.SEARCH))
+def test_바로_답은_안내서를_쓰지_않는다():
+    result = judged("고양이가 토해요", FakeToolAgent(texts=("답",)))
     assert result.intent.kind is IntentKind.SEARCH
     assert result.guide_ids == ()
 
@@ -298,53 +244,24 @@ def test_SEARCH는_안내서를_쓰지_않는다():
 
 
 def test_첫_청크_화면이_라우팅_대상이면_그_화면으로_바로가기():
-    result = judged("ㅁㄴㅇㄹ", Classified(ClassifiedKind.GUIDE, guide_id="6-1"))
+    result = guided("ㅁㄴㅇㄹ", "6-1")
     assert result.shortcut == routing_row("SCR-MYP-010").to_intent()
 
 
-def test_첫_청크_화면이_라우팅_대상이_아니면_연관_화면으로_바로가기():
+def test_첫_청크_화면이_라우팅_대상이_아니면_바로가기_없음():
     # 28 픽셀 캐릭터 상세는 라우팅 대상이 아닌 행
     assert not next(r for r in rules.routing_table() if r.no == 28).routable
-    row = routing_row("SCR-MYP-010")
-    result = judged(
-        "ㅁㄴㅇㄹ",
-        Classified(ClassifiedKind.GUIDE, guide_id="28-1", related_scr_id=row.scr_id),
-    )
+    result = guided("ㅁㄴㅇㄹ", "28-1")
     assert result.guide_ids == ("28-1",)
-    assert result.shortcut == row.to_intent()
-
-
-def test_라우팅_대상_화면도_연관_화면도_없으면_바로가기_없음():
-    result = judged("ㅁㄴㅇㄹ", Classified(ClassifiedKind.GUIDE, guide_id="28-1"))
     assert result.shortcut is None
 
 
-def test_공통_청크는_연관_화면이_없으면_바로가기_없음():
-    result = judged("ㅁㄴㅇㄹ", Classified(ClassifiedKind.GUIDE, guide_id="C-1"))
+def test_공통_청크는_바로가기_없음():
+    result = guided("ㅁㄴㅇㄹ", "C-1")
     assert result.shortcut is None
 
 
 # FN-AIM-002-02 답변
-
-
-def test_안내서가_있으면_답변_system_둘째_블록에_규칙과_청크_글():
-    fake = streaming(["마이페이지에서 ", "만들어요."])
-
-    async def collect():
-        generator = clients.AnthropicAnswerGenerator(fake.client(), MODEL)
-        stream = generator.stream([{"role": "user", "content": "q"}], 100, guide_text(("6-1",)))
-        return [chunk async for chunk in stream]
-
-    assert asyncio.run(collect()) == ["마이페이지에서 ", "만들어요."]
-    system = fake.requests[0]["system"]
-    assert system[0] == {"type": "text", "text": ANSWER_SYSTEM}
-    assert system[1]["text"] == GUIDE_RULES + rules.find_guide("6-1").text
-
-
-def test_안내서가_없으면_답변_system은_지금과_같다():
-    fake = streaming(["답"])
-    answer(fake)
-    assert fake.requests[0]["system"] == ANSWER_SYSTEM
 
 
 def test_안내_규칙은_지어내지_않고_고객센터를_안내한다():
@@ -363,28 +280,15 @@ def test_청크_글은_순서대로_빈_줄로_잇고_없는_id는_뺀다():
 # 메시지 전송 흐름
 
 
-class GuideAnswers:
-    """안내서 인자까지 기록하는 가짜 답변 생성기"""
-
-    def __init__(self) -> None:
-        self.guides: list[str | None] = []
-
-    async def stream(self, messages, max_tokens, guide=None):
-        self.guides.append(guide)
-        yield "마이페이지에서 만들어요."
-
-
 @pytest.fixture
 def java() -> MessageJava:
     return MessageJava()
 
 
-def test_사용법_질문은_SEARCH로_답하고_안내서를_답변에_넘기고_바로가기를_준다(client, java):
-    answers = GuideAnswers()
-    client.app.dependency_overrides[clients.get_answer_generator] = lambda: answers
-    client.app.dependency_overrides[clients.get_intent_classifier] = lambda: FixedClassifier(
-        Classified(ClassifiedKind.GUIDE)
-    )
+def test_사용법_질문은_SEARCH로_답하고_안내서를_도구_결과로_넘기고_바로가기를_준다(client, java):
+    # 목차 청크를 안 골라도 M1 결과를 넘김. 사용법 안내는 고지 없음(2026-11-09, FN-AIM-002-03)
+    agent = FakeToolAgent("search_guide", {"chunk_id": None})
+    client.app.dependency_overrides[clients.get_tool_agent] = lambda: agent
     as_member(client, 1)
     room = java.add_room(1, "제목")
     evs = events(send(client, room, PIXEL_QUESTION))
@@ -392,20 +296,17 @@ def test_사용법_질문은_SEARCH로_답하고_안내서를_답변에_넘기�
     assert names(evs) == ["intent", "delta", "delta", "done"]
     assert evs[0][1]["kind"] == "SEARCH"
     assert evs[0][1]["scrId"] is None
-    assert evs[2][1]["text"] == DISCLAIMER
+    assert DISCLAIMER not in deltas(evs)
     assert evs[3][1]["shortcut"]["scrId"] == "SCR-MYP-010"
-    assert answers.guides == [guide_text(tuple(rules.search_guide(PIXEL_QUESTION)))]
+    assert agent.results == [guide_text(tuple(rules.search_guide(PIXEL_QUESTION)))]
 
 
-def test_일반_검색_질문은_안내서_없이_답변한다(client, java):
-    answers = GuideAnswers()
-    client.app.dependency_overrides[clients.get_answer_generator] = lambda: answers
-    client.app.dependency_overrides[clients.get_intent_classifier] = lambda: FixedClassifier(
-        Classified(ClassifiedKind.SEARCH)
-    )
+def test_일반_질문_바로_답은_안내서를_넘기지_않는다(client, java):
+    agent = FakeToolAgent(texts=("토하면 ", "지켜보세요."))
+    client.app.dependency_overrides[clients.get_tool_agent] = lambda: agent
     as_member(client, 1)
     room = java.add_room(1, "제목")
     evs = events(send(client, room, "고양이가 토해요"))
 
     assert evs[0][1]["kind"] == "SEARCH"
-    assert answers.guides == [None]
+    assert agent.results == []

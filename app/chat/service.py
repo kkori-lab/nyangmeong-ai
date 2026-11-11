@@ -14,13 +14,9 @@ from pydantic.alias_generators import to_camel
 from app.chat import catalog, rules, tools
 from app.chat.clients import (
     AnswerError,
-    AnswerGenerator,
-    Classified,
-    ClassifiedKind,
     ClassifyError,
     ImageIntentError,
     ImageIntentJudge,
-    IntentClassifier,
     ReadMore,
     RegisterExtractor,
     TitleGenerator,
@@ -60,7 +56,7 @@ from app.chat.schemas import (
     RegisterResultRequest,
     StreamError,
 )
-from app.core.backend import BackendError
+from app.core.backend import BackendError, failure_reason
 from app.core.image import validate_upload
 from app.core.response import AppError
 
@@ -221,67 +217,15 @@ class Judged:
     cards: list[ActionCard] | None = None
     # FN-AIM-002-03 : 의료 고지 여부. 사용법 답변은 False
     notice: bool = True
-    # SEARCH(READ) : 성공한 READ 도메인, 답변 스트림이 채움. health가 있을 때만 고지
-    read_domains: set[str] | None = None
+    # SEARCH(READ) : 성공한 고지 READ(도구 notice) 이름, 답변 스트림이 채움. 하나라도 있을 때만 고지
+    notice_reads: set[str] | None = None
 
 
-async def judge(text: str, has_image: bool, classifier: IntentClassifier) -> Judged:
-    # FN-AIM-001-05 : 이미지 첨부면 판정 없이 영수증 분석(SCR-AIM-013)
-    if has_image:
-        return Judged(Intent(kind=IntentKind.RECEIPT))
-    # ① 등록 판정 — FN-AIM-004-13 : 라우팅 키워드가 있어도 등록이 먼저
-    if rules.is_register_request(text):
-        return Judged(Intent(kind=IntentKind.REGISTER))
-    # FN-AIM-002-10 : ② 룰 기반 라우팅, AI 분류보다 앞이라 LLM 장애와 무관
-    row = rules.match_route(text)
-    if row is None:
-        # ③ AI 분류(①②가 실패한 입력만, FN-AIM-004-02)
-        classified = await classifier.classify(text)
-    elif not rules.is_question(text):
-        return Judged(row.to_intent())
-    else:
-        # 범위 밖 질문 차단(2026-10-30) : 키워드에 걸린 질문꼴은 AI로 서비스 범위 확인
-        try:
-            classified = await classifier.classify(text, hint=row)
-        except ClassifyError:
-            # 룰 라우팅은 LLM 장애와 무관 (FN-AIM-002-10), 원인 로그는 분류기에서 기록
-            return Judged(row.to_intent())
-    if classified.kind is ClassifiedKind.SEARCH:
-        return Judged(Intent(kind=IntentKind.SEARCH), _shortcut_of(classified))
-    if classified.kind is ClassifiedKind.GUIDE:
-        guided = _guide_judged(text, classified)
-        if guided is not None:
-            return guided
-        # 설계 초안 0절 : M1·목차 선택 모두 못 찾으면 범위 안내
-        return Judged(Intent(kind=IntentKind.FALLBACK), out_of_scope=True)
-    if classified.kind is ClassifiedKind.ROUTE and classified.scr_id is not None:
-        row = rules.find_route(classified.scr_id, classified.param)
-        if row is not None:
-            return Judged(row.to_intent())
-    # ④ FN-AIM-004-12·005-01 : 어디에도 해당하지 않으면 폴백
-    out_of_scope = classified.kind is ClassifiedKind.OUT_OF_SCOPE
-    return Judged(Intent(kind=IntentKind.FALLBACK), out_of_scope=out_of_scope)
-
-
-def _guide_judged(text: str, classified: Classified) -> Judged | None:
-    # FN-AIM-002-02 : 분류 LLM의 목차 선택을 앞에, M1 키워드 색인 결과를 뒤에
-    ids = rules.merge_guide(classified.guide_id, text)
-    picked = bool(ids) and ids[0] == classified.guide_id
-    stage = ("목차+M1" if len(ids) > 1 else "목차") if picked else "M1"
-    if not ids:
-        logger.info("사용법 안내: 안내서 청크 없음")
-        return None
-    logger.info("사용법 안내: %s %d개 %s", stage, len(ids), ",".join(ids))
-    return Judged(
-        Intent(kind=IntentKind.SEARCH), _guide_shortcut(ids[0], classified), guide_ids=tuple(ids)
-    )
-
-
-def _guide_shortcut(chunk_id: str, classified: Classified) -> Intent | None:
-    # FN-AIM-002-04 : 첫 청크 화면이 라우팅 대상이면 그 화면, 아니면 분류의 연관 화면
+def _guide_shortcut(chunk_id: str) -> Intent | None:
+    # FN-AIM-002-04 : 첫 청크 화면이 라우팅 대상이면 그 화면, 아니면 바로가기 없음
     chunk = rules.find_guide(chunk_id)
     row = rules.find_route(chunk.scr_id, chunk.param) if chunk and chunk.scr_id else None
-    return row.to_intent() if row is not None else _shortcut_of(classified)
+    return row.to_intent() if row is not None else None
 
 
 async def judge_tools(
@@ -308,7 +252,14 @@ async def judge_tools(
     try:
         async with asyncio.timeout(first_token_sec):
             decision = await agent.decide(context, max_tokens, today, hint=row)
-    except (ClassifyError, TimeoutError):
+    except (ClassifyError, TimeoutError) as error:
+        if isinstance(error, TimeoutError):
+            # LLM 오류(ClassifyError)는 클라이언트가 로그, 시간 초과는 취소라 여기서 한 줄
+            logger.warning(
+                "도구 고르기 시간 초과(%g초): %s",
+                first_token_sec,
+                "행 이동" if row is not None else "일시 오류",
+            )
         if row is not None:
             return Judged(row.to_intent())
         raise ClassifyError("tool_decide") from None
@@ -368,16 +319,16 @@ def _tool_judged(
             return Judged(Intent(kind=IntentKind.FALLBACK))
         # Java 호출은 답변 스트림 안 : 첫 글자 제한이 Java 호출까지 덮음
         cards: list[ActionCard] = []
-        domains: set[str] = set()
+        notice_reads: set[str] = set()
         stream = _read_answer(
-            text, context, agent, decision, entry, max_tokens, today, read, cards, domains
+            text, context, agent, decision, entry, max_tokens, today, read, cards, notice_reads
         )
         return Judged(
             Intent(kind=IntentKind.SEARCH),
             _read_shortcut(entry, text),
             stream=stream,
             cards=cards,
-            read_domains=domains,
+            notice_reads=notice_reads,
         )
     ids = tuple(tools.guide_ids(call, text))
     if not ids:
@@ -385,7 +336,7 @@ def _tool_judged(
         return Judged(Intent(kind=IntentKind.FALLBACK), out_of_scope=True)
     logger.info("사용법 안내: 도구 %d개 %s", len(ids), ",".join(ids))
     stream = agent.answer(context, decision, guide_text(ids) or "", max_tokens, today)
-    shortcut = _guide_shortcut(ids[0], Classified(ClassifiedKind.GUIDE))
+    shortcut = _guide_shortcut(ids[0])
     # FN-AIM-002-03 : 사용법 안내는 건강 관련 응답이 아님
     return Judged(
         Intent(kind=IntentKind.SEARCH), shortcut, guide_ids=ids, stream=stream, notice=False
@@ -416,7 +367,9 @@ class _ReadPets:
         if self._pets is None:
             try:
                 self._pets = await self.read.contexts.get_pets()
-            except (AppError, BackendError):
+            except (AppError, BackendError) as error:
+                # 추가 요청 : 답변 실패(read_pets)의 Java 쪽 이유 한 줄
+                logger.warning("READ 반려동물 목록 실패: %s", failure_reason(error))
                 raise AnswerError("read_pets") from None
         return self._pets
 
@@ -444,7 +397,7 @@ async def _read_once(
     call: tools.ToolCall | None,
     pets: _ReadPets,
     seen: dict[str, set[int]],
-    domains: set[str] | None = None,
+    notice_reads: set[str] | None = None,
     rows: "catalog.Rows | None" = None,
 ) -> _ReadOutcome:
     args = call.args if call is not None else None
@@ -468,7 +421,22 @@ async def _read_once(
         # 가계부 : 문장 속 이름이 하나면 그 반려동물, 아니면 전체(공용 지출 포함, 2026-11-06 결정)
         named = pets.named(await pets.pets())
         targets = [named[0] if len(named) == 1 else None]
-    requests = [catalog.read_request(entry, values, p.pet_sn if p else None, seen) for p in targets]
+    pet_sns = None
+    label = None
+    if "pet_list" in entry.hooks:
+        # 여러 아이 일정 : Java 1번 호출. 모두면 petSns를 비워 Java가 양육 중인 전체를 준다
+        found = await pets.pets()
+        if not found:
+            return _ReadOutcome(ask=READ_NO_PET)
+        chosen = pets.targets(found)
+        if len(chosen) < len(found):
+            pet_sns = ",".join(str(p.pet_sn) for p in chosen)
+        # 결과 행에는 petSn만 있어 이름표를 붙인다
+        names = ", ".join(f"{p.pet_nm}(petSn {p.pet_sn})" for p in chosen)
+        label = READ_PET_LABEL.format(name=names)
+    requests = [
+        catalog.read_request(entry, values, p.pet_sn if p else None, seen, pet_sns) for p in targets
+    ]
     if any(request is None for request in requests):
         logger.info("READ 도구 필수 칸 없음: %s", entry.name)
         return _ReadOutcome(result=rules.READ_FAILED)
@@ -485,9 +453,9 @@ async def _read_once(
     started = time.perf_counter()
     datas = await asyncio.gather(*(fetch(r) for r in requests if r is not None))
     logger.info(
-        "READ 도구 시간: %s %d마리 %dms",
+        "READ 도구 시간: %s Java %d번 %dms",
         entry.name,
-        len(targets),
+        len(requests),
         (time.perf_counter() - started) * 1000,
     )
     if all(data is None for data in datas):
@@ -507,9 +475,11 @@ async def _read_once(
             text = rules.read_result_text(data, limit)
         if "pet" in entry.hooks and pet is not None:
             text = READ_PET_LABEL.format(name=pet.pet_nm) + "\n" + text
+        elif label is not None:
+            text = label + "\n" + text
         blocks.append(text)
-    if domains is not None:
-        domains.add(entry.domain)
+    if notice_reads is not None and entry.notice:
+        notice_reads.add(entry.name)
     return _ReadOutcome(result="\n\n".join(blocks))
 
 
@@ -523,15 +493,15 @@ async def _read_answer(
     today: date,
     read: ReadDeps,
     cards: list[ActionCard] | None = None,
-    domains: set[str] | None = None,
+    notice_reads: set[str] | None = None,
 ) -> AsyncIterator[str]:
     pets = _ReadPets(text, read)
     # 번호 칸은 이 턴 READ 결과에 나온 값만 (catalog.read_request)
     seen: dict[str, set[int]] = {}
     # 번호별 원래 행 : 수정 카드가 날짜만 바꿀 때 원래 시간을 씀(추가-3)
     rows: catalog.Rows = {}
-    # 되물음·실패만이면 domains가 비어 고지 없음(FN-AIM-002-03)
-    first = await _read_once(entry, decision.call, pets, seen, domains, rows)
+    # 되물음·실패만이거나 고지 READ가 아니면 notice_reads가 비어 고지 없음(FN-AIM-002-03)
+    first = await _read_once(entry, decision.call, pets, seen, notice_reads, rows)
     if first.ask is not None:
         yield first.ask
         return
@@ -560,7 +530,7 @@ async def _read_answer(
             logger.info("두 번째 도구 실행 안 함: %s", call.name)
             return None
         reads += 1
-        outcome = await _read_once(second, call, pets, seen, domains, rows)
+        outcome = await _read_once(second, call, pets, seen, notice_reads, rows)
         if outcome.ask is not None:
             return rules.READ_FAILED
         # READ 2번 뒤에도 쓰기 카드는 한 번 고를 수 있게 (2단계 ②, 목록 두 번 → 수정 카드)
@@ -594,18 +564,6 @@ def _read_shortcut(entry: catalog.CatalogEntry, text: str) -> Intent | None:
     # FN-AIM-002-04 : 첫 READ 도구의 화면, 매핑표에 그 행이 없으면 질문 글 룰 키워드
     row = rules.find_route(entry.screen, None) if entry.screen else None
     return row.to_intent() if row is not None else _keyword_shortcut(text)
-
-
-def _shortcut_of(classified: Classified) -> Intent | None:
-    # FN-AIM-004-08과 같이 매핑표의 라우팅 가능 행만 인정
-    if classified.related_scr_id is None:
-        return None
-    row = rules.find_route(classified.related_scr_id, classified.related_param)
-    return None if row is None else row.to_intent()
-
-
-async def judge_intent(text: str, has_image: bool, classifier: IntentClassifier) -> Intent:
-    return (await judge(text, has_image, classifier)).intent
 
 
 def route_message(scr_nm: str) -> str:
@@ -686,30 +644,16 @@ _running: set[asyncio.Task] = set()
 async def answer_turn(
     turn: Turn,
     repo: ConversationRepository,
-    classifier: IntentClassifier,
-    answers: AnswerGenerator,
+    agent: ToolAgent,
     ai: AiSettings,
     limits: AnswerLimits,
     register: "RegisterDeps | None" = None,
     titles: TitleGenerator | None = None,
-    agent: ToolAgent | None = None,
     reader: ToolReader | None = None,
 ) -> AsyncIterator[Event]:
     queue: asyncio.Queue[Event | None] = asyncio.Queue()
     task = asyncio.create_task(
-        _run_turn(
-            turn,
-            repo,
-            classifier,
-            answers,
-            ai,
-            limits,
-            queue.put_nowait,
-            register,
-            titles,
-            agent,
-            reader,
-        )
+        _run_turn(turn, repo, agent, ai, limits, queue.put_nowait, register, titles, reader)
     )
     _running.add(task)
     task.add_done_callback(_running.discard)
@@ -720,14 +664,12 @@ async def answer_turn(
 async def _run_turn(
     turn: Turn,
     repo: ConversationRepository,
-    classifier: IntentClassifier,
-    answers: AnswerGenerator,
+    agent: ToolAgent,
     ai: AiSettings,
     limits: AnswerLimits,
     emit: Callable[[Event | None], None],
     register: "RegisterDeps | None" = None,
     titles: TitleGenerator | None = None,
-    agent: ToolAgent | None = None,
     reader: ToolReader | None = None,
 ) -> None:
     try:
@@ -739,9 +681,8 @@ async def _run_turn(
             card = await build_card(text, turn.pet_sn, turn.draft, register)
         if card is not None:
             judged = Judged(Intent(kind=IntentKind.REGISTER))
-        elif agent is not None:
-            # 앱은 항상 이 흐름(2026-11-09) : 분류·목차 선택·등록 칸 추출을 도구 고르기 한 번으로
-            # agent None(기존 흐름)은 테스트 가짜 미주입 때만
+        else:
+            # 항상 이 흐름(2026-11-09) : 분류·목차 선택·등록 칸 추출을 도구 고르기 한 번으로
             context = build_context(turn.messages, turn.question.msg_seq, ai.context_turns)
             today = register.today if register is not None else rules.today_kst()
             now = datetime.combine(today, datetime.now(rules.KST).time())
@@ -761,20 +702,18 @@ async def _run_turn(
                 turn.action,
                 now,
             )
-        else:
-            judged = await judge(text, False, classifier)
         emit(("intent", judged.intent))
         kind = judged.intent.kind
         if kind is IntentKind.SEARCH:
+            if judged.stream is None:
+                # 도구 흐름의 SEARCH는 늘 답변 스트림을 줌 : 없으면 일시 오류
+                raise RuntimeError("SEARCH 판정에 답변 스트림 없음")
             answer = await _search_answer(
                 turn,
                 repo,
-                answers,
-                ai,
                 limits,
                 judged.shortcut,
                 emit,
-                guide_text(judged.guide_ids),
                 judged.stream,
                 judged.cards,
                 _notice(judged),
@@ -811,36 +750,39 @@ async def _run_turn(
 async def _search_answer(
     turn: Turn,
     repo: ConversationRepository,
-    answers: AnswerGenerator,
-    ai: AiSettings,
     limits: AnswerLimits,
     shortcut: Intent | None,
     emit: Callable[[Event | None], None],
-    guide: str | None = None,
-    started: AsyncIterator[str] | None = None,
+    stream: AsyncIterator[str],
     cards: list[ActionCard] | None = None,
     notice: Callable[[], bool] = lambda: True,
 ) -> str | None:
     # FN-AIM-002-02·07 : 완료면 고지 전 본문 반환(제목 요약용), 실패·미완료면 None
-    context = build_context(turn.messages, turn.question.msg_seq, ai.context_turns)
-    # started : 도구 흐름이 이미 시작한 답변 스트림
-    # 안내서가 없으면 guide 인자 없이 : 안내서를 모르는 답변기 구현과도 호환
-    if started is not None:
-        stream = started
-    elif guide is None:
-        stream = answers.stream(context, ai.max_tokens)
-    else:
-        stream = answers.stream(context, ai.max_tokens, guide=guide)
+    # stream : 도구 흐름이 이미 시작한 답변 스트림
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + limits.total_sec
+    started_at = loop.time()
+    deadline = started_at + limits.total_sec
+    first_deadline = started_at + limits.first_token_sec
     try:
         # 첫 글자 전 실패 : 미저장·안내, 사용자 메시지는 남아 [다시 시도]로 재호출
+        reason = "empty"
         try:
-            async with asyncio.timeout_at(min(deadline, loop.time() + limits.first_token_sec)):
+            async with asyncio.timeout_at(min(deadline, first_deadline)):
                 first = await anext(stream, None)
-        except (TimeoutError, AnswerError):
+        except TimeoutError:
             first = None
+            reason = "total_timeout" if deadline <= first_deadline else "first_token_timeout"
+        except AnswerError as error:
+            first = None
+            reason = error.reason
         if first is None:
+            # 추가 요청 : 실패 이유 한 줄(원문 없음)
+            logger.warning(
+                "답변 실패: 첫 글자 전 %s room=%d (%.0fms)",
+                reason,
+                turn.room_sn,
+                (loop.time() - started_at) * 1000,
+            )
             emit(("error", StreamError(code="EXTERNAL_API_ERROR", message=ANSWER_ERROR_MESSAGE)))
             return None
         chunks = [first]
@@ -852,9 +794,15 @@ async def _search_answer(
                     chunks.append(text)
                     emit(("delta", {"text": text}))
             complete = True
-        except (TimeoutError, AnswerError):
+        except (TimeoutError, AnswerError) as error:
             # 전체 시간 초과·도중 오류 : 부분 답변을 미완료로 저장
-            pass
+            logger.warning(
+                "답변 미완료: 도중 %s room=%d %d자 (%.0fms)",
+                error.reason if isinstance(error, AnswerError) else "total_timeout",
+                turn.room_sn,
+                sum(len(c) for c in chunks),
+                (loop.time() - started_at) * 1000,
+            )
     finally:
         await stream.aclose()
     body = "".join(chunks)
@@ -871,15 +819,13 @@ async def _search_answer(
     return body if complete else None
 
 
-HEALTH_DOMAIN = "health"
-
-
 def _notice(judged: Judged) -> Callable[[], bool]:
-    # FN-AIM-002-03 : READ 답변은 스트림이 끝난 뒤 health READ가 하나라도 성공했는지로 정함
+    # FN-AIM-002-03 : READ 답변은 스트림이 끝난 뒤 고지 READ(도구 notice)가 하나라도 성공했는지로
+    # 일정·케어 항목·일지 등 기록만 읽어 주는 READ는 고지 없음(2026-11-11)
     def decide() -> bool:
         if not judged.notice:
             return False
-        return judged.read_domains is None or HEALTH_DOMAIN in judged.read_domains
+        return judged.notice_reads is None or bool(judged.notice_reads)
 
     return decide
 

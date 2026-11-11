@@ -1,0 +1,7 @@
+Redraw the item in the LAST image as ONE pixel-art shop icon in the exact art style of the FIRST image: chunky square pixels, a dark outline and flat cel shading. Use the FIRST image only for the style, do not draw its animal.
+
+The shop calls the item "{item_nm}" and a small pet wears it {slot}.
+- Draw only the item itself, alone, front view, centered, filling about 80% of the canvas.
+- Keep the main colors, pattern, material and shape of the item in the photo so it is easy to recognize.
+- No pet, no person, no hands, no mannequin, no text, no shadow, no frame.
+- Fill the whole background with one flat pure magenta (#FF00FF) color and do not use magenta inside the item.

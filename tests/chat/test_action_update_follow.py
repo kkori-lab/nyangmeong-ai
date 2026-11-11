@@ -61,9 +61,9 @@ def test_READ_두_번_뒤에도_수정_카드를_고를_수_있어야_한다(cli
     agent = use_agent(
         client,
         ChainAgent(
-            "list_care_schedules",
+            "list_my_care_schedules",
             [
-                ("list_care_schedules", {}),
+                ("list_my_care_schedules", {}),
                 ("draft_schedule_update", {"schdl_sn": 31, "schdl_ymd": "2026-10-03"}),
             ],
             ("카드를 확인해 주세요.",),
@@ -86,8 +86,8 @@ def test_세_번째_READ는_실행하지_않아야_한다(client, java):
     agent = use_agent(
         client,
         ChainAgent(
-            "list_care_schedules",
-            [("list_care_schedules", {}), ("list_care_items", {})],
+            "list_my_care_schedules",
+            [("list_my_care_schedules", {}), ("list_care_items", {})],
             ("일정이에요.",),
         ),
     )
@@ -105,7 +105,7 @@ def test_카드를_띄운_뒤_고른_쓰기_도구는_실행하지_않아야_한
     agent = use_agent(
         client,
         ChainAgent(
-            "list_care_schedules",
+            "list_my_care_schedules",
             [("draft_schedule_update", raw), ("draft_schedule_update", raw)],
             ("카드를 확인해 주세요.",),
         ),
@@ -125,7 +125,7 @@ def test_카드를_띄운_뒤_고른_쓰기_도구는_실행하지_않아야_한
 @pytest.mark.parametrize(
     ("follows", "message"),
     [
-        ([("list_care_schedules", {})], READ_EMPTY_MESSAGE),
+        ([("list_my_care_schedules", {})], READ_EMPTY_MESSAGE),
         (
             [("draft_schedule_update", {"schdl_sn": 31, "schdl_nm": "검진"})],
             READ_EMPTY_CARD_MESSAGE,
@@ -133,7 +133,7 @@ def test_카드를_띄운_뒤_고른_쓰기_도구는_실행하지_않아야_한
     ],
 )
 def test_READ_답변이_0자로_끝나면_오류_대신_안내_글을_저장해야_한다(client, java, follows, message):
-    use_agent(client, ChainAgent("list_care_schedules", follows))
+    use_agent(client, ChainAgent("list_my_care_schedules", follows))
     use_reader(client, FakeToolReader(SCHEDULES))
     room = room_of(client, java, pet_sn=CHOCO)
 
@@ -148,13 +148,13 @@ def test_READ_답변이_0자로_끝나면_오류_대신_안내_글을_저장해�
 
 
 def _read_decision() -> ToolDecision:
-    use = {"type": "tool_use", "id": "toolu_1", "name": "list_care_schedules", "input": {}}
-    return ToolDecision(call=tools.parse("list_care_schedules", {}, "toolu_1"), content=(use,))
+    use = {"type": "tool_use", "id": "toolu_1", "name": "list_my_care_schedules", "input": {}}
+    return ToolDecision(call=tools.parse("list_my_care_schedules", {}, "toolu_1"), content=(use,))
 
 
 def test_follow가_ReadMore를_주면_한_번_더_도구를_고를_수_있어야_한다():
     bodies = [
-        tool_sse("list_care_schedules", {}),
+        tool_sse("list_my_care_schedules", {}),
         tool_sse("draft_schedule_update", {"schdl_sn": 31}),
         sse(["카드를 확인해 주세요."]),
     ]
@@ -171,7 +171,7 @@ def test_follow가_ReadMore를_주면_한_번_더_도구를_고를_수_있어야
         return [t async for t in stream]
 
     assert asyncio.run(run()) == ["카드를 확인해 주세요."]
-    assert calls == ["list_care_schedules", "draft_schedule_update"]
+    assert calls == ["list_my_care_schedules", "draft_schedule_update"]
     first, second, third = fake.requests
     assert first["tool_choice"]["type"] == "auto"
     assert second["tool_choice"]["type"] == "auto"
@@ -180,7 +180,7 @@ def test_follow가_ReadMore를_주면_한_번_더_도구를_고를_수_있어야
 
 def test_ReadMore가_두_번_와도_도구는_두_번까지만_고른다():
     bodies = [
-        tool_sse("list_care_schedules", {}),
+        tool_sse("list_my_care_schedules", {}),
         tool_sse("list_care_items", {}),
         sse(["답이에요."]),
     ]

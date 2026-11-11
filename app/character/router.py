@@ -109,6 +109,20 @@ async def create_bake_hint(
     return response.success(ItemBakeHintResponse(bake_hint=hint))
 
 
+# 상점 이미지용 : 관리자 프론트가 확인한 뒤 Java 아이템 등록에 이 그림을 올림
+@router.post("/items/pixel-image", dependencies=[Depends(require_admin)])
+async def create_pixel_image(
+    image: UploadFile,
+    regn_cd: Annotated[str, Form(alias="regnCd")],
+    item_nm: Annotated[str, Form(alias="itemNm", min_length=1, max_length=ITEM_NM_MAX)],
+    client: Annotated[CharacterClient | None, Depends(get_character_client)],
+) -> Response:
+    # 10MB + 1바이트까지만 읽기 : 초과 판정용
+    raw = await image.read(MAX_IMAGE_BYTES + 1)
+    png = await service.draw_item(client, raw, image.filename or "", regn_cd, item_nm)
+    return Response(png, media_type="image/png")
+
+
 @router.post("/items/trial-preview", dependencies=[Depends(require_admin)])
 async def trial_preview(
     body: ItemTrialRequest,

@@ -5,7 +5,7 @@ import logging
 import pytest
 
 from app.chat import rules, service, tools
-from app.chat.clients import Classified, ClassifiedKind, classify_system, tool_system
+from app.chat.clients import tool_system
 from app.chat.rules import DATA_DIR, MoveType
 from app.chat.schemas import RouteItem
 from tests.chat.conftest import AJAX, as_member
@@ -140,7 +140,6 @@ def test_관리자가_더한_지시어가_navigate_화면_목록과_프롬프트
     line = f"{target['aiRoutMpngSn']}. {target['trgtScrnNm']}: "
     assert any(s.startswith(line) and "물그릇" in s for s in tools.screen_list().split("\n"))
     assert "물그릇" in tool_system()
-    assert "물그릇" in classify_system()
 
 
 def test_사용_안_함인_행은_Java가_주지_않아_이동하지_않는다(client, java, room):
@@ -244,7 +243,7 @@ def test_안내서_바로가기는_행_번호가_바뀌어도_화면_ID로_이�
     ]
     rules.use_routes(rules.route_rows([RouteItem.model_validate(r) for r in moved]))
 
-    shortcut = service._guide_shortcut("6-1", Classified(ClassifiedKind.GUIDE, guide_id="6-1"))
+    shortcut = service._guide_shortcut("6-1")
 
     assert shortcut is not None
     assert (shortcut.scr_id, shortcut.scr_nm) == ("SCR-MYP-010", "캐릭터")

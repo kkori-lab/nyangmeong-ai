@@ -124,11 +124,6 @@ def match_route(text: str) -> RouteRow | None:
     return best
 
 
-@lru_cache
-def _question_markers() -> tuple[str, ...]:
-    return tuple(_compact(marker) for marker in _load("routing.yaml")["question_markers"])
-
-
 # 추가 요청(2026-11-09) : 문장 전체가 인사·감사·맞장구면 잡담. 건강 질문이 섞이면 잡담 아님
 _SMALL_TALK = re.compile(
     r"(안녕(하세요|하십니까|히계세요|히가세요)?|하이|헬로|반가워요?|반갑습니다"
@@ -153,14 +148,8 @@ def is_placeholder(text: str) -> bool:
     return _PLACEHOLDER.fullmatch(text.strip()) is not None
 
 
-def is_question(text: str) -> bool:
-    # 범위 밖 질문 차단(2026-10-30) : 키워드에 걸린 질문꼴 입력은 AI 분류로 확인
-    compact = _compact(text)
-    return any(marker in compact for marker in _question_markers())
-
-
 def find_route(scr_id: str, param: str | None) -> RouteRow | None:
-    # FN-AIM-004-08 : AI 분류 결과는 매핑표의 라우팅 가능 행에 있는 화면만 인정
+    # FN-AIM-004-08 : 매핑표의 라우팅 가능 행에 있는 화면만 인정
     for row in routing_table():
         if row.routable and row.scr_id == scr_id and row.param == param:
             return row
@@ -639,12 +628,29 @@ READ_FAILED = "기록을 불러오지 못함. 앱의 해당 화면에서 확인�
 READ_NOT_RUN = "이 도구는 실행하지 않음. 앞서 받은 결과만으로 답한다."
 
 
+_DATE_HEAD = re.compile(r"\d{4}-\d{2}-\d{2}(?![\d])")
+
+
+def _with_weekday(text: str) -> str:
+    # 날짜(일시)로 시작하는 값 : LLM이 요일을 직접 계산하지 않게 (요일) 붙임
+    match = _DATE_HEAD.match(text)
+    if match is None:
+        return text
+    try:
+        day = date.fromisoformat(match.group())
+    except ValueError:
+        return text
+    return f"{match.group()} ({WEEKDAYS[day.weekday()]}){text[match.end() :]}"
+
+
 def _drop_free_text(value: object) -> object:
     # 내용(…Cn) 칸 : 메모·자유 입력 글이라 외부 AI API로 보내지 않음
     if isinstance(value, dict):
         return {k: _drop_free_text(v) for k, v in value.items() if not k.endswith("Cn")}
     if isinstance(value, list):
         return [_drop_free_text(item) for item in value]
+    if isinstance(value, str):
+        return _with_weekday(value)
     return value
 
 

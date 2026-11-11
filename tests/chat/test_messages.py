@@ -5,7 +5,7 @@ import httpx2
 import pytest
 
 from app.chat import clients, repository, service
-from app.chat.clients import AnswerError, Classified, ClassifiedKind, ClassifyError
+from app.chat.clients import AnswerError
 from app.chat.schemas import ROLE_AI, ConversationMessage
 from app.chat.service import (
     ANSWER_ERROR_MESSAGE,
@@ -17,7 +17,7 @@ from app.chat.service import (
 )
 from app.core.config import get_settings
 from tests.chat.conftest import AJAX, ROLE_USER, FakeJava, _ok, as_member, member_of
-from tests.chat.fakes import FakeIntentClassifier, FakeTitleGenerator
+from tests.chat.fakes import FakeBasicToolAgent, FakeTitleGenerator, FakeToolAgent
 
 SEARCH_TEXT = "강아지 포도 먹어도 돼?"
 
@@ -57,41 +57,28 @@ class MessageJava(FakeJava):
         return [m for m in self.rooms[room_sn]["messages"] if m["roleCd"] == ROLE_AI]
 
 
-class Answers:
-    """가짜 답변 생성기. chunks 출력, fail이면 그 자리에서 AnswerError, hang이면 정지"""
+class Answers(FakeBasicToolAgent):
+    """가짜 도구 고르기의 바로 답 글. chunks 출력, fail이면 그 자리에서 AnswerError, hang이면 정지
+    - calls : 답 글을 만든 호출(컨텍스트, max_tokens). 이동·폴백이면 기록 없음"""
 
     def __init__(self, chunks=("포도는 ", "강아지에게 위험해요."), fail=None, hang=None):
+        super().__init__()
         self.chunks = chunks
-        self.fail = fail  # 몇 번째 조각 앞에서 실패할지
+        self.fail_at = fail  # 몇 번째 조각 앞에서 실패할지
         self.hang = hang  # 몇 번째 조각 앞에서 멈출지
         self.calls: list[tuple[list[dict], int]] = []
 
-    async def stream(self, messages, max_tokens):
+    def reply(self, messages, max_tokens):
         self.calls.append((messages, max_tokens))
+        return self.stream()
+
+    async def stream(self):
         for i, chunk in enumerate(self.chunks):
-            if self.fail == i:
+            if self.fail_at == i:
                 raise AnswerError("api_error")
             if self.hang == i:
                 await asyncio.sleep(5)
             yield chunk
-
-
-class FixedClassifier:
-    def __init__(self, result: Classified) -> None:
-        self.result = result
-
-    async def classify(self, text: str, hint=None) -> Classified:
-        return self.result
-
-
-class BrokenClassifier:
-    # LLM 장애 흉내 : AnthropicIntentClassifier는 API 오류·시간 초과면 ClassifyError
-    def __init__(self) -> None:
-        self.calls = 0
-
-    async def classify(self, text: str, hint=None) -> Classified:
-        self.calls += 1
-        raise ClassifyError("api_error")
 
 
 @pytest.fixture
@@ -101,14 +88,12 @@ def java() -> MessageJava:
 
 @pytest.fixture
 def answers(client) -> Answers:
-    fake = Answers()
-    client.app.dependency_overrides[clients.get_answer_generator] = lambda: fake
-    return fake
+    return use(client, Answers())
 
 
-def use(client, answers: Answers) -> Answers:
-    client.app.dependency_overrides[clients.get_answer_generator] = lambda: answers
-    return answers
+def use(client, agent):
+    client.app.dependency_overrides[clients.get_tool_agent] = lambda: agent
+    return agent
 
 
 def limits(monkeypatch, first: float, total: float) -> None:
@@ -273,41 +258,37 @@ def test_이동_안내는_받침에_맞춰_조사를_붙인다(scr_nm, expected)
     assert route_message(scr_nm) == expected
 
 
-def test_분류_LLM_장애면_폴백이_아니라_error_이벤트(client, java, answers):
+def test_도구_고르기_LLM_장애면_폴백이_아니라_error_이벤트(client, java):
     # 2026-10-29 결정 : 장애는 사용자 입력 실패(폴백·연속 실패)로 미집계
-    broken = BrokenClassifier()
-    client.app.dependency_overrides[clients.get_intent_classifier] = lambda: broken
+    broken = use(client, FakeToolAgent(fail=True))
     as_member(client, 1)
     room = java.add_room(1, "제목")
     evs = events(send(client, room, SEARCH_TEXT))
 
     assert names(evs) == ["error"]
     assert evs[0][1] == {"code": "EXTERNAL_API_ERROR", "message": ANSWER_ERROR_MESSAGE}
-    assert broken.calls == 1
+    assert len(broken.decides) == 1
     assert java.ai_messages(room) == []
-    assert answers.calls == []
 
 
-def test_LLM_장애여도_룰_라우팅은_ROUTE(client, java, answers):
-    # FN-AIM-002-10 : 분류 LLM이 실패 상태여도 룰 매칭은 LLM 앞에서 종료
-    broken = BrokenClassifier()
-    client.app.dependency_overrides[clients.get_intent_classifier] = lambda: broken
+def test_LLM_장애여도_룰_라우팅은_ROUTE(client, java):
+    # FN-AIM-002-10 : 도구 고르기가 실패해도 키워드에 걸린 행으로 이동
+    use(client, FakeToolAgent(fail=True))
     as_member(client, 1)
     room = java.add_room(1, "제목")
     evs = events(send(client, room, "일정 등록할래"))
 
     assert evs[0][1]["kind"] == "ROUTE"
-    assert broken.calls == 0
+    assert evs[0][1]["scrId"] == "SCR-HLT-003"
 
 
-def test_등록_요청은_판정만_준다(client, java, answers):
-    # 등록 흐름은 SCR-AIM-012에서 이어짐
+def test_등록_요청은_라우팅_키워드_힌트_없이_도구_고르기로(client, java, answers):
+    # FN-AIM-004-13 : 등록 요청은 라우팅 키워드보다 먼저, 칸은 도구 인자로(SCR-AIM-012)
     as_member(client, 1)
     room = java.add_room(1, "제목")
-    evs = events(send(client, room, "매일 산책 추가해 주세요"))
+    events(send(client, room, "매일 산책 추가해 주세요"))
 
-    assert names(evs) == ["intent", "done"]
-    assert evs[0][1]["kind"] == "REGISTER"
+    assert [hint for _, _, hint in answers.decides] == [None]
     assert answers.calls == []
 
 
@@ -325,11 +306,9 @@ def test_매칭_실패는_안내_문구를_AI_메시지로_저장(client, java, 
 
 
 @pytest.mark.parametrize("text", ["가계부 작성 방법 알려줘", "파이썬 코딩 알려줘"])
-def test_서비스_범위_밖_질문은_범위_안내_문구를_저장(client, java, answers, text):
+def test_서비스_범위_밖_질문은_범위_안내_문구를_저장(client, java, text):
     # 2026-10-30 추가 요청 : 의도는 FALLBACK 그대로, 문구만 범위 안내
-    client.app.dependency_overrides[clients.get_intent_classifier] = lambda: FixedClassifier(
-        Classified(ClassifiedKind.OUT_OF_SCOPE)
-    )
+    use(client, FakeToolAgent("decline", {"unclear": False}))
     as_member(client, 1)
     room = java.add_room(1, "제목")
     evs = events(send(client, room, text))
@@ -338,18 +317,13 @@ def test_서비스_범위_밖_질문은_범위_안내_문구를_저장(client, j
     assert evs[0][1]["kind"] == "FALLBACK"
     assert evs[1][1]["message"]["cnvrsCn"] == OUT_OF_SCOPE_MESSAGE
     assert [m["cnvrsCn"] for m in java.ai_messages(room)] == [OUT_OF_SCOPE_MESSAGE]
-    assert answers.calls == []
 
 
 def test_연관_화면이_있으면_완료에_바로가기를_주고_저장하지_않는다(client, java, answers):
-    # FN-AIM-002-04
-    related = Classified(ClassifiedKind.SEARCH, related_scr_id="SCR-HLT-003")
-    client.app.dependency_overrides[clients.get_intent_classifier] = lambda: FixedClassifier(
-        related
-    )
+    # FN-AIM-002-04 : 바로 답한 질문 글이 룰 키워드에 걸리면 그 행이 바로가기
     as_member(client, 1)
     room = java.add_room(1, "제목")
-    evs = events(send(client, room, SEARCH_TEXT))
+    evs = events(send(client, room, "일정 등록은 언제 하는 게 좋아?"))
 
     done = evs[-1][1]
     assert done["shortcut"]["kind"] == "ROUTE"
@@ -357,11 +331,7 @@ def test_연관_화면이_있으면_완료에_바로가기를_주고_저장하�
     assert "SCR-HLT-003" not in java.ai_messages(room)[0]["cnvrsCn"]
 
 
-def test_매핑표에_없는_연관_화면은_바로가기_없음(client, java, answers):
-    related = Classified(ClassifiedKind.SEARCH, related_scr_id="SCR-NONE-999")
-    client.app.dependency_overrides[clients.get_intent_classifier] = lambda: FixedClassifier(
-        related
-    )
+def test_키워드에_안_걸린_질문은_바로가기_없음(client, java, answers):
     as_member(client, 1)
     room = java.add_room(1, "제목")
     evs = events(send(client, room, SEARCH_TEXT))
@@ -428,8 +398,8 @@ def test_전체_시간_초과는_부분_답변을_미완료로_저장(client, ja
 class SlowAnswers(Answers):
     """조각 사이에 잠깐 휴지. 연결이 끊긴 뒤에도 생성 유지"""
 
-    async def stream(self, messages, max_tokens):
-        async for chunk in super().stream(messages, max_tokens):
+    async def stream(self):
+        async for chunk in super().stream():
             await asyncio.sleep(0.05)
             yield chunk
 
@@ -446,9 +416,7 @@ def test_연결이_끊겨도_답변을_끝까지_만들어_완료로_저장(clie
         backend = httpx2.AsyncClient(transport=httpx2.MockTransport(java))
         repo = repository.JavaConversationRepository(backend, settings, "access_token=member-1")
         turn = await service.prepare_turn(repo, room, None)
-        events = service.answer_turn(
-            turn, repo, FakeIntentClassifier(), answers, repository.AiSettings(), limits
-        )
+        events = service.answer_turn(turn, repo, answers, repository.AiSettings(), limits)
         first = await anext(events)
         # 연결이 끊기면 StreamingResponse가 이벤트 제너레이터 종료
         await events.aclose()
@@ -744,9 +712,8 @@ def test_요약_제목은_30자로_자른다(client, java, answers):
 # 키 없는 PC·CI : 가짜를 끼우지 않으면 실제 API 대신 502
 
 
-@pytest.mark.parametrize("getter", [clients.get_intent_classifier, clients.get_answer_generator])
-def test_LLM_키가_없으면_메시지_전송은_502(client, java, getter):
-    del client.app.dependency_overrides[getter]
+def test_LLM_키가_없으면_메시지_전송은_502(client, java):
+    del client.app.dependency_overrides[clients.get_tool_agent]
     as_member(client, 1)
     room = java.add_room(1, "제목")
     res = client.post(f"/ai/conversations/{room}/messages", json={"cnvrsCn": "안녕"}, headers=AJAX)
@@ -756,7 +723,7 @@ def test_LLM_키가_없으면_메시지_전송은_502(client, java, getter):
 
 
 def test_LLM_키가_없어도_쿠키가_없으면_401(client, java):
-    del client.app.dependency_overrides[clients.get_intent_classifier]
+    del client.app.dependency_overrides[clients.get_tool_agent]
     room = java.add_room(1, "제목")
     res = client.post(f"/ai/conversations/{room}/messages", json={"cnvrsCn": "안녕"}, headers=AJAX)
 
@@ -775,7 +742,7 @@ def test_LLM_키가_없으면_대화_생성은_502(client):
 def test_LLM_키가_없어도_대화_목록은_된다(client, java):
     as_member(client, 1)
     java.add_room(1, "제목")
-    for getter in (clients.get_title_generator, clients.get_intent_classifier):
+    for getter in (clients.get_title_generator, clients.get_tool_agent):
         del client.app.dependency_overrides[getter]
     res = client.get("/ai/conversations", headers=AJAX)
 

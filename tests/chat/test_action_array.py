@@ -91,11 +91,12 @@ def test_배열과_파일_칸이_있는_도구를_버리지_않고_실어야_한
     assert cycle.call.content_type == "multipart/form-data"
 
 
-def test_영수증_저장은_설명이_없어_싣지_않지만_설명을_주면_중첩_배열까지_읽어야_한다(caplog):
-    with caplog.at_level(logging.WARNING, logger="app.chat.catalog"):
+def test_영수증_저장은_skip이라_싣지_않지만_설명을_주면_중첩_배열까지_읽어야_한다(caplog):
+    with caplog.at_level(logging.INFO, logger="app.chat.catalog"):
         built = build(fake_catalog_json())
     assert "draft_receipt_save" not in built.entries
-    assert "draft_receipt_save 설명 없음" in caplog.text
+    assert "draft_receipt_save 싣지 않음(" in caplog.text
+    assert "draft_receipt_save 설명 없음" not in caplog.text
 
     entry = receipt_entry()
     drugs = entry.params["pets"].items["drugs"]

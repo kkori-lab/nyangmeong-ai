@@ -1,5 +1,5 @@
 import re
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from functools import lru_cache
 from pathlib import Path
 
@@ -13,8 +13,9 @@ MAX_PDF_BYTES = 10 * 1024 * 1024
 PDF_SIGNATURE = b"%PDF-"
 _NUMBER = re.compile(r"-?\d+(\.\d+)?")
 # INSP_NVL 컬럼 크기 : 수치 decimal(15,4), 직접입력명 40자, 단위 20자
+# 백엔드 검증은 소수 둘째 자리까지(2026-11-11) : 셋째 자리에서 사사오입
 MAX_INT_DIGITS = 11
-MAX_FRACTION_DIGITS = 4
+FRACTION_DIGITS = 2
 MAX_DRCT_INPT_NM = 40
 MAX_UNIT_NM = 20
 
@@ -73,18 +74,18 @@ def is_standard(code: str) -> bool:
 
 
 def normalize_number(value: str | None) -> float | None:
-    """숫자만 추출 (쉼표·공백 제거), '<0.5'·'음성'·decimal(15,4) 초과는 null"""
+    """숫자만 추출(쉼표·공백 제거), 소수 둘째 자리로 반올림
+    - '<0.5'·'음성'·정수부 11자리 초과는 null"""
     if value is None:
         return None
     text = re.sub(r"[\s,]", "", value)
     if not _NUMBER.fullmatch(text):
         return None
     try:
-        number = Decimal(text)
+        number = Decimal(text).quantize(Decimal(1).scaleb(-FRACTION_DIGITS), ROUND_HALF_UP)
     except InvalidOperation:
         return None
-    integer, _, fraction = text.lstrip("-").partition(".")
-    if len(integer.lstrip("0")) > MAX_INT_DIGITS or len(fraction) > MAX_FRACTION_DIGITS:
+    if len(str(abs(number)).partition(".")[0].lstrip("0")) > MAX_INT_DIGITS:
         return None
     return float(number)
 

@@ -19,6 +19,9 @@
 | 공통코드 값 | Java가 DB에서 읽어 응답에 넣는다. 파일·문서에 적지 않는다 | 공통코드는 DB에만 둔다 |
 | LLM에 주는 `required` | 주지 않는다. 필수 판단은 Python이 Java 규칙으로 한다 | 필수라고 하면 LLM이 값을 지어낸다 |
 | 범위 | 아래 2절 (1단계 읽기에서 알림·채팅 제외, 2단계 쓰기는 건강·가계부만) | 2026-11-05 사람 지정 |
+| 도메인 고르기 (2026-11-11) | 도메인별로 나눠 싣지 않고 열린 도구를 모두 싣는다(도구 정의는 요청 맨 앞이라 프롬프트 캐시에 든다). 도메인을 열 때마다 `tool_eval`로 정답 수·쓰기 잘못 고름 0·첫 글자 시간을 재고, 떨어지면 Anthropic tool search(BM25, `defer_loading`)로 바꾸는 마일스톤을 연다 | 분류 LLM은 지웠고, 룰 앞단 도메인 판정은 섞인 질문("애들 몸무게랑 이번 달 지출")을 놓치고, 두 단계 고르기는 첫 글자 앞에 LLM 호출 1번을 더한다 |
+| READ 답변의 의료 고지 (2026-11-11) | FN-AIM-002-03 "건강 관련 응답"을 Java `domain` 대신 `tool_prompts.yaml`의 `notice: true`로 정한다. 그 READ가 한 턴에 하나라도 성공하면 답변 끝에 고지. 지금 `get_health_indicators`·`list_inspection_values`·`list_observation_items`·`list_observation_cycles`(수치·변화를 보고 상담을 권하는 답)와 `list_prescriptions`(약 정보). 일정·케어 항목·케어 완료·건강 일지·검진 기록·기타검사·반복 예방은 기록만 읽어 주는 답이라 붙이지 않는다. 카드 도구에 쓰면 싣지 않고 경고 | health 도메인 전체에 붙이니 "다음 주 일정 뭐 있어?"에도 고지가 붙었다. 도구 없이 바로 쓴 글 답변은 그대로(잡담만 빼고 고지) |
+| 싣지 않는 Java 도구 (2026-11-11) | `tool_prompts.yaml`에 `skip: <이유>`만 두면 싣지 않고 info 로그 1줄. 지금 `draft_receipt_save`(영수증 번호 READ 없음)·`list_faqs`(사용법 문항이 `search_guide`와 겹침). `list_care_schedules`는 Java 목록에서 빠졌고 `list_places`는 좌표가 선택이 되어 열었다(백엔드 #227) | 설명 없음 경고는 빠뜨린 도구에만 남긴다 |
 
 ## 2. 범위
 
@@ -133,7 +136,7 @@
 
 | 파일 | 내용 |
 | --- | --- |
-| `data/tool_prompts.yaml` | 도구 이름별 설명(쓸 때·쓰지 않을 때·예문·말하는 법), hook 이름, 결과 요약 방식. 코드 값은 적지 않는다 |
+| `data/tool_prompts.yaml` | 도구 이름별 설명(쓸 때·쓰지 않을 때·예문·말하는 법), hook 이름, 결과 요약 방식, READ의 의료 고지 여부(`notice: true`, 1절). 코드 값은 적지 않는다 |
 | `data/tools.snapshot.json` | Java 응답의 구조 부분(코드 값 제외). CI·평가·Java 장애 때 기준. 6절 |
 | `app/chat/catalog.py`(가칭) | 목록 받기·합치기·모델 만들기·version 확인 |
 
@@ -152,14 +155,14 @@
 ### 4-3. 한 턴
 
 ```
-메시지 → 룰 앞단(지금과 같음) → 도메인 고르기 → 그 도메인 도구 + navigate·search_guide·decline으로 LLM 도구 선택
+메시지 → 룰 앞단(지금과 같음, 키워드 행은 힌트) → 열린 도구 전부 + navigate·search_guide·decline으로 LLM 도구 선택
   ├─ READ  → 인자 검증 → Python이 Java 공개 API를 브라우저 Cookie 그대로 실어 호출 → 결과 요약을 tool_result로 → 답변 스트리밍
   ├─ CARD  → 인자 검증(틀린 칸 비움) → Java 규칙(required·rules) + hook으로 빈 칸 → 되물음 카드 또는 확인 카드
   │          → 회원 [확인] → React가 Java 공개 API 실행 → 실패하면 fieldErrors의 칸만 다시 묻기, 없으면 navigate 안내
   └─ navigate·search_guide·decline → 지금과 같음
 ```
 
-- 도메인 고르기: 도구 수십 개를 한 번에 싣지 않는다. 지금 분류 LLM 자리에서 도메인을 고르거나, 도메인이 분명한 룰 앞단 결과를 쓴다(결정 남음).
+- 도메인 고르기: 나눠 싣지 않고 열린 도구를 모두 싣는다(1절 2026-11-11 결정). 정확도·첫 글자 시간이 떨어지면 tool search로 바꾼다.
 - 인증: Python → Java는 브라우저에서 받은 `Cookie`를 그대로 보내고 회원은 Java가 판정한다(2026-10-27 결정, `docs/api/internal.md`).
   `mbrSn`을 넘기지 않는다. 읽기도 Java 공개 API의 소유 검사를 그대로 탄다.
 - 읽기 결과는 대화 이력에 원문을 남기지 않는다. 답변 글만 저장된다(지금 이력 규칙).
@@ -170,6 +173,7 @@
 | hook | 하는 일 |
 | --- | --- |
 | `pet` | `petSn`을 문장과 대화의 반려동물로 정한다(지금 FN-AIM-012-04 규칙) |
+| `pet_list` | 여러 아이 READ(`list_my_care_schedules`)의 `petSns`. `pet`과 같은 순서(문장 속 이름 > 펫 태그 방의 아이 > 모두)로 고른 번호를 쉼표로 잇고, 모두면 비워 Java가 양육 중인 전체를 준다. Java 1번 호출, 결과 앞에 `이름(petSn 번호)` 줄 |
 | `date` | "다음 주 화요일" 같은 말을 오늘 기준 날짜로(지금 등록 칸 추출과 같음) |
 | `same_name_warning` | 같은 이름 케어 항목 경고(FN-AIM-012-08) |
 | `duplicate_expense` | 지출 중복 확인(`/api/expenses/duplicate-check`) |
@@ -225,7 +229,6 @@
 
 ## 9. 결정 남음
 
-- 도메인 고르기 방법(분류 LLM에 도메인 칸 추가 vs 룰 앞단 vs 두 단계 도구 선택)
 - 정상으로 받은 뒤에도 몇 분마다 다시 받을지(기동 실패 때 다시 받기는 4-2절 5번)와 Java 장애 때 카드 도구를 끌지
 - 읽기 결과가 길 때(지출 목록 수백 건) 자르는 기준: Java 쪽 페이지 크기 vs Python 요약
 - 2단계 실행을 React가 할지, 확인 토큰을 받아 서버가 할지(지금 원칙은 React)

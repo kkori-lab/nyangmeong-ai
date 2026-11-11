@@ -4,7 +4,6 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date
-from enum import StrEnum
 from functools import lru_cache
 from typing import Annotated, Protocol
 
@@ -143,93 +142,26 @@ def get_title_generator(settings: Annotated[Settings, Depends(get_settings)]) ->
     return AnthropicTitleGenerator(get_anthropic_client(settings), settings.llm_model)
 
 
-class ClassifiedKind(StrEnum):
-    ROUTE = "ROUTE"
-    SEARCH = "SEARCH"
-    UNKNOWN = "UNKNOWN"
-    # 서비스 범위 밖 질문(2026-10-30) : 폴백이지만 안내 문구가 다름
-    OUT_OF_SCOPE = "OUT_OF_SCOPE"
-    # 앱 기능의 위치·사용법 질문(2026-11-05) : 안내서 근거 답변, 응답 intent는 SEARCH
-    GUIDE = "GUIDE"
-
-
-@dataclass(frozen=True)
-class Classified:
-    kind: ClassifiedKind
-    # ROUTE일 때 매핑표의 화면 ID·파라미터 : 매핑표에 없으면 서비스가 폐기
-    scr_id: str | None = None
-    param: str | None = None
-    # SEARCH일 때 답과 관련된 화면(FN-AIM-002-04 연관 바로가기). 매핑표에 있는 행만
-    related_scr_id: str | None = None
-    related_param: str | None = None
-    # GUIDE일 때 안내서 목차에서 고른 청크. 안내서에 없는 id는 None
-    guide_id: str | None = None
-
-
 class ClassifyError(Exception):
-    """분류 LLM 장애(API 오류·시간 초과). reason은 로그용 실패 종류(원문 없음)"""
+    """도구 고르기 LLM 장애(API 오류·시간 초과). reason은 로그용 실패 종류(원문 없음)"""
 
     def __init__(self, reason: str):
         super().__init__(reason)
         self.reason = reason
 
 
-class IntentClassifier(Protocol):
-    # FN-AIM-004-02 : 룰 매칭에 실패한 입력에만 부르는 보조 분류. 장애면 ClassifyError
-    # hint : 키워드에 걸린 질문꼴 입력의 룰 행(서비스 범위 확인용, 2026-10-30)
-    async def classify(self, text: str, hint: rules.RouteRow | None = None) -> Classified: ...
-
-
-class ClassifyOutput(BaseModel):
-    # 구조화 출력 모양. route_num은 매핑표(data/routing.yaml)의 num
-    kind: ClassifiedKind
-    route_num: int | None = None
-    # SEARCH·GUIDE일 때 답과 관련된 화면 번호(FN-AIM-002-04)
-    related_num: int | None = None
-    # GUIDE일 때 안내서 목차의 청크 번호(2단계 목차 선택)
-    guide_id: str | None = None
-
-
-def classify_system() -> str:
-    return _classify_system(rules.routing_table())
-
-
-@lru_cache(maxsize=2)
-def _classify_system(table: tuple[rules.RouteRow, ...]) -> str:
-    # 매핑표의 라우팅 대상 행만 : 관리자가 매핑표를 바꿀 때까지 같은 글
-    screens = "\n".join(
-        f"{row.no}. {row.name}: {', '.join(row.keywords)}" for row in table if row.routable
-    )
-    return (
-        "반려동물 케어 앱 AI 대화창의 사용자 입력을 하나로 분류한다.\n"
-        "서비스 범위: 반려동물의 건강·증상·질병·사료·간식·행동·훈련·미용·산책·병원·"
-        "케어 일정, 반려동물 지출(가계부), 이 앱의 화면과 기능 사용법.\n"
-        "병원·진료·미용·산책·사료·간식·예방접종·펫시터처럼 이 앱에서 반려동물 일로 읽히는 "
-        "말과 알림·설정·게시판처럼 앱 기능을 가리키는 말은 그것만으로 범위 안이다. "
-        "가계부·일정·지출처럼 앱 밖 일상에서도 쓰는 말은 "
-        "반려동물(반려동물·강아지·고양이·우리 아이·반려동물 이름 등)이나 이 앱(앱·여기·"
-        "이 화면 등)을 가리키는 말이 함께 없으면, 그 일반 방법·지식을 묻는 질문은 범위 밖이다. "
-        "예: '가계부 작성 방법 알려줘'·'일정 관리 잘하는 법'은 OUT_OF_SCOPE,"
-        "'강아지 가계부 쓰는 법 알려줘'·'앱에서 가계부 어떻게 써'·'병원 어디가 좋아?'는 범위 안.\n"
-        "- ROUTE: 서비스 범위 안에서 아래 화면 중 하나로 가려는 요청. "
-        "route_num에 그 화면 번호를 쓴다.\n"
-        "- GUIDE: 서비스 범위 안에서 이 앱 기능의 위치나 사용 방법을 묻는 질문"
-        "(예: '캐릭터 어디서 만들어?'·'가족 초대 어떻게 해?'·'알림 어디서 꺼?'). "
-        "guide_id에 아래 안내서 목차에서 가장 맞는 번호 하나를, 맞는 것이 없으면 null을 쓴다. "
-        "화면 키워드가 들어 있어도 그 기능의 위치·사용법을 물으면 ROUTE가 아니라 GUIDE.\n"
-        "- SEARCH: 서비스 범위 안에서 답을 찾아 줘야 하는 그 밖의 질문"
-        "(반려동물 건강·생활 정보 등).\n"
-        "- OUT_OF_SCOPE: 뜻은 분명하지만 서비스 범위 밖인 질문·요청(반려동물·이 앱과 관계없는 "
-        "일반 질문, 예: 집 가계부 쓰는 법·요리·코딩). "
-        "화면 키워드가 들어 있어도 서비스 범위 밖이면 OUT_OF_SCOPE.\n"
-        "- UNKNOWN: 그 밖의 입력(뜻 없는 글자, 욕설, 판단하기 어려운 것). "
-        "확실하지 않으면 UNKNOWN.\n"
-        "ROUTE가 아니면 route_num은 null. GUIDE가 아니면 guide_id는 null.\n"
-        "SEARCH·GUIDE이고 답과 관련된 화면이 아래에 있으면 related_num에 그 번호를, "
-        "없으면 null을 쓴다.\n\n"
-        f"화면 목록(번호. 화면명: 키워드)\n{screens}\n\n"
-        f"안내서 목차(번호 화면명 · 할 일)\n{_guide_toc()}"
-    )
+# 서비스 범위 규칙 : 도구 system 프롬프트 앞부분(옛 분류 프롬프트에서 옮김, 글은 같음)
+SERVICE_SCOPE = (
+    "서비스 범위: 반려동물의 건강·증상·질병·사료·간식·행동·훈련·미용·산책·병원·"
+    "케어 일정, 반려동물 지출(가계부), 이 앱의 화면과 기능 사용법.\n"
+    "병원·진료·미용·산책·사료·간식·예방접종·펫시터처럼 이 앱에서 반려동물 일로 읽히는 "
+    "말과 알림·설정·게시판처럼 앱 기능을 가리키는 말은 그것만으로 범위 안이다. "
+    "가계부·일정·지출처럼 앱 밖 일상에서도 쓰는 말은 "
+    "반려동물(반려동물·강아지·고양이·우리 아이·반려동물 이름 등)이나 이 앱(앱·여기·"
+    "이 화면 등)을 가리키는 말이 함께 없으면, 그 일반 방법·지식을 묻는 질문은 범위 밖이다. "
+    "예: '가계부 작성 방법 알려줘'·'일정 관리 잘하는 법'은 OUT_OF_SCOPE,"
+    "'강아지 가계부 쓰는 법 알려줘'·'앱에서 가계부 어떻게 써'·'병원 어디가 좋아?'는 범위 안.\n"
+)
 
 
 def _guide_toc() -> str:
@@ -238,133 +170,12 @@ def _guide_toc() -> str:
     )
 
 
-def classify_system_blocks(hint: rules.RouteRow | None = None) -> list[dict]:
-    # 고정 규칙·목차(약 7,800토큰)는 캐시, 요청마다 다른 키워드 힌트는 캐시 뒤 블록
-    blocks: list[dict] = [
-        {"type": "text", "text": classify_system(), "cache_control": {"type": "ephemeral"}}
-    ]
-    note = _hint_note(hint)
-    if note:
-        blocks.append({"type": "text", "text": note.strip()})
-    return blocks
-
-
-def _routable_row(num: int | None) -> rules.RouteRow | None:
-    return next((row for row in rules.routing_table() if row.no == num and row.routable), None)
-
-
-def _route_of(num: int | None) -> Classified:
-    # 매핑표에 없는 번호·라우팅 대상 아닌 행 : 판단 못 함 처리
-    row = _routable_row(num)
-    if row is None:
-        return Classified(ClassifiedKind.UNKNOWN)
-    return Classified(ClassifiedKind.ROUTE, scr_id=row.scr_id, param=row.param)
-
-
-def _search_of(related_num: int | None) -> Classified:
-    # 연관 화면 번호가 매핑표에 없으면 바로가기 없이 검색
-    row = _routable_row(related_num)
-    if row is None:
-        return Classified(ClassifiedKind.SEARCH)
-    return Classified(ClassifiedKind.SEARCH, related_scr_id=row.scr_id, related_param=row.param)
-
-
-def _guide_of(output: ClassifyOutput) -> Classified:
-    # 목차에 없는 번호는 버림 : M1 결과도 없으면 서비스가 범위 안내
-    related = _search_of(output.related_num)
-    chunk = rules.find_guide(output.guide_id)
-    return Classified(
-        ClassifiedKind.GUIDE,
-        related_scr_id=related.related_scr_id,
-        related_param=related.related_param,
-        guide_id=chunk.id if chunk else None,
-    )
-
-
-def _hint_note(hint: rules.RouteRow | None) -> str:
-    # 키워드에 걸린 화면 알림 : 범위 안 이동이면 ROUTE, 범위 밖이면 OUT_OF_SCOPE
-    if hint is None:
-        return ""
-    return (
-        f"\n\n이 입력은 키워드로 {hint.no}번 화면({hint.name})에 걸렸다. "
-        "키워드가 걸린 것만으로 범위 안이 아니다. 위 서비스 범위 규칙대로 범위 밖이면 OUT_OF_SCOPE."
-        "범위 안에서 그 화면으로 가려는 요청이나 그 화면에 있는 내 기록을 묻는 질문"
-        "(예: '이번 달 병원비 얼마 나왔어?')이면 ROUTE, "
-        "그 화면 기능의 위치·사용법을 묻는 질문(예: '캐릭터 꾸미기 어디서 해?')이면 GUIDE, "
-        "그 밖의 범위 안 질문이면 SEARCH."
-    )
-
-
-class AnthropicIntentClassifier:
-    # FN-AIM-004-02 : API 오류·시간 초과 -> ClassifyError (error 이벤트, 2026-10-29 결정)
-    # 거절·깨진 출력은 입력 탓으로 보고 UNKNOWN (FN-AIM-004-12 폴백)
-    def __init__(self, client: AsyncAnthropic, model: str):
-        self.client = client
-        self.model = model
-
-    async def classify(self, text: str, hint: rules.RouteRow | None = None) -> Classified:
-        started = time.monotonic()
-        try:
-            response = await self.client.messages.parse(
-                model=self.model,
-                max_tokens=LLM_MAX_TOKENS,
-                system=classify_system_blocks(hint),
-                messages=[{"role": "user", "content": text}],
-                output_config={"effort": LLM_EFFORT},
-                output_format=ClassifyOutput,
-            )
-        except anthropic.APIError as error:
-            reason = _failure_reason(error)
-            _log_failure("의도 분류", started, reason)
-            raise ClassifyError(reason) from error
-        except ValidationError:
-            # 거절·max_tokens 중단 시 JSON 비거나 깨짐
-            _log_failure("의도 분류", started, "invalid_output")
-            return Classified(ClassifiedKind.UNKNOWN)
-        output = response.parsed_output
-        if response.stop_reason == "refusal" or output is None:
-            _log_failure("의도 분류", started, response.stop_reason or "no_output")
-            return Classified(ClassifiedKind.UNKNOWN)
-        # 목차 캐시 확인용 : input_tokens는 캐시 밖 토큰만 센다
-        usage = response.usage
-        logger.info(
-            "LLM 의도 분류: 입력 %d자·%d토큰(캐시 읽기 %d·쓰기 %d) → %s (%.0fms)",
-            len(text),
-            usage.input_tokens,
-            usage.cache_read_input_tokens or 0,
-            usage.cache_creation_input_tokens or 0,
-            output.kind,
-            (time.monotonic() - started) * 1000,
-        )
-        if output.kind is ClassifiedKind.ROUTE:
-            return _route_of(output.route_num)
-        if output.kind is ClassifiedKind.SEARCH:
-            return _search_of(output.related_num)
-        if output.kind is ClassifiedKind.GUIDE:
-            return _guide_of(output)
-        return Classified(output.kind)
-
-
-def get_intent_classifier(
-    settings: Annotated[Settings, Depends(get_settings)],
-) -> IntentClassifier:
-    return AnthropicIntentClassifier(get_anthropic_client(settings), settings.llm_model)
-
-
 class AnswerError(Exception):
     """답변 생성 실패. reason은 로그용 실패 종류(원문 없음)"""
 
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
         self.reason = reason
-
-
-class AnswerGenerator(Protocol):
-    # FN-AIM-002-02 : 답변 조각 스트리밍, 실패 시 AnswerError
-    # guide : 사용법 질문일 때 안내서에서 꺼낸 청크 글
-    def stream(
-        self, messages: list[dict], max_tokens: int, guide: str | None = None
-    ) -> AsyncIterator[str]: ...
 
 
 # FN-AIM-002-08·09 : 개인 데이터는 모른다고 보고 화면 안내, 진단 대신 수의사 상담 안내
@@ -399,66 +210,6 @@ GUIDE_RULES = (
     "- 질문과 관계없는 항목은 쓰지 않는다. [6-1] 같은 항목 번호는 답에 쓰지 않는다.\n\n"
     "안내서\n"
 )
-
-
-def answer_system(guide: str | None) -> str | list[dict]:
-    # 안내서는 둘째 블록 : 고정 문구인 첫 블록과 분리
-    if guide is None:
-        return ANSWER_SYSTEM
-    return [
-        {"type": "text", "text": ANSWER_SYSTEM},
-        {"type": "text", "text": GUIDE_RULES + guide},
-    ]
-
-
-class AnthropicAnswerGenerator:
-    # FN-AIM-002-02 : 대화 메시지 텍스트만 전송 (FN-AIM-011-16 반려동물 기록 제외)
-    def __init__(self, client: AsyncAnthropic, model: str):
-        self.client = client
-        self.model = model
-
-    async def stream(
-        self, messages: list[dict], max_tokens: int, guide: str | None = None
-    ) -> AsyncIterator[str]:
-        started = time.monotonic()
-        length = 0
-        try:
-            async with self.client.messages.stream(
-                model=self.model,
-                max_tokens=max_tokens,
-                system=answer_system(guide),
-                messages=messages,
-                output_config={"effort": LLM_EFFORT},
-            ) as stream:
-                async for text in stream.text_stream:
-                    length += len(text)
-                    yield text
-                final = await stream.get_final_message()
-        except anthropic.APIError as error:
-            reason = _failure_reason(error)
-            _log_failure("답변", started, reason)
-            raise AnswerError(reason) from None
-        except httpx2.HTTPError as error:
-            # 스트림 도중 끊김 : SDK 오류로 감싸이지 않고 전파될 수 있음
-            reason = "timeout" if isinstance(error, httpx2.TimeoutException) else "network"
-            _log_failure("답변", started, reason)
-            raise AnswerError(reason) from None
-        if final.stop_reason == "refusal":
-            _log_failure("답변", started, "refusal")
-            raise AnswerError("refusal")
-        logger.info(
-            "LLM 답변: 메시지 %d개 → %d자 %s (%.0fms)",
-            len(messages),
-            length,
-            final.stop_reason,
-            (time.monotonic() - started) * 1000,
-        )
-
-
-def get_answer_generator(
-    settings: Annotated[Settings, Depends(get_settings)],
-) -> AnswerGenerator:
-    return AnthropicAnswerGenerator(get_anthropic_client(settings), settings.llm_model)
 
 
 @dataclass(frozen=True)
@@ -529,7 +280,7 @@ def tool_system() -> str:
 @lru_cache(maxsize=2)
 def _tool_system(table: tuple[rules.RouteRow, ...]) -> str:
     # 매핑표가 같으면 같은 글 : 도구 정의와 함께 캐시(tools → system 순서로 캐시 앞부분)
-    scope = classify_system().split("- ROUTE:", 1)[0].split("\n", 1)[1]
+    scope = SERVICE_SCOPE
     guide_rules = GUIDE_RULES.removesuffix("\n\n안내서\n")
     return (
         f"{ANSWER_SYSTEM.replace(PRIVATE_DATA_RULE, TOOL_DATA_RULE)}\n\n{scope}\n{TOOL_RULES}\n"
@@ -709,6 +460,7 @@ class AnthropicToolAgent:
             self._log(final, "도구 결과 답변", started)
             use = next((block for block in final.content if block.type == "tool_use"), None)
             if use is None:
+                _log_failure("도구 결과 답변", started, "no_output")
                 raise AnswerError("no_output")
             call = tools.parse(use.name, use.input if isinstance(use.input, dict) else {}, use.id)
             logger.info(

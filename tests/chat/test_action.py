@@ -1,7 +1,7 @@
 import pytest
 
 from app.chat import rules
-from app.chat.service import ACTION_SHOWN, DISCLAIMER
+from app.chat.service import ACTION_SHOWN
 from tests.chat.conftest import AJAX
 from tests.chat.fakes import FakeToolAgent
 from tests.chat.test_messages import MessageJava, deltas, events, names
@@ -234,7 +234,8 @@ def test_케어_목록을_읽은_뒤_고른_완료_체크는_목록에_나온_�
     assert action["tool"] == "draft_care_completion"
     assert action["input"] == {"petSn": CHOCO} | expected
     assert action["missing"] == ([] if expected else ["careArtclSn"])
-    assert deltas(evs) == "안내서대로 답할게요." + DISCLAIMER
+    # 케어 항목 조회는 고지 READ가 아님(2026-11-11, 도구 notice)
+    assert deltas(evs) == "안내서대로 답할게요."
 
 
 def test_읽기만_한_답변에는_확인_카드가_없어야_한다(client, java):

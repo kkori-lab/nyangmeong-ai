@@ -31,7 +31,7 @@ def shortcut_of(client, java, agent: FakeToolAgent, text: str, data: object = No
     ("tool", "scr_id"),
     [
         ("list_daily_health_records", "SCR-HLT-002"),
-        ("list_care_schedules", "SCR-HLT-003"),
+        ("list_my_care_schedules", "SCR-HLT-003"),
         ("list_prescriptions", "SCR-HLT-011"),
         ("get_expense_total", "SCR-MYP-030"),
         ("list_expenses", "SCR-MYP-031"),

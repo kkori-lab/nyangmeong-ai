@@ -1,3 +1,5 @@
+import re
+
 # 낱말 분리 기준 : 글자 간격이 글자 폭의 이 배수 초과 (수량 "1"과 금액이 붙는 경우)
 SYMBOL_GAP_RATIO = 0.8
 # 같은 줄 기준 : 낱말 높이 중심 차이가 높이의 이 배수 이내
@@ -59,3 +61,32 @@ def layout_text(annotation: dict) -> str:
             line += (" " if after[0] - before[1] > before[2] * SPACE_RATIO else "") + after[3]
         lines.append(line)
     return "\n".join(lines)
+
+
+# FN-AIM-008-06 : 최종 결제 금액 줄 (띄어쓰기 무시). 청구금액·합계·소계는 할인 전이라 넣지 않는다
+PAID_WORDS = ("결제금액", "결제요청", "결제예정", "받을금액", "승인금액")
+# 나눠 낸 영수증의 수단별 줄은 한 부분만이라 뺀다
+PAID_EXCLUDE_WORDS = ("카드", "현금")
+# 줄 끝 금액 : 364,000 / 364,000원. 날짜·시각 조각(2026-11-20, 12:30)은 금액으로 보지 않는다
+LINE_END_AMOUNT = re.compile(r"(?<![\d,.\-/:])(\d{1,3}(?:,\d{3})+|\d+)\s*원?\s*$")
+
+
+def paid_amount(text: str) -> int | None:
+    """[OCR 글자 -> 결제 줄 금액]
+    - 결제 단어가 있고 카드·현금이 없는 줄의 줄 끝 금액, 여럿이면 가장 아래 줄
+    - 0원·줄 끝 금액 없음은 건너뜀, 결제 줄이 없으면 None
+    """
+    found = None
+    for line in text.splitlines():
+        compact = "".join(line.split())
+        if not any(word in compact for word in PAID_WORDS):
+            continue
+        if any(word in compact for word in PAID_EXCLUDE_WORDS):
+            continue
+        match = LINE_END_AMOUNT.search(line)
+        if match is None:
+            continue
+        amount = int(match.group(1).replace(",", ""))
+        if amount > 0:
+            found = amount
+    return found

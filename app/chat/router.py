@@ -9,15 +9,11 @@ from pydantic import BaseModel
 
 from app.chat import rules, service
 from app.chat.clients import (
-    AnswerGenerator,
     ImageIntentJudge,
-    IntentClassifier,
     RegisterExtractor,
     TitleGenerator,
     ToolAgent,
-    get_answer_generator,
     get_image_intent_judge,
-    get_intent_classifier,
     get_register_extractor,
     get_title_generator,
     get_tool_agent,
@@ -114,19 +110,17 @@ async def delete_conversation(
     return response.success()
 
 
-# LLM(분류·답변) 전에 인증 확인 : 로그인하지 않은 요청이 LLM을 부르지 않게
+# LLM(도구 고르기·답변) 전에 인증 확인 : 로그인하지 않은 요청이 LLM을 부르지 않게
 @router.post("/{aiCnvrsRoomSn}/messages", dependencies=[Depends(require_member)])
 async def send_message(
     body: MessageSendRequest,
     repo: Repo,
-    classifier: Annotated[IntentClassifier, Depends(get_intent_classifier)],
-    answers: Annotated[AnswerGenerator, Depends(get_answer_generator)],
     ai: Annotated[AiSettings, Depends(get_ai_settings)],
     settings: Annotated[Settings, Depends(get_settings)],
     contexts: Annotated[RegisterContextRepository, Depends(get_register_context_repository)],
     extractor: Annotated[RegisterExtractor, Depends(get_register_extractor)],
     titles: Annotated[TitleGenerator, Depends(get_title_generator)],
-    agent: Annotated[ToolAgent | None, Depends(get_tool_agent)],
+    agent: Annotated[ToolAgent, Depends(get_tool_agent)],
     reader: Annotated[ToolReader, Depends(get_tool_reader)],
     routes: Annotated[RouteRepository, Depends(get_route_repository)],
     room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
@@ -137,9 +131,7 @@ async def send_message(
     await service.route_cache.refresh(routes)
     limits = service.AnswerLimits(settings.answer_first_token_sec, settings.answer_total_sec)
     register = service.RegisterDeps(contexts, extractor, rules.today_kst())
-    events = service.answer_turn(
-        turn, repo, classifier, answers, ai, limits, register, titles, agent, reader
-    )
+    events = service.answer_turn(turn, repo, agent, ai, limits, register, titles, reader)
     return StreamingResponse(_sse(events), media_type="text/event-stream")
 
 
