@@ -919,3 +919,26 @@ def test_캐릭터_상세는_앞_캐릭터_목록의_번호로_불러야_한다(
     events(send(client, room, "내 캐릭터 지금 뭐 입고 있어?"))
 
     assert reader.calls == [("/api/pixel-characters", {}), ("/api/pixel-characters/3", {})]
+
+
+# 장소 검색·즐겨찾기 전체 분류(백엔드 #227, 2026-11-11)
+
+
+def test_장소_검색은_좌표_없이_분류와_낱말로_Java를_한_번_불러야_한다(client, java):
+    use_agent(client, FakeToolAgent("list_places", {"plc_clsf_cd": "PLCC0002", "keyword": "전주"}))
+    reader = use_reader(client, FakeToolReader([{"plcConm": "전주 멍멍살롱", "plcAddr": "전주시"}]))
+    room = room_of(client, java)
+
+    events(send(client, room, "전주 애견미용실 찾아 줘"))
+
+    assert reader.calls == [("/api/places", {"plcClsfCd": "PLCC0002", "keyword": "전주"})]
+
+
+def test_분류를_말하지_않은_즐겨찾기는_전체_분류로_Java를_불러야_한다(client, java):
+    use_agent(client, FakeToolAgent("list_place_bookmarks", {}))
+    reader = use_reader(client, FakeToolReader([{"plcConm": "해피동물병원", "plcAddr": "전주시"}]))
+    room = room_of(client, java)
+
+    events(send(client, room, "즐겨찾기한 장소 다 보여 줘"))
+
+    assert reader.calls == [("/api/place-bookmarks", {})]

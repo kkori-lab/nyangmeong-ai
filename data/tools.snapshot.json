@@ -1,6 +1,6 @@
 {
-  "version": "43ae6df6ca8aaf34efe2ebabe37c8d39d2fcf5599081292937afa5be6581c67d",
-  "structureVersion": "ae0d1c52c3f259708540d33f3d17994a0dc43a41f066e389f4241e588ced379f",
+  "version": "a508c7db3d2e6a4b60e875a49482031a13f541a9cbf499558c1b1a2a02865f54",
+  "structureVersion": "2e36eaa440d464698c6318ae4ab2f7a72405b4712348463bbf440a3309cd5aba",
   "tools": [
     {
       "name": "draft_care_completion",
@@ -361,21 +361,6 @@
       "rules": []
     },
     {
-      "name": "list_care_schedules",
-      "domain": "health",
-      "kind": "READ",
-      "call": {"method": "GET", "path": "/api/pets/{petSn}/care-schedules"},
-      "params": {
-        "petSn": {"in": "path", "type": "long", "required": true},
-        "fromYmd": {"in": "query", "type": "date"},
-        "toYmd": {"in": "query", "type": "date"},
-        "schdlKndCd": {"in": "query", "type": "code", "group": "HLTG19"},
-        "ckupTypeCd": {"in": "query", "type": "code", "group": "HLTG01"},
-        "size": {"in": "query", "type": "int", "min": 1, "max": 50}
-      },
-      "rules": []
-    },
-    {
       "name": "list_caregivers",
       "domain": "pet",
       "kind": "READ",
@@ -600,7 +585,7 @@
       "kind": "READ",
       "call": {"method": "GET", "path": "/api/place-bookmarks"},
       "params": {
-        "plcClsfCd": {"in": "query", "type": "code", "group": "PLCG01", "required": true}
+        "plcClsfCd": {"in": "query", "type": "code", "group": "PLCG01"}
       },
       "rules": []
     },
@@ -612,12 +597,12 @@
       "params": {
         "plcClsfCd": {"in": "query", "type": "code", "group": "PLCG01", "required": true},
         "keyword": {"in": "query", "type": "string", "maxLength": 100},
-        "swLat": {"in": "query", "type": "decimal", "required": true},
-        "swLot": {"in": "query", "type": "decimal", "required": true},
-        "neLat": {"in": "query", "type": "decimal", "required": true},
-        "neLot": {"in": "query", "type": "decimal", "required": true},
-        "cntrLat": {"in": "query", "type": "decimal", "required": true},
-        "cntrLot": {"in": "query", "type": "decimal", "required": true},
+        "swLat": {"in": "query", "type": "decimal"},
+        "swLot": {"in": "query", "type": "decimal"},
+        "neLat": {"in": "query", "type": "decimal"},
+        "neLot": {"in": "query", "type": "decimal"},
+        "cntrLat": {"in": "query", "type": "decimal"},
+        "cntrLot": {"in": "query", "type": "decimal"},
         "page": {"in": "query", "type": "int", "min": 1},
         "size": {"in": "query", "type": "int", "min": 1, "max": 50}
       },
