@@ -1,9 +1,10 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-002 대화창 · 도구 흐름 글 답변의 연관 바로가기 — 끝 (2026-11-10). READ 답변은 도구의 화면(`tool_prompts.yaml` `screen`, 매핑표에 행이 없으면 질문 글 키워드), 바로 답은 질문 글 룰 키워드로 `done.shortcut`을 채움. 인사·잡담·확인 카드 턴은 없음. 검증 1회차 통과, 사람 확인
+SCR-ADM-070 아이템 · 실사 사진으로 픽셀 아이템 그림 (상점 이미지, 추가 요청) — 끝 (2026-11-11). `POST /ai/items/pixel-image`(관리자, 256×256 투명 배경 PNG, 저장 안 함). 착용은 그대로 굽기. 검증 1회차 확인 못 함 있음(실제 그림 품질은 사람 몫) → 사람 확인: 모자·목걸이·강아지 착용 샷에서도 아이템만 추출, 오류 400·403
 
 ## 다음에 할 것
+- 연결 남음: FN-ADM-070-02 관리자 프론트 아이템 등록 (관리자 프론트): 사진을 고르면 [픽셀로 만들기] `POST /ai/items/pixel-image`(form `image`·`regnCd`·`itemNm`, 응답 `image/png`, 30~40초·이미지 1장 과금) → 미리보기 → [이 그림 쓰기]면 그 PNG를 Java 아이템 등록 이미지로(원본 사진 그대로 쓰는 선택도 남김, 2026-11-11). [굽기 지시 만들기](`POST /ai/items/bake-hints`)·[시험해 보기](`POST /ai/items/trial-preview`), 등록 뒤 `POST /ai/items/{itemSn}/bake`를 `lastYn` true까지 반복(한 번 30~40초, 매 호출 전 토큰 갱신, 502면 멈춤)
 - 연관 바로가기 프론트 확인 (LJS 프론트): 도구 흐름 글 답변(READ·바로 답)에도 `done.shortcut`(Intent ROUTE)이 온다. 버튼으로 그리는지, 확인 카드와 함께는 안 온다는 것 알림. 키워드에 안 걸리는 건강 지식 답("예방접종 언제 맞아?")은 바로가기 없음 — 필요하면 도구 고르기 LLM이 관련 화면을 고르게(도구 정의 변경). 등록 요청꼴 문장에 LLM이 글로 답해도 키워드 바로가기가 붙을 수 있음(검증 메모) (2026-11-10)
 - 답변 실패 이유 로그 (LJS, 마일스톤 대기): 첫 글자 전·도중 실패 이유(`read_pets`·첫 글자 시간 초과)·반려동물 목록 실패·도구 고르기 시간 초과 한 줄씩. 배포 서버 식사량·음수량 "일시적으로 답변할 수 없어요" 원인 가리기용
 - 관리자 프론트 라우팅 매핑표 연결 (관리자 프론트): `features/adminAiRoute/api.js`가 아직 가짜 응답이라 관리자 화면에서 고쳐도 저장 안 됨. Java `/api/admin/ai/routes`(GET·POST·PATCH·DELETE)는 있음. 연결되면 대화창 이동에 10초 안에 반영 (2026-11-10)
@@ -31,7 +32,6 @@ SCR-AIM-002 대화창 · 도구 흐름 글 답변의 연관 바로가기 — 끝
 - 프론트(LJS) 알리기: 대화창 → 본창 새로고침 장치 없음 / `screenPaths.js` num 27이 없는 `/mypage/caregivers`로 감, 바로가기가 SCR-MYP-004를 줄 수 있음, `docs/guide-review.md` "프론트 대조"(해시 `#c-care` → `#hlt003-care`, 760px 이하 회원정보 수정 메뉴 없음, `/mypage/withdraw` 없음, 플레이스 회원 전용 의도 확인) / 첫 SEARCH 답변은 제목 요약 뒤 스트림이 닫힘 — 입력창은 `done` 기준 / 범위 밖도 FALLBACK 그대로, `done.message` 문구를 씀 / ROUTE 뒤 `done.message`와 화면 안내 겹침, 분류 장애 `error`는 연속 실패로 세지 않음 / SSE 이벤트·화면 ID → 경로·칩·연속 실패·FAQ는 프론트 몫
 - 프론트(LJS) 대기: 대화창 영수증(이미지 첨부 시 `POST /ai/receipts` `ocrRqstSrcCd=AIMC0031` → `receipt-result`), 검진상세 [PDF 분석] → `POST /ai/checkups/lab-results`(파일 다시 올림, `excludedArtclNms` 안내, `registered`는 검진상세 목록으로 판정, 실패·422·504는 SCR-HLT-005에서 사유, 버튼 잠금)
 - 연결 남음: FN-AIM-010-06 프론트 [직접 입력] 영수증 (LJS 프론트, 맨 먼저): `ReceiptUploadModal.jsx` `onError`에서 `setFailedRecptSn(error.data?.recptSn ?? null)`, 넘기는 키 `rcptSn` 이름 맞춤, 다시 촬영·닫기 때 초기화. AI PR과 프론트 PR을 함께. 저장 뒤 영수증 상태 저장완료로 바꾸는지 확인(LJS 백엔드, `CheckupService.create`는 연결만). 결과 보고 실패·20초 가드로 끊긴 경우는 `recptSn`이 없어 연결 없는 기록(그대로 두기로 함)
-- 연결 남음: FN-ADM-070-02 관리자 프론트 아이템 등록 (관리자 프론트): [굽기 지시 만들기](`POST /ai/items/bake-hints`)·[시험해 보기](`POST /ai/items/trial-preview`), 등록 뒤 `POST /ai/items/{itemSn}/bake`를 `lastYn` true까지 반복(한 번 30~40초, 매 호출 전 토큰 갱신, 502면 멈춤)
 - 연결 남음: FN-MYP-010-16 프론트 꾸미기 [장착] (SJM): Java `PUT equipped-items` 성공 뒤 `POST /ai/characters/{pixelCharSn}/equipped-image` `{itemSns}`
 - 연결 남음: FN-MAN-006 메인 위젯 (프론트, Java 내부 API 연결은 2026-11-10 끝·로컬 확인): `AiReportCard.jsx`가 `GET /ai/pets/{petSn}/health-report`. `rptTtl`을 "{petNm}는 지금 ___"에, `tips`·`notice`, `staleYn`·`dataLackYn` 안내, `rfrshPsblYn`으로 새로고침(`POST .../refresh`, 409 `HEALTH_REPORT_REFRESH_LIMIT`), 은/는 받침, 3~6초 로딩
 - 연결 남음: FN-MYP-031-03·05 프론트 가계부 (SJM): `recognizeReceipt` 가짜 → `POST /ai/receipts`(`ocrRqstSrcCd=AIMC0027`, `petSn` 없음), `data.ocr`의 `ckupYmd`·`recptAmt` → `expndYmd`·`expndAmt`, 0건은 값이 모두 null인 200, 504·502는 "영수증을 읽지 못했어요"

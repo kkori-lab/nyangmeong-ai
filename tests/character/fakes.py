@@ -1,8 +1,13 @@
+import base64
+import io
 import json
 import logging
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
+
+from PIL import Image
 
 from app.character.canvas import Layout
 from app.character.engine import BakeItem
@@ -163,3 +168,31 @@ class FakeCharacterJobRepository:
         saved = self.jobs[pixel_char_sn]
         saved.equipped_item_sns, saved.equipped_image = list(item_sns), image
         logger.info("가짜 Java 대표 이미지 저장: %d, %d바이트", pixel_char_sn, len(image))
+
+
+def magenta_drawing(size: int = 1024, item: bool = True) -> bytes:
+    """가짜 이미지 생성 답 : 마젠타 바탕에 빨간 테(안쪽은 바탕색 구멍)와 작은 얼룩"""
+    image = Image.new("RGB", (size, size), (255, 0, 255))
+    if item:
+        image.paste((200, 30, 30), (300, 400, 700, 600))
+        image.paste((255, 0, 255), (350, 450, 650, 550))
+        image.paste((10, 10, 10), (20, 20, 22, 22))
+    buffer = io.BytesIO()
+    image.save(buffer, "PNG")
+    return buffer.getvalue()
+
+
+class FakeImagesOpenAI:
+    """OpenAI images.edit 가짜 : 호출 기록, 정해 둔 그림(b64) 또는 예외"""
+
+    def __init__(self, answer: bytes | Exception) -> None:
+        self.answer = answer
+        self.calls: list[dict] = []
+        self.images = SimpleNamespace(edit=self._edit)
+
+    def _edit(self, **kwargs):
+        self.calls.append(kwargs)
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        data = SimpleNamespace(b64_json=base64.b64encode(self.answer).decode())
+        return SimpleNamespace(data=[data])
