@@ -1,10 +1,10 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-004 대화창 · 안 쓰는 routing.yaml 삭제·옛 분류 LLM 설명 정리·건강 수치 소수 둘째 자리 반올림 (SCR-AIM-012·HLT-005 공통, 추가 요청) — 끝 (2026-11-11). `data/routing.yaml` 삭제, `docs/api/chat.md` 범위 밖·오류 설명을 도구 흐름 기준으로, 대화 카드 decimal 칸을 Java 도구 목록 `scale`로 사사오입(스냅샷 `rcdNvl`·`obsrvSz` 2), 검사결과지 수치를 소수 둘째 자리로 사사오입. 검증 1회차 통과, 사람 확인은 테스트로
+SCR-AIM-004 대화창 · 백엔드 건강 수치 소수 둘째 자리 병합 확인 (도구 목록 `scale: 2`, 추가 요청) — 끝 (2026-11-11). 백엔드 PR #221 반영 Java가 `rcdNvl`·`obsrvSz` `precision 7, scale 2`를 줌, 대화 카드 4.236 → 4.24 확인, `data/tools.snapshot.json`을 Java 응답(코드 값 제외)으로 다시 맞춤. 검증 2회차 통과, 사람 확인
 
 ## 다음에 할 것
-- 백엔드 건강 수치 소수 둘째 자리 (LJS·백엔드): 백엔드 PR이 `@Digits(fraction = 2)`로 병합되면 Java 도구 목록이 `draft_daily_health_record.rcdNvl`·`draft_observation_cycle.obsrvSz`에 `scale: 2`를 주는지 확인(병합 전에는 Java가 3을 줘 카드도 셋째 자리, 스냅샷만 2). 공용 하네스 변경·반올림 알림 디스코드 글은 사람이 보냄(2026-11-11 초안). 옛 등록 카드(`draft`·REGISTER·등록 칸 추출 LLM)는 프론트 범용 카드 전환 뒤 삭제
+- 새 READ 도구 `list_my_care_schedules`(`GET /api/care-schedules`, 백엔드 PR #216) (LJS): 스냅샷에는 넣었지만 `data/tool_prompts.yaml`에 설명이 없어 기동 때 "설명 없음, 싣지 않음"으로 빠진다. 대화창에서 여러 아이 케어 일정 READ로 쓸지 정하고 열 때 설명·tool_eval 문항을 함께. 반려동물 몸무게(`petBdwg` 등) `scale 3`은 PR #221 범위 밖(담당자에게 전달됨). 공용 하네스 변경·반올림 알림 디스코드 글은 사람이 보냄(2026-11-11 초안). 옛 등록 카드(`draft`·REGISTER·등록 칸 추출 LLM)는 프론트 범용 카드 전환 뒤 삭제. Python은 도구 목록을 기동 때 1회만 받으므로 Java를 다시 띄우면 Python도 다시 띄운다
 - 연결 남음: FN-ADM-070-02 관리자 프론트 아이템 등록 (관리자 프론트): 사진을 고르면 [픽셀로 만들기] `POST /ai/items/pixel-image`(form `image`·`regnCd`·`itemNm`, 응답 `image/png`, 30~40초·이미지 1장 과금) → 미리보기 → [이 그림 쓰기]면 그 PNG를 Java 아이템 등록 이미지로(원본 사진 그대로 쓰는 선택도 남김, 2026-11-11). [굽기 지시 만들기](`POST /ai/items/bake-hints`)·[시험해 보기](`POST /ai/items/trial-preview`), 등록 뒤 `POST /ai/items/{itemSn}/bake`를 `lastYn` true까지 반복(한 번 30~40초, 매 호출 전 토큰 갱신, 502면 멈춤)
 - 연관 바로가기 프론트 확인 (LJS 프론트): 도구 흐름 글 답변(READ·바로 답)에도 `done.shortcut`(Intent ROUTE)이 온다. 버튼으로 그리는지, 확인 카드와 함께는 안 온다는 것 알림. 키워드에 안 걸리는 건강 지식 답("예방접종 언제 맞아?")은 바로가기 없음 — 필요하면 도구 고르기 LLM이 관련 화면을 고르게(도구 정의 변경). 등록 요청꼴 문장에 LLM이 글로 답해도 키워드 바로가기가 붙을 수 있음(검증 메모) (2026-11-10)
 - 배포 서버에서 식사량·음수량 질문에 "일시적으로 답변할 수 없어요" (LJS, 2026-11-09 보고, 원인 미확정): 로컬은 첫 글자 4.9~5.6초로 정상. 후보는 반려동물 조회(`register-context`) 실패 `AnswerError("read_pets")`, 첫 글자 10초 초과(반려동물 조회·Java 읽기·답변 LLM이 모두 그 안), 예상 못 한 예외(`대화 응답 처리 실패` 로그). 실패 이유 로그는 2026-11-11 추가(`답변 실패: 첫 글자 전 <이유>`·`READ 반려동물 목록 실패: <이유>`·`도구 고르기 시간 초과`) — 배포 뒤 서버에서 같은 질문을 다시 해 이 로그로 가린다. 서버에서 `journalctl -u ai-backend`·`systemctl cat ai-backend`(`.env` 읽는지)·`.env.local` 유무 확인
