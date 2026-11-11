@@ -13,6 +13,7 @@ import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, time
+from decimal import ROUND_HALF_UP, Decimal
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Protocol
@@ -81,6 +82,8 @@ class CatalogItemParam(BaseModel):
     # @Positive (숫자 칸), @Pattern (글자 칸)
     positive: bool | None = None
     pattern: str | None = None
+    # @Digits(fraction) (decimal 칸) : 카드 input을 이 자리수로 반올림. 카드 params에는 싣지 않는다
+    scale: int | None = Field(None, exclude=True)
     # 배열 칸 : 항목 칸 규칙(중첩 배열 포함)·최소 항목 수
     items: dict[str, "CatalogItemParam"] | None = None
     min_items: int | None = Field(None, alias="minItems")
@@ -660,7 +663,7 @@ def _clean_array(
             elif _valid(rule, item_value) and (
                 seen is None or not is_id(name) or item_value in seen.get(name, set())
             ):
-                kept[name] = item_value
+                kept[name] = _rounded(rule, item_value)
         cleaned.append(kept)
     return cleaned
 
@@ -671,7 +674,16 @@ def _usable(
     # 카드 input에 쓸 값(배열은 틀린 항목 칸만 뺌). 쓸 수 없으면 None
     if param.type == ARRAY:
         return _clean_array(param, value, seen)
-    return value if _valid(param, value) else None
+    return _rounded(param, value) if _valid(param, value) else None
+
+
+def _rounded(param: CatalogItemParam, value: object) -> object:
+    # decimal 칸 : Java @Digits(fraction) 자리수로 사사오입(건강 수치 소수 둘째 자리, 2026-11-11)
+    # float 오차를 피하려고 글자로 바꿔 계산. scale이 없는 칸(지도 좌표)은 그대로
+    if param.type != "decimal" or param.scale is None or not isinstance(value, (int, float)):
+        return value
+    step = Decimal(1).scaleb(-param.scale)
+    return float(Decimal(str(value)).quantize(step, rounding=ROUND_HALF_UP))
 
 
 def _valid_role(role: str, value: object) -> bool:

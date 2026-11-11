@@ -59,7 +59,7 @@
         "petSn": {"in": "path", "type": "long", "required": true},
         "dailyRcdIdctCd": {"in": "body", "type": "code", "group": "HLTG09", "required": true, "maxLength": 8},
         "rcdDt": {"in": "body", "type": "datetime", "required": true},
-        "rcdNvl": {"in": "body", "type": "decimal", "precision": 8, "scale": 3},
+        "rcdNvl": {"in": "body", "type": "decimal", "precision": 8, "scale": 2},
         "crsdSttsCd": {"in": "body", "type": "code", "group": "HLTG10", "maxLength": 8}
       },
       "rules": [
@@ -123,7 +123,7 @@
         "obsrvArtclSn": {"in": "body", "type": "long", "required": true},
         "file": {"in": "body", "type": "file", "required": true},
         "obsrvDt": {"in": "body", "type": "datetime", "required": true},
-        "obsrvSz": {"in": "body", "type": "decimal", "precision": 8, "scale": 3},
+        "obsrvSz": {"in": "body", "type": "decimal", "precision": 8, "scale": 2},
         "obsrvChgCd": {"in": "body", "type": "code", "group": "HLTG17", "maxLength": 8},
         "memoCn": {"in": "body", "type": "string", "maxLength": 200}
       },

@@ -25,7 +25,7 @@ React(SCR-HLT-005 검진상세 첨부 자료 탭 [PDF 분석])가 부른다. 담
 | --- | --- | --- | --- | --- |
 | inspArtclCd | String | N | 검사항목 공통코드(HLTG12). 드롭다운 항목이면 이 값, 아니면 null. 별칭(예: `Creatinine`·`CRE`)도 같은 코드로 맞춘다(`data/lab_items.yaml`) | INSP_NVL.INSP_ARTCL_CD, HLT-007-02·04 |
 | inspArtclDrctInptNm | String | N | `inspArtclCd`가 null일 때 항목명(결과지 표기, 최대 40자). HLTG12에 코드가 없는 SDMA는 `SDMA` | INSP_NVL.INSP_ARTCL_DRCT_INPT_NM, HLT-007-04 |
-| rsltNvl | Number | N | 결과수치. 못 읽었거나 숫자가 아니면(`<0.5`·`음성`) 또는 decimal(15,4)에 안 들어가면 null(사용자가 직접 입력) | INSP_NVL.RSLT_NVL, HLT-007-04 |
+| rsltNvl | Number | N | 결과수치. 소수 셋째 자리에서 사사오입해 둘째 자리까지(백엔드 검증, 2026-11-11). 못 읽었거나 숫자가 아니면(`<0.5`·`음성`) 또는 반올림 뒤 정수부가 11자리를 넘으면 null(사용자가 직접 입력) | INSP_NVL.RSLT_NVL, HLT-007-04 |
 | unitNm | String | N | 단위(최대 20자). 못 읽으면 null | INSP_NVL.UNIT_NM, HLT-007-02 |
-| refLlmtNvl | Number | N | 참고하한. 하한·상한 중 한쪽만 읽히면 둘 다 null | INSP_NVL.REF_LLMT_NVL, HLT-007-02 |
+| refLlmtNvl | Number | N | 참고하한. 자리수 규칙은 rsltNvl과 같다. 하한·상한 중 한쪽만 읽히면 둘 다 null | INSP_NVL.REF_LLMT_NVL, HLT-007-02 |
 | refUplmtNvl | Number | N | 참고상한. 규칙은 refLlmtNvl과 같다 | INSP_NVL.REF_UPLMT_NVL, HLT-007-02 |
