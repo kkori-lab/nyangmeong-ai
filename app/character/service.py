@@ -227,7 +227,8 @@ async def _draw(task: BakeTask) -> tuple[bytes | None, int]:
         return None, 0
     for attempt in range(1, BAKE_ATTEMPTS + 1):
         try:
-            return await _bake_once(task.client, sheet, pet_se_cd, task.item), attempt
+            worn = await _bake_once(task.client, task.repo, sheet, pet_se_cd, task.item)
+            return worn, attempt
         except Exception as exc:
             # 큐 일꾼 유지 : 한 아이템 실패가 나머지 굽기를 막지 않게
             logger.warning("굽기 시도 실패: itemSn=%d, %s", task.item_sn, type(exc).__name__)
@@ -235,10 +236,19 @@ async def _draw(task: BakeTask) -> tuple[bytes | None, int]:
 
 
 async def _bake_once(
-    client: CharacterClient, sheet: bytes, pet_se_cd: PetSeCd, item: engine.BakeItem
+    client: CharacterClient,
+    repo: CharacterJobRepository,
+    sheet: bytes,
+    pet_se_cd: PetSeCd,
+    item: engine.BakeItem,
 ) -> bytes:
     source = await asyncio.to_thread(bake.bake_source, sheet, item.regn_cd)
-    worn = await client.bake(source, pet_se_cd, item)
+    if item.image_file_sn is None:
+        worn = await client.bake(source, pet_se_cd, item)
+    else:
+        # 그림 참고 굽기 : 받기 실패도 굽기 실패와 같이 다시 시도
+        item_image = await repo.fetch_item_image(item.image_file_sn)
+        worn = await client.bake(source, pet_se_cd, item, item_image)
     await asyncio.to_thread(bake.validate, sheet, worn, item.regn_cd)
     return worn
 
@@ -367,7 +377,7 @@ async def trial_preview(
     found = await repo.find_sheets(pixel_char_sn, [])
     item = engine.BakeItem(0, regn_cd, bake_hint)
     try:
-        worn = await _bake_once(client, found.sheet, found.pet_se_cd, item)
+        worn = await _bake_once(client, repo, found.sheet, found.pet_se_cd, item)
     except Exception as exc:
         logger.error("시험 굽기 실패: %s", type(exc).__name__)
         raise _preview_error() from exc

@@ -2,17 +2,25 @@ import asyncio
 import io
 from dataclasses import replace
 
+import httpx2
 import numpy as np
 import pytest
 from PIL import Image, ImageDraw
 
 from app.character import bake, compose, engine, service
 from app.character.canvas import Layout
-from app.character.clients import CharacterApiError, GeneratedCharacter
+from app.character.clients import CharacterApiError, GeneratedCharacter, OpenAICharacterClient
 from app.character.repository import CharacterJob
 from app.character.rules import matches_spec
 from app.character.schemas import FACE_W, FACE_X, FACE_Y
-from tests.character.fakes import FakeCharacterJobRepository, SavedJob, fake_item, seed_rows
+from tests.character.fakes import (
+    FakeCharacterJobRepository,
+    FakeImagesOpenAI,
+    SavedJob,
+    fake_item,
+    seed_rows,
+)
+from tests.character.test_repository import BASE, COOKIE, make_repo, ok
 
 MAGENTA = (255, 0, 255, 255)
 FUR = (200, 150, 100, 255)
@@ -368,3 +376,103 @@ def test_합성_구간별_시간을_남긴다(caplog: pytest.LogCaptureFixture):
     caplog.set_level("INFO", "app.character.compose")
     compose.render(sheet(), LAYOUT, {BODY: sheet(body=True)})
     assert "합성 시간: 아이템 1개" in caplog.text
+
+
+# 그림 참고 굽기 (설계 9절, Java 계약은 초안 : 가짜 응답 기준)
+IMAGE_FILE_SN = 77
+BY_IMAGE = engine.BakeItem(1, BODY, None, IMAGE_FILE_SN)
+BY_HINT = engine.BakeItem(2, BODY, "a green knitted dog sweater")
+
+
+def item_png() -> bytes:
+    image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    ImageDraw.Draw(image).rectangle((16, 16, 48, 48), fill=GREEN)
+    buffer = io.BytesIO()
+    image.save(buffer, "PNG")
+    return buffer.getvalue()
+
+
+class ImageBakeClient(BakeClient):
+    """받은 아이템 그림을 기록하는 가짜 생성기"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.images: dict[int, bytes | None] = {}
+
+    async def bake(self, bare: bytes, pet_se_cd, item: engine.BakeItem, item_image=None) -> bytes:
+        self.images[item.item_sn] = item_image
+        return await super().bake(bare, pet_se_cd, item)
+
+
+class ImageRepo(FakeCharacterJobRepository):
+    def __init__(self, *, with_image: bool = True) -> None:
+        super().__init__()
+        if with_image:
+            self.item_images[IMAGE_FILE_SN] = item_png()
+
+    async def list_bake_items(self) -> dict[int, engine.BakeItem]:
+        return {BY_IMAGE.item_sn: BY_IMAGE, BY_HINT.item_sn: BY_HINT}
+
+
+def test_list_bake_items_그림_참고_아이템은_그림_번호를_돌려주고_둘_다_없으면_뺀다():
+    data = [
+        {"itemSn": 5, "regnCd": "MYPC0005", "bakeHint": None, "bakeImageFileSn": 77},
+        {"itemSn": 6, "regnCd": "MYPC0002", "bakeHint": "round thin black glasses"},
+        {"itemSn": 7, "regnCd": "MYPC0001", "bakeHint": None, "bakeImageFileSn": None},
+        {"itemSn": 8, "regnCd": "MYPC0003"},
+    ]
+    targets = asyncio.run(make_repo(lambda _: ok(data)).list_bake_items())
+    assert targets == {
+        5: engine.BakeItem(5, "MYPC0005", None, 77),
+        6: engine.BakeItem(6, "MYPC0002", "round thin black glasses", None),
+    }
+
+
+def test_fetch_item_image는_쿠키와_함께_item_files에서_받는다():
+    requests: list = []
+    repo = make_repo(lambda _: httpx2.Response(200, content=b"png"), requests)
+    assert asyncio.run(repo.fetch_item_image(IMAGE_FILE_SN)) == b"png"
+    request = requests[0]
+    assert (request.method, str(request.url)) == ("GET", f"{BASE}/item-files/{IMAGE_FILE_SN}")
+    assert request.headers["cookie"] == COOKIE
+
+
+def test_그림_참고_아이템만_아이템_그림을_받아_굽는다():
+    client, repo = ImageBakeClient(), ImageRepo()
+    run(client, repo)
+    assert client.images == {BY_IMAGE.item_sn: item_png(), BY_HINT.item_sn: None}
+    assert set(repo.jobs[1].item_sheets) == {BY_IMAGE.item_sn, BY_HINT.item_sn}
+
+
+def test_아이템_그림_받기_실패는_굽지_않고_굽기_실패로_보고한다():
+    client, repo = ImageBakeClient(), ImageRepo(with_image=False)
+    run(client, repo)
+    assert BY_IMAGE.item_sn not in client.calls
+    assert repo.jobs[1].failed_items == {BY_IMAGE.item_sn}
+    assert set(repo.jobs[1].item_sheets) == {BY_HINT.item_sn}
+
+
+# FN-ADM-070-02 : 전체 굽기도 같은 경로
+def batch_edit(item: engine.BakeItem) -> dict:
+    """캐릭터 1개를 전체 굽기 한 묶음으로 굽고 images.edit 호출을 돌려준다"""
+    repo = ImageRepo()
+    repo.jobs[1] = SavedJob(CharacterJob(1, "PETC0001"), 3, sheet=sheet(), layout=LAYOUT)
+    fake = FakeImagesOpenAI(sheet(body=True))
+    client = OpenAICharacterClient(fake, "image-model", "vision-model")
+    result = asyncio.run(service.bake_item_batch(client, repo, service.BakeQueue(), item.item_sn))
+    assert (result.baked_cnt, result.failed_cnt, result.last) == (1, 0, True)
+    [edit] = fake.calls
+    return edit
+
+
+def test_전체_굽기_그림_참고_아이템은_그림_두_장을_보낸다():
+    edit = batch_edit(BY_IMAGE)
+    assert [name for name, _, _ in edit["image"]] == ["character.png", "item.png"]
+    assert "the one shown in the LAST image" in edit["prompt"]
+
+
+def test_전체_굽기_굽기_지시_아이템은_그림_한_장을_보낸다():
+    edit = batch_edit(BY_HINT)
+    assert [name for name, _, _ in edit["image"]] == ["character.png"]
+    assert "a green knitted dog sweater" in edit["prompt"]
+    assert "LAST image" not in edit["prompt"]

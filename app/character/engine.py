@@ -41,6 +41,31 @@ _WEAR_SLOT = {
     "MYPC0004": "ONE {hint} on its torso in all four figures, wrapping the body while the "
     "head, the paws and the tail stay uncovered",
 }
+# 그림 참고 굽기 (설계 9절) : 생김새는 마지막 그림이 전하고 부위 문장은 착용 방식만 지시
+_REF_HEAD = (
+    "Two images are given. The FIRST image is the character sheet to edit. The LAST image "
+    "is only a reference picture of the item to wear: copy how the item looks, never its "
+    "background, its size on the canvas or its position."
+)
+_REF_HINT = (
+    "item exactly like the one shown in the LAST image (same colors, pattern, material and shape)"
+)
+# 가방·목 문장은 그림 참고에만 : 굽기 지시 아이템은 지시 안에 착용 방식이 있어 겹침
+_REF_WEAR_SLOT = _WEAR_SLOT | {
+    "MYPC0003": "ONE {hint} around its neck in all four figures: a snug band circling the "
+    "neck just under the chin, at the same place and the same width in every figure; in the "
+    "front views its front part (buckle, tag or charm) shows centered under the chin, in the "
+    "side views it is seen from the side as a band across the neck; it sits on the neck only "
+    "and never covers the face, the ears or the chest",
+    "MYPC0005": "ONE {hint} worn as a backpack in all four figures: two thin shoulder straps "
+    "go over the shoulders and the bag lies face-down flat against the back, its underside "
+    "pressed to the back and its top surface facing away from the body, at the same place "
+    "and the same size in every figure; in the side views the bag is drawn in PROFILE, seen "
+    "from its own side as a low dome hugging the line of the back - the viewer must NOT see "
+    "the bag's top surface as a full round shape; in the front views the straps show on the "
+    "chest and the bag only peeks out from behind the body; the bag stays below the head and "
+    "never touches the head or the ears",
+}
 _SPECIES: dict[PetSeCd, str] = {"PETC0001": "dog", "PETC0002": "cat"}
 
 # 입력 토큰 비용 상한
@@ -126,11 +151,15 @@ class Cut:
 
 @dataclass(frozen=True)
 class BakeItem:
-    """FN-MYP-011-01 : Java ITEM의 굽기 대상 (지시 문장은 관리자 등록값)"""
+    """FN-MYP-011-01 : Java ITEM의 굽기 대상 (지시 문장은 관리자 등록값)
+
+    - image_file_sn이 있으면 그 아이템 그림을 참고로 굽고 bake_hint는 쓰지 않음
+    """
 
     item_sn: int
     regn_cd: str
-    bake_hint: str
+    bake_hint: str | None
+    image_file_sn: int | None = None
 
 
 def species_of(pet_se_cd: PetSeCd) -> str:
@@ -339,11 +368,16 @@ def stand_front_cut(sheet_png: bytes) -> Cut:
     return Cut(_crop(rgb, blob), int(xs.min()), int(ys.min()))
 
 
-def build_wear_prompt(species: str, item: BakeItem) -> str:
+def build_wear_prompt(species: str, item: BakeItem, by_image: bool = False) -> str:
+    template = _WEAR_PROMPT.read_text(encoding="utf-8")
+    if by_image:
+        wear = _REF_WEAR_SLOT.get(item.regn_cd, "{hint}").format(hint=_REF_HINT)
+        body = template.format(species=species, wear=wear)
+        return f"{_REF_HEAD}\n{body.replace('The image', 'The FIRST image', 1)}"
     # 지시 문장의 dog : 강아지 기준으로 쓴 아이템의 종 치환
-    hint = item.bake_hint.replace("dog", species)
+    hint = (item.bake_hint or "").replace("dog", species)
     wear = _WEAR_SLOT.get(item.regn_cd, "{hint}").format(hint=hint)
-    return _WEAR_PROMPT.read_text(encoding="utf-8").format(species=species, wear=wear)
+    return template.format(species=species, wear=wear)
 
 
 def item_hint_question(regn_cd: str, item_nm: str) -> str:
