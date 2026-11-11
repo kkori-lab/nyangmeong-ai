@@ -19,10 +19,10 @@ def post_pixel(client: TestClient, headers=ADMIN, regn_cd="MYPC0001", name="i.pn
     return client.post("/ai/items/pixel-image", data=form, files=files, headers=headers)
 
 
-def pixel_client(monkeypatch, repo, answer: bytes | Exception | None = None, enabled=False):  # noqa: F811
+def pixel_client(monkeypatch, repo, answer: bytes | Exception | None = None):  # noqa: F811
     fake = FakeImagesOpenAI(magenta_drawing() if answer is None else answer)
     generator = OpenAICharacterClient(fake, "image-model", "vision-model")
-    return make_client(monkeypatch, repo, generator, enabled=enabled), fake
+    return make_client(monkeypatch, repo, generator), fake
 
 
 def rgba(png: bytes) -> Image.Image:
@@ -52,11 +52,6 @@ def test_pixel_image_화풍_기준과_사진을_이미지_모델에_보낸다(mo
     assert [ref[0] for ref in call["image"]] == ["style_ref.png", "item.png"]
     assert "빨간 털모자" in call["prompt"]
     assert "on the head" in call["prompt"]
-
-
-def test_pixel_image_굽기가_꺼져_있어도_돈다(monkeypatch, repo) -> None:  # noqa: F811
-    client, _ = pixel_client(monkeypatch, repo, enabled=False)
-    assert post_pixel(client).status_code == 200
 
 
 def test_pixel_image_생성기가_없으면_502_EXTERNAL(monkeypatch, repo) -> None:  # noqa: F811

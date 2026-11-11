@@ -199,30 +199,23 @@ class Repo(FakeCharacterJobRepository):
         return {sn: replace(fake_item(name), item_sn=sn) for sn, name in names.items()}
 
 
-def run(client: BakeClient, repo: Repo, enabled: bool) -> None:
+def run(client: BakeClient, repo: Repo) -> None:
     job = CharacterJob(1, "PETC0001")
     repo.jobs[1] = SavedJob(job, 3)
     queue = service.BakeQueue()
-    asyncio.run(service.generate_and_report(client, repo, queue, job, b"photo", enabled))
+    asyncio.run(service.generate_and_report(client, repo, queue, job, b"photo"))
 
 
-def test_굽기가_꺼져_있으면_이미지_API를_부르지_않는다():
+def test_생성_뒤_전_아이템을_한_번씩_굽는다():
     client, repo = BakeClient(), Repo()
-    run(client, repo, False)
-    assert client.calls == []
-    assert repo.jobs[1].image is not None
-
-
-def test_굽기가_켜져_있으면_전_아이템을_한_번씩_굽는다():
-    client, repo = BakeClient(), Repo()
-    run(client, repo, True)
+    run(client, repo)
     assert sorted(client.calls) == [1, 2, 3]
     assert set(repo.jobs[1].item_sheets) == {1, 2, 3}
 
 
 def test_굽기_실패는_한_번_다시_해_보고_실패로_보고한다():
     client, repo = BakeClient(fail=frozenset({2})), Repo()
-    run(client, repo, True)
+    run(client, repo)
     assert client.calls.count(2) == 2
     assert repo.jobs[1].failed_items == {2}
     assert set(repo.jobs[1].item_sheets) == {1, 3}
@@ -230,7 +223,7 @@ def test_굽기_실패는_한_번_다시_해_보고_실패로_보고한다():
 
 def test_빈_레이어는_다시_굽는다():
     client, repo = BakeClient(flaky=frozenset({2})), Repo()
-    run(client, repo, True)
+    run(client, repo)
     assert client.calls.count(2) == 2
     assert 2 in repo.jobs[1].item_sheets
 
@@ -365,7 +358,7 @@ def test_build_wear_prompt_부위별_착용_지시(item_id: str, phrase: str):
 # 시간 기록 : 추가-5
 def test_굽기_시간과_시도_횟수를_남긴다(caplog: pytest.LogCaptureFixture):
     caplog.set_level("INFO", "app.character.service")
-    run(BakeClient(flaky=frozenset({2})), Repo(), True)
+    run(BakeClient(flaky=frozenset({2})), Repo())
     assert "굽기 시간: pixelCharSn=1, itemSn=2" in caplog.text
     assert "2회 시도" in caplog.text
     assert "전체 굽기 시간" in caplog.text
