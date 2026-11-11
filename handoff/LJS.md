@@ -1,9 +1,10 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-002 대화창 · 답변 실패 이유 로그 (첫 글자 전·도중, 추가 요청) — 끝 (2026-11-11). 첫 글자 전 실패(`first_token_timeout`·`total_timeout`·`empty`·AnswerError 이유), 도중 미완료(이유·글자 수), `READ 반려동물 목록 실패: <Java 이유>`, 도구 고르기 시간 초과, 도구 결과 답변 `no_output`을 한 줄씩 로그로(원문 없음). 검증 1회차 통과, register-context만 500을 주는 18080 프록시로 `read_pets` 두 줄 사람 확인
+SCR-AIM-004 대화창 · 기존 흐름 코드 삭제 (분류 LLM·답변 LLM 단독·`judge`, 추가 요청) — 끝 (2026-11-11). 옛 판정 `service.judge`·분류 LLM·답변 LLM 클라이언트를 지우고 대화창 판정을 도구 흐름 하나로, 테스트는 도구 흐름 가짜(`FakeBasicToolAgent`)로 옮김(1133 → 1090, 지운 것은 지운 코드만 검사하던 테스트). 검증 1회차 통과, 로컬 Java·실제 LLM으로 "안녕"·"코코 체중 알려줘"·"가계부는 어디서 봐?" SSE 사람 확인
 
 ## 다음에 할 것
+- 공용 하네스 PR (LJS, 이 앱 PR보다 먼저 또는 함께 병합): `scripts/tool_eval.py`(도구 흐름만)·`guide_eval.py`(`judge_tools`로)·`llm_smoke.py`(도구 고르기로) 수정, `tool_eval_old.py` 삭제. 앱 PR만 먼저 병합되면 스크립트가 지운 `service.judge`·분류·답변 클라이언트를 import해 깨짐. 옛 등록 카드(`draft`·REGISTER·등록 칸 추출 LLM, `build_card`의 `ai_values`·`tool` 인자는 이미 안 씀)는 프론트 범용 카드 전환 뒤 삭제, `data/routing.yaml` `question_markers`는 읽는 곳 없음
 - 연결 남음: FN-ADM-070-02 관리자 프론트 아이템 등록 (관리자 프론트): 사진을 고르면 [픽셀로 만들기] `POST /ai/items/pixel-image`(form `image`·`regnCd`·`itemNm`, 응답 `image/png`, 30~40초·이미지 1장 과금) → 미리보기 → [이 그림 쓰기]면 그 PNG를 Java 아이템 등록 이미지로(원본 사진 그대로 쓰는 선택도 남김, 2026-11-11). [굽기 지시 만들기](`POST /ai/items/bake-hints`)·[시험해 보기](`POST /ai/items/trial-preview`), 등록 뒤 `POST /ai/items/{itemSn}/bake`를 `lastYn` true까지 반복(한 번 30~40초, 매 호출 전 토큰 갱신, 502면 멈춤)
 - 연관 바로가기 프론트 확인 (LJS 프론트): 도구 흐름 글 답변(READ·바로 답)에도 `done.shortcut`(Intent ROUTE)이 온다. 버튼으로 그리는지, 확인 카드와 함께는 안 온다는 것 알림. 키워드에 안 걸리는 건강 지식 답("예방접종 언제 맞아?")은 바로가기 없음 — 필요하면 도구 고르기 LLM이 관련 화면을 고르게(도구 정의 변경). 등록 요청꼴 문장에 LLM이 글로 답해도 키워드 바로가기가 붙을 수 있음(검증 메모) (2026-11-10)
 - 배포 서버에서 식사량·음수량 질문에 "일시적으로 답변할 수 없어요" (LJS, 2026-11-09 보고, 원인 미확정): 로컬은 첫 글자 4.9~5.6초로 정상. 후보는 반려동물 조회(`register-context`) 실패 `AnswerError("read_pets")`, 첫 글자 10초 초과(반려동물 조회·Java 읽기·답변 LLM이 모두 그 안), 예상 못 한 예외(`대화 응답 처리 실패` 로그). 실패 이유 로그는 2026-11-11 추가(`답변 실패: 첫 글자 전 <이유>`·`READ 반려동물 목록 실패: <이유>`·`도구 고르기 시간 초과`) — 배포 뒤 서버에서 같은 질문을 다시 해 이 로그로 가린다. 서버에서 `journalctl -u ai-backend`·`systemctl cat ai-backend`(`.env` 읽는지)·`.env.local` 유무 확인
@@ -21,7 +22,6 @@ SCR-AIM-002 대화창 · 답변 실패 이유 로그 (첫 글자 전·도중, �
 - `docs/api/chat.md` 맞추기 (LJS): AI 메시지 `cnvrsCn`·SSE `delta`는 Markdown(GFM)이라고 적기(프론트 끝 PR #288: `react-markdown`+`remark-gfm`, HTML·이미지 안 그림, 고지는 맨 끝 빈 줄 뒤 `※` 문단만 떼어 표시 — 마지막 문단 유지), ActionCard `params`는 값 없는 키가 null로 나옴(문서는 "없는 키는 생략", ①부터, `ActionParam`), `input`의 "datetime 칸에 날짜만 오면…"에 수정 카드는 원래 시간을 쓴다는 것(추가-3) 미반영
 - 공용 하네스 PR: `scripts/tool_eval.py`(추가-1, READ·ACTION 세기·유형 `수정`)는 end-check가 공용 하네스로 분류해 이번 커밋에서 뺌 — PR로 따로
 - 실제 LLM에서 "코코 오늘 체중 4.2kg 기록해줘"에 `rcd_ymd`를 비워 `missing ["rcdDt"]`가 된 적 있음(2026-11-09 검증, 1/2). 날짜를 말하지 않았으면 서버가 오늘로 채울지 정한다(지금 결정은 "날짜만 오면"만) (LJS). 돌려받은 카드가 있으면 LLM의 "오늘"은 버림(추가-1)
-- 기존 흐름 코드 삭제 (LJS, 별도 마일스톤 후보): `judge`·분류 LLM·답변 LLM 단독 호출은 앱에서 안 탐. `test_messages`·`test_register`·`test_intent`·`test_guide` 등이 `conftest.py`의 도구 가짜 미주입(기존 흐름)으로 돌아 테스트를 도구 흐름 기준으로 옮겨야 지울 수 있다. 등록 칸 추출 LLM은 초안 이어 쓰기에 계속 씀
 - 배포 서버 tool calling 미동작 원인(2026-11-08): 배포 워크플로우(`.github/workflows/main.yml` 4번)는 서버에 `.env`를 만들고 이미 있으면 건너뛰는데 앱은 `.env.local`만 읽는다(`app/core/config.py:10`). 서비스 파일이 `.env`를 `EnvironmentFile`로 읽는지 미확인. 워크플로우 수정은 backend-90과. Python을 Java보다 먼저 띄우면 도구 목록이 snapshot으로 떨어진다(기동 때 1회). 설정은 2026-11-09 지워 이제 `.env`와 무관하게 켜짐. 서버 접속: Mac 공개키를 `authorized_keys`에 덧붙인다(학원 PC MobaXterm, `>>`)
 - 답 없는 질문이 이력에 둘이면 `disable_parallel_tool_use`로도 첫 도구가 이전 질문용(`get_expense_total`, 실측 3/3). 지금 질문만 보게 할지는 tool_eval 문항으로 정한다 (LJS)
 - 건강 READ 후속 (LJS): `tests/chat/data/tool_eval.jsonl`에 READ·ACTION 문항 추가 후 `uv run python -m scripts.tool_eval` 재측정, 결과 자르기 6000자 미측정, FN-AIM-011-16 "개인 데이터 비전달"과 READ를 기능 ID 추가 때 맞춘다. 백엔드(2026-11-06): 다른 도메인 READ·스냅샷 자동 PR은 그 단계를 열 때 알려 `/start`, 새 도메인 CARD 때 그 서비스 `INVALID_INPUT_VALUE`도 칸 이름을 담게(#175는 일정·케어 항목만)

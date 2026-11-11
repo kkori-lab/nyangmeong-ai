@@ -11,8 +11,7 @@ from app.core.backend import get_backend_client
 from app.core.config import get_settings
 from app.main import create_app
 from tests.chat.fakes import (
-    FakeAnswerGenerator,
-    FakeIntentClassifier,
+    FakeBasicToolAgent,
     FakeRegisterExtractor,
     FakeTitleGenerator,
     fake_catalog,
@@ -205,11 +204,9 @@ def client(monkeypatch: pytest.MonkeyPatch, java: FakeJava) -> TestClient:
     backend = httpx2.AsyncClient(transport=httpx2.MockTransport(java))
     app.dependency_overrides[get_backend_client] = lambda: backend
     app.dependency_overrides[clients.get_title_generator] = FakeTitleGenerator
-    app.dependency_overrides[clients.get_intent_classifier] = FakeIntentClassifier
-    app.dependency_overrides[clients.get_answer_generator] = FakeAnswerGenerator
     app.dependency_overrides[clients.get_register_extractor] = FakeRegisterExtractor
-    # 도구 고르기 가짜 미주입 = 기존 판정(judge) : 도구 흐름 테스트만 가짜를 끼움
-    app.dependency_overrides[clients.get_tool_agent] = lambda: None
+    # 기본 가짜 도구 고르기 : 테스트별로 FakeToolAgent로 교체
+    app.dependency_overrides[clients.get_tool_agent] = FakeBasicToolAgent
     return TestClient(app)
 
 

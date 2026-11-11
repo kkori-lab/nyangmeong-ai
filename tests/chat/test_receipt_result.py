@@ -5,7 +5,8 @@ import pytest
 from app.chat import clients
 from app.chat.schemas import ROLE_AI, ROLE_USER
 from tests.chat.conftest import AJAX, as_member
-from tests.chat.test_messages import Answers, BrokenClassifier, MessageJava
+from tests.chat.fakes import FakeToolAgent
+from tests.chat.test_messages import MessageJava
 
 URL = "/ai/conversations/{}/receipt-result"
 
@@ -17,11 +18,10 @@ def java() -> MessageJava:
 
 @pytest.fixture
 def spies(client):
-    # FN-AIM-013-02 : 영수증 결과 저장은 의도 판정·답변 생성 미호출
-    classifier, answers = BrokenClassifier(), Answers()
-    client.app.dependency_overrides[clients.get_intent_classifier] = lambda: classifier
-    client.app.dependency_overrides[clients.get_answer_generator] = lambda: answers
-    return classifier, answers
+    # FN-AIM-013-02 : 영수증 결과 저장은 의도 판정·답변 생성(도구 고르기) 미호출
+    agent = FakeToolAgent(fail=True)
+    client.app.dependency_overrides[clients.get_tool_agent] = lambda: agent
+    return agent
 
 
 def post(client, room_sn: int, body: dict):
@@ -58,9 +58,7 @@ def test_텍스트가_있으면_사용자_다음_AI_요약_순으로_저장(clie
     assert saved_messages(java) == [(ROLE_USER, "이거 지난주 병원비야"), (ROLE_AI, summary)]
     data = res.json()["data"]
     assert [(m["roleCd"], m["cnvrsCn"]) for m in data] == saved_messages(java)
-    classifier, answers = spies
-    assert classifier.calls == 0
-    assert answers.calls == []
+    assert spies.decides == []
 
 
 def test_텍스트가_없으면_AI_요약만_저장(client, java, spies):

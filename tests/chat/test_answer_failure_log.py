@@ -14,7 +14,6 @@ import pytest
 
 from app.chat import service
 from app.chat.clients import AnswerError, AnthropicToolAgent, ClassifyError, ToolDecision
-from app.chat.repository import AiSettings
 from app.chat.schemas import ROLE_USER, ConversationMessage
 from app.core.backend import BackendError, external_error
 from app.core.response import AppError
@@ -61,12 +60,10 @@ def _run(stream: AsyncIterator[str], first: float = 5, total: float = 30) -> lis
         service._search_answer(
             _turn(),
             _Repo(),
-            None,
-            AiSettings(),
             service.AnswerLimits(first, total),
             None,
             emitted.append,
-            started=stream,
+            stream,
         )
     )
     return emitted

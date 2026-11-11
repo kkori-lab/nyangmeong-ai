@@ -5,23 +5,15 @@ import httpx2
 import pytest
 from anthropic import AsyncAnthropic, DefaultAsyncHttpxClient
 
-from app.chat import rules
 from app.chat.clients import (
     ANSWER_SYSTEM,
-    AnswerError,
-    AnthropicAnswerGenerator,
-    AnthropicIntentClassifier,
     AnthropicRegisterExtractor,
     AnthropicTitleGenerator,
-    Classified,
-    ClassifiedKind,
-    ClassifyError,
-    classify_system,
-    get_answer_generator,
+    AnthropicToolAgent,
     get_anthropic_client,
-    get_intent_classifier,
     get_register_extractor,
     get_title_generator,
+    get_tool_agent,
 )
 from app.core.config import Settings
 from app.core.response import AppError
@@ -80,14 +72,6 @@ def generate(fake: FakeAnthropic, first_message: str = FIRST_MESSAGE) -> str:
     return asyncio.run(AnthropicTitleGenerator(fake.client(), MODEL).generate(first_message))
 
 
-def classify(fake: FakeAnthropic, text: str = "근처에 아이 데리고 갈 곳") -> Classified:
-    return asyncio.run(AnthropicIntentClassifier(fake.client(), MODEL).classify(text))
-
-
-def classified(kind: str, route_num: int | None = None) -> FakeAnthropic:
-    return replying(json.dumps({"kind": kind, "route_num": route_num}))
-
-
 # FN-AIM-011-11 제목 생성
 
 
@@ -141,77 +125,6 @@ def test_15자를_넘으면_LLM으로_제목을_만든다():
     assert len(fake.requests) == 1
 
 
-# FN-AIM-004-02 의도 분류
-
-
-def test_분류가_SEARCH면_검색():
-    assert classify(classified("SEARCH")) == Classified(ClassifiedKind.SEARCH)
-
-
-def test_분류가_UNKNOWN이면_판단_못_함():
-    assert classify(classified("UNKNOWN")) == Classified(ClassifiedKind.UNKNOWN)
-
-
-def test_분류가_OUT_OF_SCOPE면_서비스_범위_밖():
-    assert classify(classified("OUT_OF_SCOPE")) == Classified(ClassifiedKind.OUT_OF_SCOPE)
-
-
-def test_키워드_힌트는_시스템_프롬프트_뒤에_붙인다():
-    row = next(r for r in rules.routing_table() if r.scr_id == "SCR-MYP-030")
-    fake = classified("OUT_OF_SCOPE")
-    asyncio.run(AnthropicIntentClassifier(fake.client(), MODEL).classify("가계부 방법", row))
-
-    fixed, note = fake.requests[0]["system"]
-    # 힌트가 붙어도 캐시 블록은 그대로(캐시 적중), 힌트 블록에는 캐시 표시 없음
-    assert fixed == {
-        "type": "text",
-        "text": classify_system(),
-        "cache_control": {"type": "ephemeral"},
-    }
-    assert "cache_control" not in note
-    assert f"{row.no}번 화면({row.name})" in note["text"]
-
-
-def test_분류가_ROUTE면_매핑표_번호를_화면_ID와_파라미터로_바꾼다():
-    row = next(r for r in rules.routing_table() if r.routable and r.param is not None)
-    result = classify(classified("ROUTE", row.no))
-    assert result == Classified(ClassifiedKind.ROUTE, scr_id=row.scr_id, param=row.param)
-
-
-def test_라우팅_대상이_아닌_행이나_없는_번호면_판단_못_함():
-    not_routable = next(r.no for r in rules.routing_table() if not r.routable)
-    missing = max(r.no for r in rules.routing_table()) + 1
-    for num in (not_routable, missing, None):
-        assert classify(classified("ROUTE", num)).kind is ClassifiedKind.UNKNOWN
-
-
-@pytest.mark.parametrize("respond", [server_error, timeout])
-def test_분류_API가_실패하면_ClassifyError(respond):
-    # 2026-10-29 결정 : 장애는 폴백(UNKNOWN)이 아니라 error 이벤트로 전달
-    with pytest.raises(ClassifyError):
-        classify(FakeAnthropic(respond))
-
-
-def test_분류가_거절되면_판단_못_함():
-    assert classify(replying("", stop_reason="refusal")).kind is ClassifiedKind.UNKNOWN
-
-
-def test_분류_요청은_입력만_보내고_구조화_출력을_쓴다():
-    fake = classified("SEARCH")
-    classify(fake, "강아지 포도 먹어도 돼?")
-    body = fake.requests[0]
-    assert body["messages"] == [{"role": "user", "content": "강아지 포도 먹어도 돼?"}]
-    assert body["system"][0]["text"] == classify_system()
-    assert body["output_config"]["format"]["type"] == "json_schema"
-
-
-def test_분류_프롬프트에는_라우팅_대상_행만_들어간다():
-    system = classify_system()
-    for row in rules.routing_table():
-        line = f"\n{row.no}. {row.name}:"
-        assert (line in system) is row.routable
-
-
 # 키에 따른 선택 : 앱에는 실제 구현만 존재
 
 
@@ -221,7 +134,7 @@ def settings(key: str = "test-key") -> Settings:
 
 @pytest.mark.parametrize(
     "getter",
-    [get_title_generator, get_intent_classifier, get_answer_generator, get_register_extractor],
+    [get_title_generator, get_tool_agent, get_register_extractor],
 )
 def test_키가_비면_LLM_클라이언트를_만들지_않고_502(getter):
     with pytest.raises(AppError) as raised:
@@ -232,7 +145,7 @@ def test_키가_비면_LLM_클라이언트를_만들지_않고_502(getter):
 def test_키가_있으면_Anthropic_구현을_쓴다():
     real = settings()
     assert isinstance(get_title_generator(real), AnthropicTitleGenerator)
-    assert isinstance(get_intent_classifier(real), AnthropicIntentClassifier)
+    assert isinstance(get_tool_agent(real), AnthropicToolAgent)
 
 
 def test_키가_비면_Anthropic_클라이언트도_502():
@@ -240,24 +153,7 @@ def test_키가_비면_Anthropic_클라이언트도_502():
         get_anthropic_client(settings(""))
 
 
-# FN-AIM-002-04 연관 바로가기
-
-
-def test_검색이면서_연관_화면이_있으면_매핑표의_화면으로_바꾼다():
-    row = next(r for r in rules.routing_table() if r.routable)
-    fake = replying(json.dumps({"kind": "SEARCH", "route_num": None, "related_num": row.no}))
-    result = classify(fake)
-    assert result.kind is ClassifiedKind.SEARCH
-    assert (result.related_scr_id, result.related_param) == (row.scr_id, row.param)
-
-
-def test_연관_화면이_매핑표에_없으면_바로가기_없는_검색():
-    missing = max(r.no for r in rules.routing_table()) + 1
-    fake = replying(json.dumps({"kind": "SEARCH", "route_num": None, "related_num": missing}))
-    assert classify(fake) == Classified(ClassifiedKind.SEARCH)
-
-
-# FN-AIM-002-02 답변 스트리밍
+# FN-AIM-002-02 답변 스트리밍 흉내(도구 고르기 테스트가 씀)
 
 
 def sse(texts, stop_reason: str = "end_turn") -> bytes:
@@ -322,26 +218,6 @@ CONTEXT = [
 ]
 
 
-def answer(fake: FakeAnthropic, messages=CONTEXT, max_tokens: int = 4500) -> list[str]:
-    async def collect():
-        generator = AnthropicAnswerGenerator(fake.client(), MODEL)
-        return [chunk async for chunk in generator.stream(messages, max_tokens)]
-
-    return asyncio.run(collect())
-
-
-def test_답변은_조각을_차례로_내고_대화_텍스트만_보낸다():
-    fake = streaming(["건포도도 ", "위험해요."])
-    assert answer(fake) == ["건포도도 ", "위험해요."]
-    body = fake.requests[0]
-    assert body["model"] == MODEL
-    assert body["stream"] is True
-    assert body["max_tokens"] == 4500
-    # FN-AIM-011-16 : 대화 메시지 텍스트만. 시스템 프롬프트는 고정 문구
-    assert body["messages"] == CONTEXT
-    assert body["system"] == ANSWER_SYSTEM
-
-
 def test_답변_시스템_프롬프트는_개인_데이터와_진단을_제한한다():
     # FN-AIM-002-08·09
     assert "개인 데이터" in ANSWER_SYSTEM
@@ -349,20 +225,5 @@ def test_답변_시스템_프롬프트는_개인_데이터와_진단을_제한�
     assert "수의사" in ANSWER_SYSTEM
 
 
-@pytest.mark.parametrize("respond", [server_error, timeout])
-def test_답변_호출이_실패하면_AnswerError(respond):
-    with pytest.raises(AnswerError):
-        answer(FakeAnthropic(respond))
-
-
-def test_답변이_거절되면_AnswerError():
-    with pytest.raises(AnswerError, match="refusal"):
-        answer(streaming(["부분"], stop_reason="refusal"))
-
-
 def test_등록_추출기도_키가_있으면_Anthropic_구현():
     assert isinstance(get_register_extractor(settings()), AnthropicRegisterExtractor)
-
-
-def test_답변_생성기도_키가_있으면_Anthropic_구현():
-    assert isinstance(get_answer_generator(settings()), AnthropicAnswerGenerator)
