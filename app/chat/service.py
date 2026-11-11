@@ -60,7 +60,7 @@ from app.chat.schemas import (
     RegisterResultRequest,
     StreamError,
 )
-from app.core.backend import BackendError
+from app.core.backend import BackendError, failure_reason
 from app.core.image import validate_upload
 from app.core.response import AppError
 
@@ -308,7 +308,14 @@ async def judge_tools(
     try:
         async with asyncio.timeout(first_token_sec):
             decision = await agent.decide(context, max_tokens, today, hint=row)
-    except (ClassifyError, TimeoutError):
+    except (ClassifyError, TimeoutError) as error:
+        if isinstance(error, TimeoutError):
+            # LLM 오류(ClassifyError)는 클라이언트가 로그, 시간 초과는 취소라 여기서 한 줄
+            logger.warning(
+                "도구 고르기 시간 초과(%g초): %s",
+                first_token_sec,
+                "행 이동" if row is not None else "일시 오류",
+            )
         if row is not None:
             return Judged(row.to_intent())
         raise ClassifyError("tool_decide") from None
@@ -416,7 +423,9 @@ class _ReadPets:
         if self._pets is None:
             try:
                 self._pets = await self.read.contexts.get_pets()
-            except (AppError, BackendError):
+            except (AppError, BackendError) as error:
+                # 추가 요청 : 답변 실패(read_pets)의 Java 쪽 이유 한 줄
+                logger.warning("READ 반려동물 목록 실패: %s", failure_reason(error))
                 raise AnswerError("read_pets") from None
         return self._pets
 
@@ -832,15 +841,29 @@ async def _search_answer(
     else:
         stream = answers.stream(context, ai.max_tokens, guide=guide)
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + limits.total_sec
+    started_at = loop.time()
+    deadline = started_at + limits.total_sec
+    first_deadline = started_at + limits.first_token_sec
     try:
         # 첫 글자 전 실패 : 미저장·안내, 사용자 메시지는 남아 [다시 시도]로 재호출
+        reason = "empty"
         try:
-            async with asyncio.timeout_at(min(deadline, loop.time() + limits.first_token_sec)):
+            async with asyncio.timeout_at(min(deadline, first_deadline)):
                 first = await anext(stream, None)
-        except (TimeoutError, AnswerError):
+        except TimeoutError:
             first = None
+            reason = "total_timeout" if deadline <= first_deadline else "first_token_timeout"
+        except AnswerError as error:
+            first = None
+            reason = error.reason
         if first is None:
+            # 추가 요청 : 실패 이유 한 줄(원문 없음)
+            logger.warning(
+                "답변 실패: 첫 글자 전 %s room=%d (%.0fms)",
+                reason,
+                turn.room_sn,
+                (loop.time() - started_at) * 1000,
+            )
             emit(("error", StreamError(code="EXTERNAL_API_ERROR", message=ANSWER_ERROR_MESSAGE)))
             return None
         chunks = [first]
@@ -852,9 +875,15 @@ async def _search_answer(
                     chunks.append(text)
                     emit(("delta", {"text": text}))
             complete = True
-        except (TimeoutError, AnswerError):
+        except (TimeoutError, AnswerError) as error:
             # 전체 시간 초과·도중 오류 : 부분 답변을 미완료로 저장
-            pass
+            logger.warning(
+                "답변 미완료: 도중 %s room=%d %d자 (%.0fms)",
+                error.reason if isinstance(error, AnswerError) else "total_timeout",
+                turn.room_sn,
+                sum(len(c) for c in chunks),
+                (loop.time() - started_at) * 1000,
+            )
     finally:
         await stream.aclose()
     body = "".join(chunks)
