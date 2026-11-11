@@ -709,6 +709,7 @@ class AnthropicToolAgent:
             self._log(final, "도구 결과 답변", started)
             use = next((block for block in final.content if block.type == "tool_use"), None)
             if use is None:
+                _log_failure("도구 결과 답변", started, "no_output")
                 raise AnswerError("no_output")
             call = tools.parse(use.name, use.input if isinstance(use.input, dict) else {}, use.id)
             logger.info(
