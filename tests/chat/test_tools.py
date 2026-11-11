@@ -105,6 +105,7 @@ def test_도구는_builtin_등록_READ이고_설명과_인자_스키마를_모�
         "list_lost_reports",
         "list_news",
         "list_place_bookmarks",
+        "list_places",
         "list_posts",
     } | {
         "draft_care_completion",

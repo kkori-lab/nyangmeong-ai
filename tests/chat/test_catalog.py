@@ -78,10 +78,11 @@ READ = {
     "list_lost_reports",
     "list_news",
     "list_place_bookmarks",
+    "list_places",
     "list_posts",
 }
 # 일부러 싣지 않는 Java 도구(tool_prompts.yaml skip)
-SKIP = {"list_care_schedules", "draft_receipt_save", "list_places", "list_faqs"}
+SKIP = {"draft_receipt_save", "list_faqs"}
 # 스냅샷(코드 값 없음)으로도 싣는 READ : 코드 칸 없음
 READ_WITHOUT_CODES = {
     "get_checkup",
@@ -523,8 +524,8 @@ def test_skip_도구는_싣지_않고_경고_없이_info_로그만_남겨야_한
 
 def test_skip_항목에_다른_칸이_있으면_경고하고_싣지_않아야_한다(caplog):
     prompts = catalog.tool_prompts() | {
-        "list_places": catalog.ToolPrompt.model_validate(
-            {"skip": "좌표 칸", "description": "장소를 찾는다"}
+        "draft_receipt_save": catalog.ToolPrompt.model_validate(
+            {"skip": "영수증 번호", "description": "영수증을 저장한다"}
         )
     }
     with caplog.at_level(logging.INFO, logger="app.chat.catalog"):
@@ -532,10 +533,40 @@ def test_skip_항목에_다른_칸이_있으면_경고하고_싣지_않아야_�
             catalog.ToolCatalogResponse.model_validate(fake_catalog_json()), prompts=prompts
         )
 
-    assert "list_places" not in built.entries
-    assert "list_places skip 항목에 다른 칸 description" in caplog.text
+    assert "draft_receipt_save" not in built.entries
+    assert "draft_receipt_save skip 항목에 다른 칸 description" in caplog.text
 
 
 def test_설명도_skip도_없는_설명_항목은_만들_수_없어야_한다():
     with pytest.raises(ValueError):
         catalog.ToolPrompt.model_validate({"hooks": ["pet"]})
+
+
+# 백엔드 #227 반영(2026-11-11) : 장소 검색 좌표·즐겨찾기 분류가 선택
+
+
+def test_장소_검색은_분류와_낱말_두_칸만_LLM에_줘야_한다():
+    props = entry("list_places").definition["input_schema"]["properties"]
+
+    assert set(props) == {"plc_clsf_cd", "keyword"}
+
+
+def test_장소_검색은_좌표_없이_분류와_낱말만_Java_쿼리로_보내야_한다():
+    request = catalog.read_request(
+        entry("list_places"), {"plc_clsf_cd": "PLCC0002", "keyword": "전주"}, None
+    )
+
+    assert request == ("/api/places", {"plcClsfCd": "PLCC0002", "keyword": "전주"})
+
+
+def test_즐겨찾기_분류를_비우면_분류_없이_Java를_불러야_한다():
+    request = catalog.read_request(entry("list_place_bookmarks"), {}, None)
+
+    assert request == ("/api/place-bookmarks", {})
+
+
+def test_스냅샷에_빠진_일정_도구가_없어야_한다():
+    names = {tool.name for tool in catalog.read_snapshot().tools}
+
+    assert "list_care_schedules" not in names
+    assert "list_care_schedules" not in catalog.tool_prompts()

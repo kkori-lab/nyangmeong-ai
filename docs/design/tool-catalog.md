@@ -20,7 +20,7 @@
 | LLM에 주는 `required` | 주지 않는다. 필수 판단은 Python이 Java 규칙으로 한다 | 필수라고 하면 LLM이 값을 지어낸다 |
 | 범위 | 아래 2절 (1단계 읽기에서 알림·채팅 제외, 2단계 쓰기는 건강·가계부만) | 2026-11-05 사람 지정 |
 | 도메인 고르기 (2026-11-11) | 도메인별로 나눠 싣지 않고 열린 도구를 모두 싣는다(도구 정의는 요청 맨 앞이라 프롬프트 캐시에 든다). 도메인을 열 때마다 `tool_eval`로 정답 수·쓰기 잘못 고름 0·첫 글자 시간을 재고, 떨어지면 Anthropic tool search(BM25, `defer_loading`)로 바꾸는 마일스톤을 연다 | 분류 LLM은 지웠고, 룰 앞단 도메인 판정은 섞인 질문("애들 몸무게랑 이번 달 지출")을 놓치고, 두 단계 고르기는 첫 글자 앞에 LLM 호출 1번을 더한다 |
-| 싣지 않는 Java 도구 (2026-11-11) | `tool_prompts.yaml`에 `skip: <이유>`만 두면 싣지 않고 info 로그 1줄. 지금 `list_care_schedules`(여러 아이 도구가 대신)·`draft_receipt_save`(영수증 번호 READ 없음)·`list_places`(지도 좌표 6칸 필수)·`list_faqs`(사용법 문항이 `search_guide`와 겹침) | 설명 없음 경고는 빠뜨린 도구에만 남긴다 |
+| 싣지 않는 Java 도구 (2026-11-11) | `tool_prompts.yaml`에 `skip: <이유>`만 두면 싣지 않고 info 로그 1줄. 지금 `draft_receipt_save`(영수증 번호 READ 없음)·`list_faqs`(사용법 문항이 `search_guide`와 겹침). `list_care_schedules`는 Java 목록에서 빠졌고 `list_places`는 좌표가 선택이 되어 열었다(백엔드 #227) | 설명 없음 경고는 빠뜨린 도구에만 남긴다 |
 
 ## 2. 범위
 
