@@ -1,7 +1,8 @@
 """사용법 질문 평가. 실제 Anthropic API를 부른다(.env.local의 LLM_API_KEY, 비용이 든다)
 
-M1 단독(키워드 색인)과 M1+LLM(실제 판정 흐름 `service.judge`: 룰 라우팅 → 분류 LLM → M1, 없으면
-목차 선택)의 hit@1·hit@3, 범위 밖 거절, 토큰을 표로 낸다. 답변 본문은 .cache/guide_eval/에 쓴다.
+M1 단독(키워드 색인)과 M1+LLM(실제 판정 흐름 `service.judge_tools`: 도구 고르기의 search_guide
+목차 선택을 앞에, M1을 뒤에)의 hit@1·hit@3, 범위 밖 거절, 토큰을 표로 낸다.
+답변 본문은 .cache/guide_eval/에 쓴다. 도구 목록은 테스트와 같은 가짜 Java 목록(Java 미호출).
 답변 정확도는 사람이 그 파일을 읽고 매긴다(LLM 채점 안 함).
 
 돌리기: uv run python -m scripts.guide_eval [세트 이름, 기본 guide_eval2] [--no-answer]
@@ -16,16 +17,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from anthropic.lib.streaming import AsyncMessageStream
-
-from app.chat import rules, service
-from app.chat.clients import (
-    AnthropicAnswerGenerator,
-    AnthropicIntentClassifier,
-    get_anthropic_client,
-)
+from app.chat import rules, service, tools
+from app.chat.clients import AnthropicToolAgent, get_anthropic_client
 from app.chat.repository import get_ai_settings
 from app.core.config import get_settings
+from tests.chat.fakes import fake_catalog
 
 DATA = Path(__file__).resolve().parents[1] / "tests" / "chat" / "data"
 OUT = Path(__file__).resolve().parents[1] / ".cache" / "guide_eval"
@@ -56,26 +52,15 @@ def _usage(usage) -> dict:
 
 
 class Recorder:
-    # 분류(parse)·답변(stream) 응답의 usage를 지금 문항에 모은다
-    def __init__(self, client):
+    # 도구 고르기·답변 응답의 usage를 지금 문항에 모은다(AnthropicToolAgent on_usage)
+    def __init__(self) -> None:
         self.current: Row | None = None
-        original_parse = client.messages.parse
 
-        async def parse(*args, **kwargs):
-            response = await original_parse(*args, **kwargs)
-            self.row().classify_usage.append(_usage(response.usage))
-            return response
-
-        client.messages.parse = parse
-        original_final = AsyncMessageStream.get_final_message
-        recorder = self
-
-        async def get_final_message(stream):
-            message = await original_final(stream)
-            recorder.row().answer_usage = _usage(message.usage)
-            return message
-
-        AsyncMessageStream.get_final_message = get_final_message
+    def __call__(self, task: str, usage) -> None:
+        if task == "도구 고르기":
+            self.row().classify_usage.append(_usage(usage))
+        else:
+            self.row().answer_usage = _usage(usage)
 
     def row(self) -> Row:
         assert self.current is not None
@@ -90,31 +75,38 @@ def load(name: str) -> list[Row]:
     return [Row(q, labels[q["id"]], rules.search_guide(q["q"])) for q in questions]
 
 
-async def run_one(row: Row, classifier, answers, recorder: Recorder, with_answer: bool) -> None:
+async def run_one(row: Row, agent, recorder: Recorder, with_answer: bool) -> None:
     recorder.current = row
-    judged = await service.judge(row.question["q"], False, classifier)
+    settings = get_settings()
+    q = row.question["q"]
+    judged = await service.judge_tools(
+        q,
+        [{"role": "user", "content": q}],
+        agent,
+        get_ai_settings().max_tokens,
+        rules.today_kst(),
+        settings.answer_first_token_sec,
+    )
     row.kind = judged.intent.kind.value
     row.ids = list(judged.guide_ids)
     row.route_scr = judged.intent.scr_id
-    if not with_answer or not row.ids:
+    if judged.stream is None:
         return
-    guide = service.guide_text(judged.guide_ids)
-    messages = [{"role": "user", "content": row.question["q"]}]
-    chunks = [
-        text async for text in answers.stream(messages, get_ai_settings().max_tokens, guide=guide)
-    ]
-    row.answer = "".join(chunks)
+    if not with_answer or not row.ids:
+        # 바로 답 글 스트림은 이미 시작한 호출 : 읽지 않고 닫는다
+        await judged.stream.aclose()
+        return
+    row.answer = "".join([text async for text in judged.stream])
 
 
 async def run(rows: list[Row], with_answer: bool) -> None:
     settings = get_settings()
-    client = get_anthropic_client(settings)
-    recorder = Recorder(client)
-    classifier = AnthropicIntentClassifier(client, settings.llm_model)
-    answers = AnthropicAnswerGenerator(client, settings.llm_model)
+    tools.use_catalog(fake_catalog())
+    recorder = Recorder()
+    agent = AnthropicToolAgent(get_anthropic_client(settings), settings.llm_model, recorder)
     # Recorder.current가 하나라 문항은 순차로 돈다(50문항 몇 분)
     for index, row in enumerate(rows, 1):
-        await run_one(row, classifier, answers, recorder, with_answer)
+        await run_one(row, agent, recorder, with_answer)
         print(f"\r{index}/{len(rows)}", end="", file=sys.stderr, flush=True)
     print(file=sys.stderr)
 
@@ -165,7 +157,7 @@ def report(rows: list[Row]) -> str:
             + ", ".join(f"{r.question['id']} → {r.ids or '청크 없음'}" for r in gap_rows)
         )
     stages = defaultdict(int)
-    # 실제 흐름 기준 : M1은 분류가 GUIDE일 때만 쓰인다(ROUTE·SEARCH면 M1이 걸려도 안 씀)
+    # 실제 흐름 기준 : M1은 search_guide를 골랐을 때만 쓰인다(이동·바로 답이면 안 씀)
     for row in usage_rows:
         if row.ids and row.ids == row.m1:
             stages["M1"] += 1
@@ -181,7 +173,7 @@ def report(rows: list[Row]) -> str:
         + ", ".join(f"{r.question['id']}→{r.route_scr}" for r in routed)
         + ")"
     )
-    lines.append(_tokens("분류", [u for r in rows for u in r.classify_usage]))
+    lines.append(_tokens("도구 고르기", [u for r in rows for u in r.classify_usage]))
     lines.append(_tokens("답변", [r.answer_usage for r in rows if r.answer_usage]))
     return "\n".join(lines)
 
