@@ -170,6 +170,7 @@
 | hook | 하는 일 |
 | --- | --- |
 | `pet` | `petSn`을 문장과 대화의 반려동물로 정한다(지금 FN-AIM-012-04 규칙) |
+| `pet_list` | 여러 아이 READ(`list_my_care_schedules`)의 `petSns`. `pet`과 같은 순서(문장 속 이름 > 펫 태그 방의 아이 > 모두)로 고른 번호를 쉼표로 잇고, 모두면 비워 Java가 양육 중인 전체를 준다. Java 1번 호출, 결과 앞에 `이름(petSn 번호)` 줄 |
 | `date` | "다음 주 화요일" 같은 말을 오늘 기준 날짜로(지금 등록 칸 추출과 같음) |
 | `same_name_warning` | 같은 이름 케어 항목 경고(FN-AIM-012-08) |
 | `duplicate_expense` | 지출 중복 확인(`/api/expenses/duplicate-check`) |

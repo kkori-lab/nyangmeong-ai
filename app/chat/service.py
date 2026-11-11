@@ -421,7 +421,22 @@ async def _read_once(
         # 가계부 : 문장 속 이름이 하나면 그 반려동물, 아니면 전체(공용 지출 포함, 2026-11-06 결정)
         named = pets.named(await pets.pets())
         targets = [named[0] if len(named) == 1 else None]
-    requests = [catalog.read_request(entry, values, p.pet_sn if p else None, seen) for p in targets]
+    pet_sns = None
+    label = None
+    if "pet_list" in entry.hooks:
+        # 여러 아이 일정 : Java 1번 호출. 모두면 petSns를 비워 Java가 양육 중인 전체를 준다
+        found = await pets.pets()
+        if not found:
+            return _ReadOutcome(ask=READ_NO_PET)
+        chosen = pets.targets(found)
+        if len(chosen) < len(found):
+            pet_sns = ",".join(str(p.pet_sn) for p in chosen)
+        # 결과 행에는 petSn만 있어 이름표를 붙인다
+        names = ", ".join(f"{p.pet_nm}(petSn {p.pet_sn})" for p in chosen)
+        label = READ_PET_LABEL.format(name=names)
+    requests = [
+        catalog.read_request(entry, values, p.pet_sn if p else None, seen, pet_sns) for p in targets
+    ]
     if any(request is None for request in requests):
         logger.info("READ 도구 필수 칸 없음: %s", entry.name)
         return _ReadOutcome(result=rules.READ_FAILED)
@@ -460,6 +475,8 @@ async def _read_once(
             text = rules.read_result_text(data, limit)
         if "pet" in entry.hooks and pet is not None:
             text = READ_PET_LABEL.format(name=pet.pet_nm) + "\n" + text
+        elif label is not None:
+            text = label + "\n" + text
         blocks.append(text)
     if domains is not None:
         domains.add(entry.domain)

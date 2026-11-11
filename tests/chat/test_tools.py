@@ -69,7 +69,7 @@ def test_도구는_builtin_등록_READ이고_설명과_인자_스키마를_모�
         "get_health_indicators",
         "list_care_completions",
         "list_care_items",
-        "list_care_schedules",
+        "list_my_care_schedules",
         "list_checkups",
         "list_daily_health_records",
         "list_inspection_values",

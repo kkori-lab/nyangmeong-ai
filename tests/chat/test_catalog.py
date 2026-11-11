@@ -42,7 +42,7 @@ READ = {
     "get_health_indicators",
     "list_care_completions",
     "list_care_items",
-    "list_care_schedules",
+    "list_my_care_schedules",
     "list_checkups",
     "list_daily_health_records",
     "list_etc_inspections",

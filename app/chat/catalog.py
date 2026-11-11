@@ -36,6 +36,7 @@ CATALOG_TIMEOUT_SEC = 20.0
 RETRY_INTERVAL_SEC = 30.0
 RETRY_ATTEMPTS = 10
 PET_SN = "petSn"
+PET_SNS = "petSns"
 HR_INPUT = "hrInptYn"
 YEAR_MONTH = "yearMonth"
 _YEAR_MONTH = re.compile(r"\d{4}-(0[1-9]|1[0-2])")
@@ -175,6 +176,8 @@ HOOKS: dict[str, Hook] = {
     "same_name_warning": Hook(),
     # 가계부 READ : 문장 속 이름이 하나면 petSn 조건, 아니면 전체(공용 지출 포함)
     "pet_filter": Hook(),
+    # 여러 아이 READ(list_my_care_schedules) : pet과 같은 규칙으로 고른 번호들을 쉼표로, 모두면 비움
+    "pet_list": Hook(makes=frozenset({"petSns"})),
     # 배열 줄의 petSn(지출 등록 lines[0].petSn) : 문장 속 이름이 하나면 그 번호, 아니면 비움(공용)
     "line_pet": Hook(),
 }
@@ -518,12 +521,17 @@ def read_request(
     values: dict,
     pet_sn: int | None,
     seen: dict[str, set[int]] | None = None,
+    pet_sns: str | None = None,
 ) -> tuple[str, dict] | None:
     """READ 도구 인자 -> Java 경로·query (필수 칸이 비면 None)
-    - 번호 칸은 같은 턴 앞 READ 결과(seen)에 나온 값만 : LLM이 지어낸 번호면 그 칸을 비움"""
+    - 번호 칸은 같은 턴 앞 READ 결과(seen)에 나온 값만 : LLM이 지어낸 번호면 그 칸을 비움
+    - pet_sns : pet_list hook이 고른 번호들(쉼표). None이면 petSns를 보내지 않는다(모든 아이)"""
     java = to_java(entry, values)
     if pet_sn is not None and PET_SN in entry.params:
         java[PET_SN] = pet_sn
+    java.pop(PET_SNS, None)
+    if pet_sns is not None and PET_SNS in entry.params:
+        java[PET_SNS] = pet_sns
     seen = seen or {}
     for name, value in list(java.items()):
         param = entry.params.get(name)
