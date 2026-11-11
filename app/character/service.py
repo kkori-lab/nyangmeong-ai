@@ -339,6 +339,27 @@ async def describe_item(
         raise external_error() from None
 
 
+async def draw_item(
+    client: CharacterClient | None, image: bytes, file_name: str, regn_cd: str, item_nm: str
+) -> bytes:
+    """FN-ADM-070-02 : 실사 아이템 사진 -> 투명 배경 픽셀 아이템 그림 (상점 이미지, 저장 안 함)"""
+    _check_region(regn_cd)
+    validate_upload(image, file_name)
+    if client is None:
+        logger.error("픽셀 아이템 그림 불가: 생성기가 아직 연결되지 않았습니다")
+        raise external_error()
+    try:
+        drawn = await client.draw_item(image, regn_cd, item_nm)
+    except CharacterApiError:
+        raise _item_image_error() from None
+    try:
+        return engine.cut_item(drawn)
+    except (engine.ItemImageError, OSError, ValueError) as error:
+        # OSError : PIL이 그림으로 못 읽음 (UnidentifiedImageError 포함)
+        logger.error("픽셀 아이템 그림 후처리 실패: %s", type(error).__name__)
+        raise _item_image_error() from None
+
+
 async def trial_preview(
     client: CharacterClient | None,
     repo: CharacterJobRepository,
@@ -415,6 +436,10 @@ async def bake_item_batch(
 def _check_region(regn_cd: str) -> None:
     if regn_cd not in engine.BAKE_REGIONS:
         raise AppError("INVALID_REQUEST", 400, "구울 수 없는 부위입니다.")
+
+
+def _item_image_error() -> AppError:
+    return AppError("CHARACTER_API_ERROR", 502, "픽셀 아이템 그림을 만들지 못했습니다.")
 
 
 def _preview_error() -> AppError:

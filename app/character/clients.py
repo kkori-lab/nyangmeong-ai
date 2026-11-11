@@ -49,6 +49,8 @@ class CharacterClient(Protocol):
 
     async def describe_item(self, image: bytes, regn_cd: str, item_nm: str) -> str: ...
 
+    async def draw_item(self, image: bytes, regn_cd: str, item_nm: str) -> bytes: ...
+
 
 @dataclass(frozen=True)
 class Rendered:
@@ -123,6 +125,30 @@ class OpenAICharacterClient:
             logger.error("굽기 지시 초안 실패: 빈 답 또는 길이 초과")
             raise CharacterApiError
         return hint
+
+    async def draw_item(self, image: bytes, regn_cd: str, item_nm: str) -> bytes:
+        return await asyncio.to_thread(self._draw_item, image, regn_cd, item_nm)
+
+    def _draw_item(self, image: bytes, regn_cd: str, item_nm: str) -> bytes:
+        """FN-ADM-070-02 : 실사 아이템 사진 -> 단색 배경 픽셀 아이템 그림 (배경 떼기는 service)"""
+        try:
+            # 순서 고정 : 프롬프트가 첫 그림을 화풍 기준, 마지막 그림을 사진으로 지칭
+            refs = [
+                ("style_ref.png", io.BytesIO(engine.STYLE_REF.read_bytes()), "image/png"),
+                ("item.png", io.BytesIO(engine.normalize_item_image(image)), "image/png"),
+            ]
+            response = self._client.images.edit(
+                model=self._image_model,
+                prompt=engine.item_pixel_prompt(regn_cd, item_nm),
+                image=refs,
+                size=IMAGE_SIZE,
+                quality=IMAGE_QUALITY,
+                n=1,
+            )
+            return base64.b64decode(response.data[0].b64_json)
+        except Exception as exc:
+            logger.error("픽셀 아이템 그림 생성 실패: %s", type(exc).__name__)
+            raise CharacterApiError from exc
 
     def render(self, request: CharacterRequest) -> Rendered:
         """동기 SDK·이미지 처리 전체 (샘플 검증 스크립트도 사용)"""

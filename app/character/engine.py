@@ -21,6 +21,7 @@ STYLE_REF = PROMPTS / "style_ref.png"
 _PROMPT_FILES = {"dog": "chibi_poses.txt", "cat": "chibi_poses_cat.txt"}
 _WEAR_PROMPT = PROMPTS / "chibi_wear.txt"
 _ITEM_HINT_PROMPT = PROMPTS / "item_hint.txt"
+_ITEM_PIXEL_PROMPT = PROMPTS / "item_pixel.txt"
 # FN-ADM-070-02 : 굽는 부위 (신발 MYPC0006 제외)
 _ITEM_SLOT_TEXT = {
     "MYPC0001": "on the head",
@@ -58,6 +59,13 @@ FRINGE_BG_CHROMA = 128
 FRINGE_T_MIN = 0.2
 FRINGE_T_MAX = 1.3
 FRINGE_DIST = 40
+# FN-ADM-070-02 : 픽셀 아이템 그림 (상점 이미지) 정사각 크기·여백
+ITEM_PX = 256
+ITEM_PAD = 16
+# 배경을 떼고 남은 화소가 이 비율보다 적으면 그림 없음
+ITEM_MIN_FRAC = 0.005
+# 이보다 작은 덩어리는 배경 얼룩으로 보고 버림
+ITEM_SPECK_PX = 16
 FRINGE_PEEL = 3
 FRINGE_STRONG_T = 0.35
 FRINGE_STRONG_DIST = 60
@@ -353,3 +361,44 @@ def parse_bake_hint(answer: str) -> str | None:
     if not hint or len(hint) > BAKE_HINT_MAX:
         return None
     return hint
+
+
+class ItemImageError(Exception):
+    """픽셀 아이템 그림에서 아이템을 찾지 못함"""
+
+
+def item_pixel_prompt(regn_cd: str, item_nm: str) -> str:
+    return _ITEM_PIXEL_PROMPT.read_text(encoding="utf-8").format(
+        item_nm=item_nm, slot=_ITEM_SLOT_TEXT[regn_cd]
+    )
+
+
+def cut_item(drawn_png: bytes) -> bytes:
+    """FN-ADM-070-02 : 단색 배경 그림 -> 배경 투명, 아이템만 가운데 둔 ITEM_PX 정사각 PNG
+
+    - 배경색과 같은 색의 구멍(안경알·가방끈 안쪽)은 크기와 관계없이 투명
+    - 도트가 뭉개지지 않게 NEAREST로 줄임
+    """
+    rgb, alpha = _load(drawn_png)
+    if alpha is not None:
+        mask = alpha
+    else:
+        background = rgb[0, 0].astype(int)
+        mask = np.abs(rgb.astype(int) - background).sum(axis=2) > BG_THRESHOLD
+        mask = _defringe(mask, rgb)
+    labels, count = ndimage.label(mask)
+    if count:
+        sizes = ndimage.sum(mask, labels, range(1, count + 1))
+        mask = np.isin(labels, np.flatnonzero(sizes >= ITEM_SPECK_PX) + 1)
+    if mask.sum() < ITEM_MIN_FRAC * mask.size:
+        raise ItemImageError("배경을 떼고 남은 그림이 없음")
+    item = _crop(rgb, mask)
+    box = ITEM_PX - 2 * ITEM_PAD
+    scale = box / max(item.size)
+    size = (max(1, round(item.width * scale)), max(1, round(item.height * scale)))
+    item = item.resize(size, Image.NEAREST)
+    canvas_image = Image.new("RGBA", (ITEM_PX, ITEM_PX), (0, 0, 0, 0))
+    canvas_image.paste(item, ((ITEM_PX - item.width) // 2, (ITEM_PX - item.height) // 2))
+    buffer = io.BytesIO()
+    canvas_image.save(buffer, "PNG", optimize=True)
+    return buffer.getvalue()
