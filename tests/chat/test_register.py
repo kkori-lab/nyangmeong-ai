@@ -57,7 +57,7 @@ def extractor(client) -> Extractor:
 @pytest.fixture
 def answers(client) -> Answers:
     fake = Answers()
-    client.app.dependency_overrides[clients.get_answer_generator] = lambda: fake
+    client.app.dependency_overrides[clients.get_tool_agent] = lambda: fake
     return fake
 
 
@@ -72,9 +72,8 @@ def use_pets(client, *pets: PetInfo) -> None:
 
 
 def send(client, room_sn: int, cn: str, draft: dict | None = None):
-    body = {"cnvrsCn": cn}
-    if draft is not None:
-        body["draft"] = draft
+    # 옛 등록 카드는 초안 이어 쓰기로만 탐 : 첫 요청은 빈 초안으로(칸은 이 문장에서)
+    body = {"cnvrsCn": cn, "draft": {} if draft is None else draft}
     return events(client.post(f"/ai/conversations/{room_sn}/messages", json=body, headers=AJAX))
 
 
@@ -476,11 +475,13 @@ def test_Java가_준_반려동물로_카드의_반려동물을_정한다(client,
 @pytest.mark.parametrize("status", [401, 500, 0])
 def test_Java_등록_맥락이_실패하면_SSE_error(client, java, extractor, status):
     # 스트림 시작 뒤라 Java 본문 전달 불가(0은 연결 실패)
+    # 초안 이어 쓰기는 판정 전에 반려동물 목록을 읽음 : intent 없이 error
+    # (옛 판정 judge의 첫 요청 REGISTER는 intent 뒤였음, 2026-11-11 기존 흐름 삭제)
     java.context_status = status
     as_member(client, 1)
     room = java.add_room(1, "제목")
     evs = send(client, room, HOSPITAL_TEXT)
 
-    assert names(evs) == ["intent", "error"]
+    assert names(evs) == ["error"]
     assert evs[-1][1]["code"] == "EXTERNAL_API_ERROR"
     assert java.ai_messages(room) == []

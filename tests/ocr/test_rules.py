@@ -1,6 +1,6 @@
 import pytest
 
-from app.ocr.rules import layout_text
+from app.ocr.rules import layout_text, paid_amount
 
 
 def symbol(text: str, x: int, y: int, width: int = 10, height: int = 20) -> dict:
@@ -62,3 +62,33 @@ def test_좁게_붙은_낱말은_띄우지_않는다() -> None:
 def test_낱말_위치가_없으면_Vision_text를_쓴다() -> None:
     assert layout_text({"text": "청구서\n합계 1,000"}) == "청구서\n합계 1,000"
     assert layout_text({}) == ""
+
+
+# FN-AIM-008-06 : 결제 줄 금액
+
+
+def test_결제_줄의_줄_끝_금액을_읽는다() -> None:
+    text = "청구금액 564,000\n절사 할인 -200,000\n결제요청금액 364,000원"
+    assert paid_amount(text) == 364000
+
+
+def test_결제_줄이_둘이면_가장_아래_줄() -> None:
+    text = "결제금액 120,000\n추가 진료 30,000\n결제 요청 150,000"
+    assert paid_amount(text) == 150000
+
+
+@pytest.mark.parametrize("line", ["카드 결제금액 100,000", "현금 결제금액 64,000"])
+def test_카드_현금_결제_줄은_보지_않는다(line: str) -> None:
+    assert paid_amount(f"결제요청금액 164,000\n{line}") == 164000
+    assert paid_amount(line) is None
+
+
+def test_결제_줄이_없으면_None() -> None:
+    assert paid_amount("진료비 30,000\n합계 30,000") is None
+
+
+@pytest.mark.parametrize(
+    "line", ["결제요청금액", "결제예정일 2026-11-20", "결제금액 0", "승인금액 12:30"]
+)
+def test_줄_끝에_금액이_없으면_None(line: str) -> None:
+    assert paid_amount(line) is None

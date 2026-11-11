@@ -124,11 +124,6 @@ def match_route(text: str) -> RouteRow | None:
     return best
 
 
-@lru_cache
-def _question_markers() -> tuple[str, ...]:
-    return tuple(_compact(marker) for marker in _load("routing.yaml")["question_markers"])
-
-
 # 추가 요청(2026-11-09) : 문장 전체가 인사·감사·맞장구면 잡담. 건강 질문이 섞이면 잡담 아님
 _SMALL_TALK = re.compile(
     r"(안녕(하세요|하십니까|히계세요|히가세요)?|하이|헬로|반가워요?|반갑습니다"
@@ -153,14 +148,8 @@ def is_placeholder(text: str) -> bool:
     return _PLACEHOLDER.fullmatch(text.strip()) is not None
 
 
-def is_question(text: str) -> bool:
-    # 범위 밖 질문 차단(2026-10-30) : 키워드에 걸린 질문꼴 입력은 AI 분류로 확인
-    compact = _compact(text)
-    return any(marker in compact for marker in _question_markers())
-
-
 def find_route(scr_id: str, param: str | None) -> RouteRow | None:
-    # FN-AIM-004-08 : AI 분류 결과는 매핑표의 라우팅 가능 행에 있는 화면만 인정
+    # FN-AIM-004-08 : 매핑표의 라우팅 가능 행에 있는 화면만 인정
     for row in routing_table():
         if row.routable and row.scr_id == scr_id and row.param == param:
             return row

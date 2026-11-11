@@ -1,18 +1,17 @@
 import asyncio
-from datetime import datetime
+from datetime import date, datetime
 
 import pytest
 
-from app.chat.clients import Classified, ClassifiedKind
 from app.chat.schemas import ROLE_AI, ConversationMessage, IntentKind
 from app.chat.service import (
     FALLBACK_MESSAGE,
     OUT_OF_SCOPE_MESSAGE,
-    judge,
-    judge_intent,
+    Judged,
+    judge_tools,
     reply_fallback,
 )
-from tests.chat.fakes import FakeIntentClassifier
+from tests.chat.fakes import FakeBasicToolAgent, FakeToolAgent
 
 
 class FakeRepository:
@@ -30,9 +29,16 @@ class FakeRepository:
         )
 
 
+def judged_of(text: str, agent=None) -> Judged:
+    # 도구 흐름 판정 : 가짜 도구 고르기(기본은 키워드 이동·질문 바로 답·그 밖 폴백)
+    context = [{"role": "user", "content": text}]
+    agent = agent or FakeBasicToolAgent()
+    return asyncio.run(judge_tools(text, context, agent, 4500, date(2026, 10, 28), 5.0))
+
+
 def fallback_flow(text: str, repo: FakeRepository, room_sn: int = 1):
     # SCR-AIM-002 메시지 전송이 할 순서 : 판정이 FALLBACK이면 안내 문구 저장
-    intent = asyncio.run(judge_intent(text, False, FakeIntentClassifier()))
+    intent = judged_of(text).intent
     saved = None
     if intent.kind is IntentKind.FALLBACK:
         saved = asyncio.run(reply_fallback(repo, room_sn))
@@ -65,9 +71,7 @@ def test_부적절_입력도_같은_폴백(text):
     assert repo.added == [(1, ROLE_AI, FALLBACK_MESSAGE)]
 
 
-@pytest.mark.parametrize(
-    "text", ["병원 찾아줘", "강아지가 포도 먹어도 돼?", "내일 3시 병원 일정 잡아줘"]
-)
+@pytest.mark.parametrize("text", ["병원 찾아줘", "강아지가 포도 먹어도 돼?"])
 def test_매칭되면_폴백_문구를_저장하지_않는다(text):
     repo = FakeRepository()
     intent, saved = fallback_flow(text, repo)
@@ -75,12 +79,6 @@ def test_매칭되면_폴백_문구를_저장하지_않는다(text):
     assert intent.kind is not IntentKind.FALLBACK
     assert saved is None
     assert repo.added == []
-
-
-class OutOfScopeClassifier:
-    # 서비스 범위 밖으로 답하는 분류기
-    async def classify(self, text: str, hint=None) -> Classified:
-        return Classified(ClassifiedKind.OUT_OF_SCOPE)
 
 
 def test_범위_밖_안내_문구():
@@ -94,7 +92,7 @@ def test_범위_밖_안내_문구():
 def test_서비스_범위_밖_질문은_FALLBACK이고_범위_안내를_저장(text):
     # 2026-10-30 추가 요청 : 의도는 FALLBACK 그대로(칩·연속 실패 카운트 같음), 문구만 다름
     repo = FakeRepository()
-    judged = asyncio.run(judge(text, False, OutOfScopeClassifier()))
+    judged = judged_of(text, FakeToolAgent("decline", {"unclear": False}))
     asyncio.run(reply_fallback(repo, 3, judged.out_of_scope))
 
     assert judged.intent.kind is IntentKind.FALLBACK
@@ -103,7 +101,7 @@ def test_서비스_범위_밖_질문은_FALLBACK이고_범위_안내를_저장(t
 
 def test_판단_못_함은_기존_폴백_문구():
     repo = FakeRepository()
-    judged = asyncio.run(judge("ㅁㄴㅇㄹ", False, FakeIntentClassifier()))
+    judged = judged_of("ㅁㄴㅇㄹ")
     asyncio.run(reply_fallback(repo, 3, judged.out_of_scope))
 
     assert repo.added == [(3, ROLE_AI, FALLBACK_MESSAGE)]

@@ -238,3 +238,61 @@ def test_LLM_키가_비면_502_EXTERNAL_API_ERROR() -> None:
 def test_두_키가_있으면_Google_Vision_구현을_쓴다() -> None:
     settings = Settings(_env_file=None, llm_api_key="llm-key", google_vision_api_key="vision-key")
     assert isinstance(get_ocr_client(settings), GoogleVisionOcrClient)
+
+
+# FN-AIM-008-06 : 최종 결제 금액은 결제 줄 금액 (이름은 바꾼 실제 영수증 모양)
+
+TWO_PET_TEXT = (
+    "냥멍동물병원\n2026-11-05\n[콩이]\n진료비 12,000\n수술 300,000\n소계 312,000\n"
+    "[밤이]\n진료비 12,000\n수술 240,000\n소계 252,000\n"
+    "청구금액 564,000\n절사 할인 -200,000\n결제요청금액 364,000"
+)
+TWO_PET = {
+    "hsptl_nm": "냥멍동물병원",
+    "ckup_ymd": "2026-11-05",
+    "recpt_amt": 564000,
+    "btm_dscnt_amt": 200000,
+    "sections": [
+        {"sectionNm": "콩이", "sbttlAmt": 312000, "items": []},
+        {"sectionNm": "밤이", "sbttlAmt": 252000, "items": []},
+    ],
+}
+
+
+def test_LLM이_청구금액을_골라도_결제_줄_금액으로_바꾼다() -> None:
+    result = recognize(FakeVision(vision_ok(TWO_PET_TEXT)), llm_replying(json.dumps(TWO_PET)))
+
+    assert result.recpt_amt == 364000
+    assert result.btm_dscnt_amt == 200000
+
+
+def test_LLM이_금액을_못_읽어도_결제_줄_금액을_쓴다() -> None:
+    llm = llm_replying(json.dumps({**TWO_PET, "recpt_amt": None}))
+    assert recognize(FakeVision(vision_ok(TWO_PET_TEXT)), llm).recpt_amt == 364000
+
+
+def test_결제_줄이_없으면_LLM_값_그대로() -> None:
+    llm = llm_replying(json.dumps({**STRUCTURED, "recpt_amt": 44000}))
+    assert recognize(FakeVision(vision_ok(RECEIPT_TEXT)), llm).recpt_amt == 44000
+
+
+def test_추출_0건은_결제_줄이_있어도_빈_응답() -> None:
+    empty = {
+        "hsptl_nm": None,
+        "ckup_ymd": None,
+        "recpt_amt": None,
+        "btm_dscnt_amt": None,
+        "sections": [],
+    }
+    result = recognize(FakeVision(vision_ok("결제금액 5,000")), llm_replying(json.dumps(empty)))
+    assert result == ReceiptOcrResponse()
+
+
+def test_LLM에_결제_줄_우선_지시를_보낸다() -> None:
+    llm = llm_replying(json.dumps(STRUCTURED))
+    recognize(FakeVision(vision_ok(RECEIPT_TEXT)), llm)
+
+    system = llm.requests[0]["system"]
+    assert "결제요청" in system
+    assert "청구금액" in system
+    assert "가장 아래" in system
