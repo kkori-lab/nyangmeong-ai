@@ -72,7 +72,7 @@
 {"id": "T72", "type": "이동", "q": "실종 신고 글 올리고 싶어", "intent": "쓰기 도구가 없어 실종 신고 화면으로", "tool": "navigate", "scr_id": "SCR-CMU-002"}
 {"id": "T73", "type": "헷갈림", "q": "공동양육자 초대 어떻게 해?", "intent": "초대 목록이 아닌 사용법", "tool": "search_guide", "scr_id": "SCR-MYP-004"}
 {"id": "T74", "type": "지식", "q": "전주 애견미용실 찾아 줘", "intent": "지역을 말한 장소 검색", "tool": "list_places"}
-{"id": "T75", "type": "이동", "q": "근처 동물병원 어디야?", "intent": "내 위치를 몰라 플레이스 화면으로", "tool": "navigate", "scr_id": "SCR-PLC-001"}
-{"id": "T76", "type": "이동", "q": "동물병원 찾아 줘", "intent": "지역·상호명 없는 분류만 검색은 플레이스 화면으로", "tool": "navigate", "scr_id": "SCR-PLC-001"}
+{"id": "T75", "type": "이동", "q": "근처 동물병원 어디야?", "intent": "내 위치를 몰라 플레이스 화면으로", "tool": "navigate", "scr_id": "SCR-HOS-001"}
+{"id": "T76", "type": "이동", "q": "동물병원 찾아 줘", "intent": "지역·상호명 없는 분류만 검색은 플레이스 화면으로", "tool": "navigate", "scr_id": "SCR-HOS-001"}
 {"id": "T77", "type": "지식", "q": "해피동물병원 전화번호 알려 줘", "intent": "상호명을 말한 장소 검색", "tool": "list_places"}
 {"id": "T78", "type": "지식", "q": "즐겨찾기한 장소 다 보여 줘", "intent": "분류 없는 즐겨찾기는 전체 분류", "tool": "list_place_bookmarks"}

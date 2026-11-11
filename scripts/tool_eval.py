@@ -138,8 +138,10 @@ def score(row: dict, result: Result) -> dict:
         args_ok = all(result.args.get(k) == v for k, v in row.get("args", {}).items())
     else:
         args_ok = True
-    # 쓰기 도구 잘못 : 등록이 아닌 질문에 등록 도구, 또는 일정↔케어 뒤바뀜
-    write_wrong = result.tool in tools.REGISTER_TOOLS and not tool_ok
+    # 쓰기 도구 잘못 : 쓰기가 아닌 질문에 쓰기 도구, 또는 쓰기 도구끼리 뒤바뀜
+    # 쓰기 도구 = 옛 등록 도구 + 확인 카드(ACTION) 도구 전부
+    is_write = result.tool in tools.REGISTER_TOOLS or tools.card_entry(result.tool) is not None
+    write_wrong = is_write and not tool_ok
     declined = row["tool"] == tools.DECLINE and result.tool == tools.DECLINE
     return {
         "tool_ok": tool_ok,
