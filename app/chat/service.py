@@ -217,8 +217,8 @@ class Judged:
     cards: list[ActionCard] | None = None
     # FN-AIM-002-03 : 의료 고지 여부. 사용법 답변은 False
     notice: bool = True
-    # SEARCH(READ) : 성공한 READ 도메인, 답변 스트림이 채움. health가 있을 때만 고지
-    read_domains: set[str] | None = None
+    # SEARCH(READ) : 성공한 고지 READ(도구 notice) 이름, 답변 스트림이 채움. 하나라도 있을 때만 고지
+    notice_reads: set[str] | None = None
 
 
 def _guide_shortcut(chunk_id: str) -> Intent | None:
@@ -319,16 +319,16 @@ def _tool_judged(
             return Judged(Intent(kind=IntentKind.FALLBACK))
         # Java 호출은 답변 스트림 안 : 첫 글자 제한이 Java 호출까지 덮음
         cards: list[ActionCard] = []
-        domains: set[str] = set()
+        notice_reads: set[str] = set()
         stream = _read_answer(
-            text, context, agent, decision, entry, max_tokens, today, read, cards, domains
+            text, context, agent, decision, entry, max_tokens, today, read, cards, notice_reads
         )
         return Judged(
             Intent(kind=IntentKind.SEARCH),
             _read_shortcut(entry, text),
             stream=stream,
             cards=cards,
-            read_domains=domains,
+            notice_reads=notice_reads,
         )
     ids = tuple(tools.guide_ids(call, text))
     if not ids:
@@ -397,7 +397,7 @@ async def _read_once(
     call: tools.ToolCall | None,
     pets: _ReadPets,
     seen: dict[str, set[int]],
-    domains: set[str] | None = None,
+    notice_reads: set[str] | None = None,
     rows: "catalog.Rows | None" = None,
 ) -> _ReadOutcome:
     args = call.args if call is not None else None
@@ -478,8 +478,8 @@ async def _read_once(
         elif label is not None:
             text = label + "\n" + text
         blocks.append(text)
-    if domains is not None:
-        domains.add(entry.domain)
+    if notice_reads is not None and entry.notice:
+        notice_reads.add(entry.name)
     return _ReadOutcome(result="\n\n".join(blocks))
 
 
@@ -493,15 +493,15 @@ async def _read_answer(
     today: date,
     read: ReadDeps,
     cards: list[ActionCard] | None = None,
-    domains: set[str] | None = None,
+    notice_reads: set[str] | None = None,
 ) -> AsyncIterator[str]:
     pets = _ReadPets(text, read)
     # 번호 칸은 이 턴 READ 결과에 나온 값만 (catalog.read_request)
     seen: dict[str, set[int]] = {}
     # 번호별 원래 행 : 수정 카드가 날짜만 바꿀 때 원래 시간을 씀(추가-3)
     rows: catalog.Rows = {}
-    # 되물음·실패만이면 domains가 비어 고지 없음(FN-AIM-002-03)
-    first = await _read_once(entry, decision.call, pets, seen, domains, rows)
+    # 되물음·실패만이거나 고지 READ가 아니면 notice_reads가 비어 고지 없음(FN-AIM-002-03)
+    first = await _read_once(entry, decision.call, pets, seen, notice_reads, rows)
     if first.ask is not None:
         yield first.ask
         return
@@ -530,7 +530,7 @@ async def _read_answer(
             logger.info("두 번째 도구 실행 안 함: %s", call.name)
             return None
         reads += 1
-        outcome = await _read_once(second, call, pets, seen, domains, rows)
+        outcome = await _read_once(second, call, pets, seen, notice_reads, rows)
         if outcome.ask is not None:
             return rules.READ_FAILED
         # READ 2번 뒤에도 쓰기 카드는 한 번 고를 수 있게 (2단계 ②, 목록 두 번 → 수정 카드)
@@ -819,15 +819,13 @@ async def _search_answer(
     return body if complete else None
 
 
-HEALTH_DOMAIN = "health"
-
-
 def _notice(judged: Judged) -> Callable[[], bool]:
-    # FN-AIM-002-03 : READ 답변은 스트림이 끝난 뒤 health READ가 하나라도 성공했는지로 정함
+    # FN-AIM-002-03 : READ 답변은 스트림이 끝난 뒤 고지 READ(도구 notice)가 하나라도 성공했는지로
+    # 일정·케어 항목·일지 등 기록만 읽어 주는 READ는 고지 없음(2026-11-11)
     def decide() -> bool:
         if not judged.notice:
             return False
-        return judged.read_domains is None or HEALTH_DOMAIN in judged.read_domains
+        return judged.notice_reads is None or bool(judged.notice_reads)
 
     return decide
 
