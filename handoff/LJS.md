@@ -1,7 +1,7 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-004 대화창 · 기존 흐름 코드 삭제 (분류 LLM·답변 LLM 단독·`judge`, 추가 요청) — 끝 (2026-11-11). 옛 판정 `service.judge`·분류 LLM·답변 LLM 클라이언트를 지우고 대화창 판정을 도구 흐름 하나로, 테스트는 도구 흐름 가짜(`FakeBasicToolAgent`)로 옮김(1133 → 1090, 지운 것은 지운 코드만 검사하던 테스트). 검증 1회차 통과, 로컬 Java·실제 LLM으로 "안녕"·"코코 체중 알려줘"·"가계부는 어디서 봐?" SSE 사람 확인
+SCR-AIM-008 영수증 촬영 · 업로드 (최종 결제 금액 고정, 추가 요청) — 끝 (2026-11-11). `recptAmt` 프롬프트에 결제 줄 우선 지시, Vision 글자의 결제 줄(결제금액·결제요청·결제예정·받을금액·승인금액, 카드·현금 줄 제외, 가장 아래 줄) 금액과 다르면 덮어씀(추출 0건은 그대로). 검증 2회차 통과(1회차는 영수증 사진이 없어 화면 확인 못 함), 실제 영수증으로 364,000 확인
 
 ## 다음에 할 것
 - 공용 하네스 알리기 (LJS): 평가 스크립트 `scripts/tool_eval.py`(도구 흐름만)·`guide_eval.py`(`judge_tools`로)·`llm_smoke.py`(도구 고르기로) 수정·`tool_eval_old.py` 삭제는 사람 결정(2026-11-11)으로 앱 PR에 함께 넣음. 옛 등록 카드(`draft`·REGISTER·등록 칸 추출 LLM, `build_card`의 `ai_values`·`tool` 인자는 이미 안 씀)는 프론트 범용 카드 전환 뒤 삭제, `data/routing.yaml` `question_markers`는 읽는 곳 없음
@@ -41,8 +41,8 @@ SCR-AIM-004 대화창 · 기존 흐름 코드 삭제 (분류 LLM·답변 LLM 단
 - 백엔드에 요청(LJS 백엔드): Java `/api/receipts`·`/{recptSn}/analyze`·`FakeOcrClient` 흐름 정리(`/internal/v1/ocr` 삭제와 함께, Postman이 8080으로 가면 가짜 결과), AI 설정값 조회 내부 API(연결되면 가짜 `get_ai_settings` 교체), AI 역할 메시지 `cnvrsCn` 1,000자 상한 확대. 계약은 백엔드 PR과 함께(`AGENTS.md` 4번): 백엔드 LJS `ai` 도메인(대화 내부 API)·서버 간 키 제거와 `docs/api/internal.md`를 같은 때 병합
 - backend-90에 알리기: requirements.txt 커밋됨(`bf28ade`), 배포는 develop → master 뒤. frontend-83에 알리기: 영수증 원본·상태가 Java 영수증 내부 API로 저장(SCR-AIM-008·013, 대화창 `AIMC0031`)
 - 중복 분석 차단(`_in_progress`)은 프로세스 메모리라 워커 1개 전제인데 배포 서버는 uvicorn `--workers 4`(2026-11-08 실측) — 전제가 깨져 있다. 여러 워커면 Java 영수증 상태로 옮긴다. 워커마다 기동 때 도구 목록을 따로 받는다
-- OCR (LJS): 출력 모양(`app/ocr/clients.py` `ReceiptOutput`)에 필드를 더하면 Anthropic이 400 "Schema is too complex"로 거절할 수 있다(2026-11-03 실측) — 더하면 실제 영수증으로 돌려 본다. 인식률은 실제 영수증 1건으로 맞춤(아조딜 `mdcnUsage` null), 2마리 청구서·다른 병원으로 더(샘플 10건, 사진은 git 제외). `docs/api/internal.md` OCR mock은 고정 응답 1개
-- 개발 DB 정리 (LJS 백엔드): 회원 1·반려동물 2의 RECPT 501·502·505·508·514와 원본 파일. 로컬 시험 데이터: 관리자 mbrSn 2(601 주양육자)의 petSn 1001 "시험복실"·pixelCharSn 601. READ 확인용은 mbrSn 1(`dev-tokens`): petSn 2에 검진 `ckupRcdSn` 418, 2026-10 지출 45건 중 petSn 1이 8건. 2026-11-09 검증: mbrSn 1의 petSn 14 "코코", 반려동물 8마리
+- OCR (LJS): 출력 모양(`app/ocr/clients.py` `ReceiptOutput`)에 필드를 더하면 Anthropic이 400 "Schema is too complex"로 거절할 수 있다(2026-11-03 실측) — 더하면 실제 영수증으로 돌려 본다. 인식률은 실제 영수증 1건으로 맞춤(아조딜 `mdcnUsage` null), 2마리 청구서·다른 병원으로 더(샘플 10건, 사진은 git 제외). `docs/api/internal.md` OCR mock은 고정 응답 1개. 결제 줄 금액(`app/ocr/rules.py` `paid_amount`)은 "364, 000"처럼 쉼표 뒤가 띄어지면 못 읽는다(그 줄을 건너뛰고 LLM 값이나 다른 결제 줄을 씀) — 실제 영수증에서 보이면 고친다
+- 개발 DB 정리 (LJS 백엔드): 회원 1·반려동물 2의 RECPT 501·502·505·508·514·570·571(2026-11-11 결제 금액 확인)와 원본 파일. 로컬 시험 데이터: 관리자 mbrSn 2(601 주양육자)의 petSn 1001 "시험복실"·pixelCharSn 601. READ 확인용은 mbrSn 1(`dev-tokens`): petSn 2에 검진 `ckupRcdSn` 418, 2026-10 지출 45건 중 petSn 1이 8건. 2026-11-09 검증: mbrSn 1의 petSn 14 "코코", 반려동물 8마리
 - 캐릭터 (LJS): `bake-hints` 그림 형식·10MB 오류는 `FILE_TYPE_NOT_ALLOWED`·`FILE_SIZE_EXCEEDED`(기획은 `INVALID_REQUEST`). 옛 흐름 캐릭터는 맨몸 시트가 없어 `/preview` 404 — 다시 만들어야 하고 무료 재생성(FN-MYP-010-23)은 SCR-ADM-042 전에 계약(LJS 백엔드). 신발 공통코드 `MYPC0006`·시드 신발 4개 정리(DB에서만)
 - 굽기 (LJS): 26개 실측 104.2초(동시 10), 동시 13 미측정, 합성 1.4초는 시험 그림 값. 후보는 전용 스레드 풀·429 재시도·OpenAI 한도·품질 `low`. 켜기는 팀 비용 결정(캐릭터당 약 $1.64)·Java 시트 저장 뒤, access_token(30분) 만료 대책 먼저(회원 캐릭터 생성 뒤 굽기)
 - 캐릭터 위험 (LJS): 고양이 꼬리 경계선·다리 사이 분홍 점 원인 미확인, 정렬 2단계 탐색은 촘촘한 무늬에서 빗나갈 수 있음, `dog_fluffy` 512 재검출이 눈 아닌 쌍을 잡음(배치 샘플 10건은 맞음, 검은 털 눈 높이 미측정). 약한 테스트: EXIF 테스트 입력에 EXIF 없음, 고양이 분기는 가짜가 짝수 `petSn`일 때만 `PETC0002`

@@ -13,7 +13,7 @@ from pydantic import BaseModel, ValidationError
 from app.core.backend import external_error
 from app.core.config import Settings, get_settings
 from app.core.llm import get_anthropic_client
-from app.ocr.rules import layout_text
+from app.ocr.rules import layout_text, paid_amount
 from app.ocr.schemas import ReceiptOcrResponse, Section
 
 logger = logging.getLogger(__name__)
@@ -66,7 +66,10 @@ STRUCTURE_SYSTEM = (
     "category: 상호·품목으로 본 지출 종류, 병원·사료·간식·용품·미용·돌봄·기타 중 하나. "
     "확실하지 않으면 null.\n"
     "ckup_ymd: 진료일 또는 결제일 YYYY-MM-DD, 연도가 없으면 null. "
-    "recpt_amt: 최종 결제 금액(할인 후). btm_dscnt_amt: 영수증 하단에만 찍힌 할인 합계.\n"
+    "recpt_amt: 최종 결제 금액(할인 후). 결제금액·결제요청·결제예정·받을금액·승인금액 줄이 "
+    "있으면 그 금액을 쓴다. 청구금액·진료비 합계·총액·소계는 할인 전 금액이라 결제 줄이 "
+    "있으면 쓰지 않는다. 결제 줄이 여럿이면 가장 아래 줄. "
+    "btm_dscnt_amt: 영수증 하단에만 찍힌 할인 합계.\n"
     "같은 할인을 btm_dscnt_amt와 dscntAmt에 겹쳐 넣지 않는다. 하단 합계 부분의 할인은 "
     "btm_dscnt_amt에만, 반려동물 구역 안에 찍힌 할인만 dscntAmt에 둔다.\n"
     "sections: 반려동물 구역. 영수증이 반려동물 이름별로 나뉘면 구역마다 하나(sectionNm=이름), "
@@ -179,7 +182,7 @@ class GoogleVisionOcrClient:
             len(output.sections),
             _elapsed(started),
         )
-        return ReceiptOcrResponse(
+        result = ReceiptOcrResponse(
             hsptl_nm=output.hsptl_nm,
             expnd_plcus_nm=_place(output.plcus_nm),
             expnd_clsf_cd=EXPENSE_CATEGORY_CODES.get(output.category or ""),
@@ -188,6 +191,19 @@ class GoogleVisionOcrClient:
             btm_dscnt_amt=output.btm_dscnt_amt,
             sections=output.sections,
         )
+        return _fix_paid_amount(result, text)
+
+
+def _fix_paid_amount(result: ReceiptOcrResponse, text: str) -> ReceiptOcrResponse:
+    # FN-AIM-008-06 : 결제 줄 금액이 있으면 recpt_amt를 그 값으로 (LLM이 청구금액을 고른 경우)
+    # 추출 0건은 그대로 둔다. 로그에 금액은 남기지 않는다
+    if result == ReceiptOcrResponse():
+        return result
+    paid = paid_amount(text)
+    if paid is None or paid == result.recpt_amt:
+        return result
+    logger.info("영수증 결제 금액을 결제 줄 값으로 바꿈")
+    return result.model_copy(update={"recpt_amt": paid})
 
 
 def _place(value: str | None) -> str | None:
