@@ -20,6 +20,7 @@
 | LLM에 주는 `required` | 주지 않는다. 필수 판단은 Python이 Java 규칙으로 한다 | 필수라고 하면 LLM이 값을 지어낸다 |
 | 범위 | 아래 2절 (1단계 읽기에서 알림·채팅 제외, 2단계 쓰기는 건강·가계부만) | 2026-11-05 사람 지정 |
 | 도메인 고르기 (2026-11-11) | 도메인별로 나눠 싣지 않고 열린 도구를 모두 싣는다(도구 정의는 요청 맨 앞이라 프롬프트 캐시에 든다). 도메인을 열 때마다 `tool_eval`로 정답 수·쓰기 잘못 고름 0·첫 글자 시간을 재고, 떨어지면 Anthropic tool search(BM25, `defer_loading`)로 바꾸는 마일스톤을 연다 | 분류 LLM은 지웠고, 룰 앞단 도메인 판정은 섞인 질문("애들 몸무게랑 이번 달 지출")을 놓치고, 두 단계 고르기는 첫 글자 앞에 LLM 호출 1번을 더한다 |
+| READ 답변의 의료 고지 (2026-11-11) | FN-AIM-002-03 "건강 관련 응답"을 Java `domain` 대신 `tool_prompts.yaml`의 `notice: true`로 정한다. 그 READ가 한 턴에 하나라도 성공하면 답변 끝에 고지. 지금 `get_health_indicators`·`list_inspection_values`·`list_observation_items`·`list_observation_cycles`(수치·변화를 보고 상담을 권하는 답)와 `list_prescriptions`(약 정보). 일정·케어 항목·케어 완료·건강 일지·검진 기록·기타검사·반복 예방은 기록만 읽어 주는 답이라 붙이지 않는다. 카드 도구에 쓰면 싣지 않고 경고 | health 도메인 전체에 붙이니 "다음 주 일정 뭐 있어?"에도 고지가 붙었다. 도구 없이 바로 쓴 글 답변은 그대로(잡담만 빼고 고지) |
 | 싣지 않는 Java 도구 (2026-11-11) | `tool_prompts.yaml`에 `skip: <이유>`만 두면 싣지 않고 info 로그 1줄. 지금 `draft_receipt_save`(영수증 번호 READ 없음)·`list_faqs`(사용법 문항이 `search_guide`와 겹침). `list_care_schedules`는 Java 목록에서 빠졌고 `list_places`는 좌표가 선택이 되어 열었다(백엔드 #227) | 설명 없음 경고는 빠뜨린 도구에만 남긴다 |
 
 ## 2. 범위
@@ -135,7 +136,7 @@
 
 | 파일 | 내용 |
 | --- | --- |
-| `data/tool_prompts.yaml` | 도구 이름별 설명(쓸 때·쓰지 않을 때·예문·말하는 법), hook 이름, 결과 요약 방식. 코드 값은 적지 않는다 |
+| `data/tool_prompts.yaml` | 도구 이름별 설명(쓸 때·쓰지 않을 때·예문·말하는 법), hook 이름, 결과 요약 방식, READ의 의료 고지 여부(`notice: true`, 1절). 코드 값은 적지 않는다 |
 | `data/tools.snapshot.json` | Java 응답의 구조 부분(코드 값 제외). CI·평가·Java 장애 때 기준. 6절 |
 | `app/chat/catalog.py`(가칭) | 목록 받기·합치기·모델 만들기·version 확인 |
 

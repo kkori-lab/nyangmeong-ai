@@ -82,8 +82,9 @@ def test_READ_도구를_고르면_경로와_query로_Java를_부르고_결과로
         )
     ]
     assert payload(agent.results[0]) == [{"schdlNm": "병원"}]
-    assert deltas(evs) == ANSWER + DISCLAIMER
-    assert [m["cnvrsCn"] for m in java.ai_messages(room)] == [ANSWER + DISCLAIMER]
+    # 일정 조회는 기록만 읽어 주는 답이라 고지 없음(2026-11-11, 도구 notice)
+    assert deltas(evs) == ANSWER
+    assert [m["cnvrsCn"] for m in java.ai_messages(room)] == [ANSWER]
 
 
 # 여러 아이 일정(list_my_care_schedules, pet_list hook) : Java 1번 호출
@@ -457,7 +458,8 @@ def test_결과를_보고_읽기_도구를_한_번_더_고르면_앞_결과의_�
     assert reader.calls == [("/api/pets/1/checkups", {}), ("/api/pets/1/checkups/7", {})]
     assert len(agent.results) == 2
     assert payload(agent.results[1]) == [{"ckupRcdSn": 7, "hsptlNm": "메이"}]
-    assert deltas(evs) == ANSWER + DISCLAIMER
+    # 검진 기록은 날짜·병원만 읽어 주는 답이라 고지 없음(2026-11-11, 도구 notice)
+    assert deltas(evs) == ANSWER
 
 
 def test_앞_결과에_없는_번호면_Java를_부르지_않고_불러오지_못함이어야_한다(client, java):
@@ -509,7 +511,8 @@ def test_결과를_보고_읽기_도구가_아닌_도구를_고르면_실행하�
 
     assert len(reader.calls) == 1
     assert agent.results[1] is None
-    assert deltas(evs) == ANSWER + DISCLAIMER
+    # 검진 기록은 고지 READ가 아님(2026-11-11, 도구 notice)
+    assert deltas(evs) == ANSWER
 
 
 # 가계부 READ
@@ -573,21 +576,23 @@ def test_가계부_READ_답변은_고지_없이_저장해야_한다(client, java
 
 
 def test_건강_READ_실패만이면_고지_없이_저장해야_한다(client, java):
-    use_agent(client, FakeToolAgent("list_checkups", {}))
+    # 고지 READ(도구 notice)로 : 검진 기록(list_checkups)은 2026-11-11부터 고지 READ가 아님
+    use_agent(client, FakeToolAgent("list_inspection_values", {}))
     use_reader(client, FakeToolReader(fail=True))
     room = room_of(client, java, pet_sn=CHOCO)
 
-    events(send(client, room, "검진 기록 알려 줘"))
+    events(send(client, room, "피검사 결과 알려 줘"))
 
     assert [m["cnvrsCn"] for m in java.ai_messages(room)] == [ANSWER]
 
 
 def test_건강_READ_다음_가계부_READ면_고지가_붙어야_한다(client, java):
-    use_agent(client, FakeToolAgent("list_checkups", {}, follow_tool="list_expenses"))
-    reader = use_reader(client, FakeToolReader([{"ckupRcdSn": 7}]))
+    # 고지 READ(도구 notice)로 : 검진 기록(list_checkups)은 2026-11-11부터 고지 READ가 아님
+    use_agent(client, FakeToolAgent("list_inspection_values", {}, follow_tool="list_expenses"))
+    reader = use_reader(client, FakeToolReader([{"inspArtclCd": "ALT"}]))
     room = room_of(client, java, pet_sn=CHOCO)
 
-    evs = events(send(client, room, "검진하고 병원비 알려 줘"))
+    evs = events(send(client, room, "피검사 결과하고 병원비 알려 줘"))
 
     assert len(reader.calls) == 2
     assert deltas(evs) == ANSWER + DISCLAIMER
@@ -595,11 +600,61 @@ def test_건강_READ_다음_가계부_READ면_고지가_붙어야_한다(client,
 
 
 def test_가계부_READ_다음_건강_READ면_고지가_붙어야_한다(client, java):
-    use_agent(client, FakeToolAgent("list_expenses", {}, follow_tool="list_checkups"))
+    # 고지 READ(도구 notice)로 : 검진 기록(list_checkups)은 2026-11-11부터 고지 READ가 아님
+    use_agent(client, FakeToolAgent("list_expenses", {}, follow_tool="list_inspection_values"))
     reader = use_reader(client, FakeToolReader([{"expndSn": 1}]))
     room = room_of(client, java, pet_sn=CHOCO)
 
-    evs = events(send(client, room, "병원비랑 검진 알려 줘"))
+    evs = events(send(client, room, "병원비랑 피검사 결과 알려 줘"))
+
+    assert len(reader.calls) == 2
+    assert deltas(evs) == ANSWER + DISCLAIMER
+
+
+# 고지 READ는 도구 notice로 정함(2026-11-11) : 기록만 읽어 주는 건강 READ는 고지 없음
+
+
+@pytest.mark.parametrize(
+    ("tool", "question"),
+    [
+        ("list_my_care_schedules", "다음 주 일정 뭐 있어?"),
+        ("list_care_items", "케어 항목 뭐 있어?"),
+        ("list_daily_health_records", "어제 산책 기록 있어?"),
+        ("list_checkups", "마지막 검진 언제야?"),
+    ],
+)
+def test_기록만_읽어_주는_건강_READ_답변은_고지_없이_저장해야_한다(client, java, tool, question):
+    use_agent(client, FakeToolAgent(tool, {}))
+    reader = use_reader(client, FakeToolReader([{"sn": 1}]))
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    evs = events(send(client, room, question))
+
+    assert len(reader.calls) == 1
+    assert deltas(evs) == ANSWER
+    assert [m["cnvrsCn"] for m in java.ai_messages(room)] == [ANSWER]
+
+
+def test_검사_수치_READ_답변은_고지를_붙여_저장해야_한다(client, java):
+    use_agent(client, FakeToolAgent("list_inspection_values", {}))
+    use_reader(client, FakeToolReader([{"inspArtclCd": "ALT"}]))
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    evs = events(send(client, room, "초코 피검사 결과 어때?"))
+
+    assert deltas(evs) == ANSWER + DISCLAIMER
+    assert [m["cnvrsCn"] for m in java.ai_messages(room)] == [ANSWER + DISCLAIMER]
+
+
+def test_일정_READ_다음_검사_READ면_고지가_붙어야_한다(client, java):
+    use_agent(
+        client,
+        FakeToolAgent("list_my_care_schedules", {}, follow_tool="list_inspection_values"),
+    )
+    reader = use_reader(client, FakeToolReader([{"schdlSn": 1}]))
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    evs = events(send(client, room, "병원 일정하고 피검사 결과 알려 줘"))
 
     assert len(reader.calls) == 2
     assert deltas(evs) == ANSWER + DISCLAIMER

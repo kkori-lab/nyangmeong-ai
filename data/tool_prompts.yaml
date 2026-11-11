@@ -3,6 +3,7 @@
 # - builtin: true : Java API가 아닌 Python 도구(navigate·search_guide·decline). Java 목록과 짝짓지 않는다
 # - params : LLM 칸 이름(snake_case) -> 설명. java는 Java 칸 이름, hook은 "<hook>:<역할>"(그 hook이 Java 칸을 만든다)
 # - hooks : 이 도구에 쓰는 Python 처리(app/chat/catalog.py HOOKS)
+# - notice : READ 답변 끝에 의료 고지(FN-AIM-002-03). 수치·변화를 보고 상담을 권하는 답·약 정보만 true
 # - skip : 일부러 싣지 않는 Java 도구의 이유. 이것만 둔다(경고 대신 info 로그)
 
 navigate:
@@ -409,6 +410,7 @@ draft_pet_update:
 get_health_indicators:
   screen: SCR-HLT-002
   hooks: [pet]
+  notice: true
   description: |
     반려동물의 건강 지표(체중·식사량·음수량·산책 추이, 크레아티닌)를 읽어 와 답한다.
     아무것도 저장하지 않는다.
@@ -554,6 +556,7 @@ list_checkups:
 list_inspection_values:
   screen: SCR-HLT-011
   hooks: [pet]
+  notice: true
   description: |
     혈액검사 수치(항목·결과값·단위·참고 범위)를 읽어 와 답한다. 아무것도 저장하지 않는다.
 
@@ -573,6 +576,7 @@ list_inspection_values:
 list_prescriptions:
   screen: SCR-HLT-011
   hooks: [pet]
+  notice: true
   description: |
     처방약(약 이름·복용 기간·하루 횟수·상태)을 읽어 와 답한다. 아무것도 저장하지 않는다.
 
@@ -608,6 +612,7 @@ list_repeat_preventions:
 list_observation_items:
   screen: SCR-HLT-002
   hooks: [pet]
+  notice: true
   description: |
     관찰 항목(혹·상처 등 지켜보는 부위, 처음·마지막 관찰과 크기 변화)을 읽어 와 답한다.
     아무것도 저장하지 않는다.
@@ -657,6 +662,7 @@ list_etc_inspections:
 list_observation_cycles:
   screen: SCR-HLT-002
   hooks: [pet]
+  notice: true
   description: |
     관찰 항목 하나의 회차별 기록(날짜·크기·변화)을 읽어 와 답한다. 아무것도 저장하지 않는다.
 

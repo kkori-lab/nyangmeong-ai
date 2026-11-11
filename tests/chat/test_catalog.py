@@ -366,6 +366,36 @@ def test_지원하지_않는_칸_타입이면_싣지_않아야_한다(caplog):
     assert "지원하지 않는 칸 타입 list" in caplog.text
 
 
+# 의료 고지(FN-AIM-002-03) : 수치·변화를 보고 상담을 권하는 READ·약 정보만(2026-11-11)
+
+NOTICE = {
+    "get_health_indicators",
+    "list_inspection_values",
+    "list_observation_items",
+    "list_observation_cycles",
+    "list_prescriptions",
+}
+
+
+def test_고지_READ는_설명에_notice로_표시한_5개만이어야_한다():
+    built = build(fake_catalog_json())
+
+    assert {name for name, item in built.entries.items() if item.notice} == NOTICE
+    assert all(built.entries[name].kind == "READ" for name in NOTICE)
+
+
+def test_카드_도구에_notice가_있으면_싣지_않고_경고해야_한다(caplog):
+    prompts = dict(catalog.tool_prompts())
+    prompts["draft_schedule"] = prompts["draft_schedule"].model_copy(update={"notice": True})
+    response = catalog.ToolCatalogResponse.model_validate(fake_catalog_json())
+
+    with caplog.at_level(logging.WARNING, logger="app.chat.catalog"):
+        built = catalog.build(response, prompts=prompts)
+
+    assert "draft_schedule" not in built.entries
+    assert "notice는 READ 도구만" in caplog.text
+
+
 # 기동(설계 4-2절 1·2번)
 
 

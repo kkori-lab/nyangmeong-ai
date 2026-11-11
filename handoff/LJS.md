@@ -1,10 +1,11 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-004 대화창 · 도구 52개 뒤 tool_eval 재측정 (추가 요청) — 끝 (2026-11-11). 78문항 2회: 도구 정확 72·71/78, 쓰기 잘못 0, T01~T44 40·39/44(3회차 36)이지만 판정 지연 중앙값 2,235·2,322ms로 기준 1,640ms 초과 → tool search 전환을 다음에 할 것 맨 위로. 검증 1회차 통과, 사람 확인
+SCR-AIM-004 대화창 · 의료 고지를 건강 관련 READ에만 (추가 요청) — 끝 (2026-11-11). READ 고지를 Java `domain` 대신 `tool_prompts.yaml` `notice: true` 5개(건강 지표·검사 수치·관찰 항목·관찰 회차·처방약)로. 일정·케어·일지·검진 기록 답변은 고지 없음. 검증 1회차 통과, 사람 확인
 
 ## 다음에 할 것
-- tool search 전환 (LJS, 2026-11-11 tool_eval 4회차 판정): 도구 52개 모두 싣기에서 T01~T44 판정 지연 중앙값 2,235·2,322ms로 3회차 1,091ms의 1.5배를 넘음(정확도 40·39/44, 쓰기 잘못 0은 통과). Anthropic tool search(BM25, `defer_loading`)로 바꾸고 같은 78문항으로 정확도·지연을 다시 잰다. 결과·판정은 `docs/design/tool-calling.md` 7-1절 4회차 — `/start`로 기획
+- `docs/api/chat.md` 20·80행 고지 문구 (LJS, 2026-11-11 검증 메모, 사람 결정 대기): "SEARCH면 끝에 의료 고지"라고 적혀 있으나 실제는 사용법 안내·가계부 등 READ·잡담에는 없음(READ는 도구별 `notice`, `tool-catalog.md` 1절). 맞출지 정한다. 도구 없이 바로 쓴 글 답변은 지금도 잡담만 빼고 고지
+- tool search 전환 (LJS, 2026-11-11 tool_eval 4회차 판정, 마일스톤 절 `대기`): 도구 52개 모두 싣기에서 T01~T44 판정 지연 중앙값 2,235·2,322ms로 기준 1,640ms 초과. 2026-11-11 `/start` 기획 초안(승인 전 보류, 사람이 다음 마일스톤으로 미룸): Java 도구만 `defer_loading`, builtin 3개는 싣기, `tool_definitions(search)`·`AnthropicToolAgent(tool_search=)`·`tool_eval --tool-search bm25|regex`, 기준(T01~T44 36/44 이상·쓰기 잘못 0·지연 1,640ms 이하·78문항 71/78에서 3문항 넘게 안 떨어짐)을 넘을 때만 앱에서 켬. 주의: 검색 단계가 늘어 지연이 줄지 않을 수 있음, 한국어 BM25, 검색 전 글. 대안: 지연 수용, search_guide·글 답변 출력 줄이기, 자주 쓰는 READ만 싣기 — `/start`로 다시 기획
 - tool_eval 정답·설명 고칠 거리 (LJS, 4회차): T15·T16·T17 정답이 READ 열기 전 `navigate`라 `get_expense_total`·`list_inspection_values`·`get_points`로, T66 정답(`list_pixel_characters` vs 고른 `list_shop_items`) 확인, T67 "자유게시판 최근 글"이 `navigate`로 감(설명), T03·T05·T08·T09 `search_guide` 화면, T36·T42 범위 밖 거절
 - 도구 확장 후속 (LJS): 커뮤니티 설명은 KSJ, 플레이스는 YAY 확인. `list_faqs`는 운영 FAQ 문항이 정해지면 다시(지금 시드는 같은 질문 8개 복사본)
 - 여러 아이 일정 READ 남은 메모 (LJS): 반려동물 몸무게(`petBdwg` 등) `scale 3`은 PR #221 범위 밖(담당자에게 전달됨). 옛 등록 카드(`draft`·REGISTER·등록 칸 추출 LLM)는 프론트 범용 카드 전환 뒤 삭제. Python은 도구 목록을 기동 때 1회만 받으므로 Java를 다시 띄우면 Python도 다시 띄운다
@@ -23,7 +24,6 @@ SCR-AIM-004 대화창 · 도구 52개 뒤 tool_eval 재측정 (추가 요청) �
 - `draft_receipt_save` 대기 (LJS): 저장 전 OCR 영수증 번호를 주는 READ가 없어 싣지 않음(카탈로그는 중첩 배열을 읽음). SCR-AIM-013 ⑤ 팀 결정 뒤 마일스톤 대기 절로
 - 프론트(LJS) 알리기: ②·③·④ 카드분과 추가-1(돌려받은 카드 날짜 유지)이 develop에 병합되면 알림. 사진 의도 판단(SCR-AIM-013) 계약 `POST /ai/image-intent`도 병합 뒤 함께 알림
 - `docs/api/chat.md` 맞추기 (LJS): AI 메시지 `cnvrsCn`·SSE `delta`는 Markdown(GFM)이라고 적기(프론트 끝 PR #288: `react-markdown`+`remark-gfm`, HTML·이미지 안 그림, 고지는 맨 끝 빈 줄 뒤 `※` 문단만 떼어 표시 — 마지막 문단 유지), ActionCard `params`는 값 없는 키가 null로 나옴(문서는 "없는 키는 생략", ①부터, `ActionParam`), `input`의 "datetime 칸에 날짜만 오면…"에 수정 카드는 원래 시간을 쓴다는 것(추가-3) 미반영
-- 공용 하네스 PR: `scripts/tool_eval.py` "쓰기 도구 잘못"을 확인 카드 도구 전부로 세기(2026-11-11 tool_eval 4회차) — 이번 커밋에서 뺌, chore PR로 따로
 - 실제 LLM에서 "코코 오늘 체중 4.2kg 기록해줘"에 `rcd_ymd`를 비워 `missing ["rcdDt"]`가 된 적 있음(2026-11-09 검증, 1/2). 날짜를 말하지 않았으면 서버가 오늘로 채울지 정한다(지금 결정은 "날짜만 오면"만) (LJS). 돌려받은 카드가 있으면 LLM의 "오늘"은 버림(추가-1)
 - 배포 서버 tool calling 미동작 원인(2026-11-08): 배포 워크플로우(`.github/workflows/main.yml` 4번)는 서버에 `.env`를 만들고 이미 있으면 건너뛰는데 앱은 `.env.local`만 읽는다(`app/core/config.py:10`). 서비스 파일이 `.env`를 `EnvironmentFile`로 읽는지 미확인. 워크플로우 수정은 backend-90과. Python을 Java보다 먼저 띄우면 도구 목록이 snapshot으로 떨어진다(기동 때 1회). 설정은 2026-11-09 지워 이제 `.env`와 무관하게 켜짐. 서버 접속: Mac 공개키를 `authorized_keys`에 덧붙인다(학원 PC MobaXterm, `>>`)
 - 답 없는 질문이 이력에 둘이면 `disable_parallel_tool_use`로도 첫 도구가 이전 질문용(`get_expense_total`, 실측 3/3). 지금 질문만 보게 할지는 tool_eval 문항으로 정한다 (LJS)

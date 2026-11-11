@@ -164,6 +164,8 @@ class ToolPrompt(BaseModel):
     fixed: dict[str, str | int | bool] = {}
     # READ : 답변의 연관 바로가기 화면 ID(FN-AIM-002-04, 매핑표의 라우팅 가능 행으로 찾음)
     screen: str | None = None
+    # READ : 답변 끝에 의료 고지(FN-AIM-002-03 건강 관련 응답). 기록만 읽어 주는 READ는 False
+    notice: bool = False
     # 일부러 싣지 않는 Java 도구 : 이유만 둔다. 경고 대신 info 로그(2026-11-11)
     skip: str | None = None
 
@@ -235,6 +237,7 @@ class CatalogEntry:
     target: str | None = None
     fixed: dict[str, object] = field(default_factory=dict)
     screen: str | None = None
+    notice: bool = False
 
 
 @dataclass(frozen=True)
@@ -315,6 +318,8 @@ def _problem(tool: CatalogTool, prompt: ToolPrompt, source: str) -> str | None:
     unknown = [name for name in prompt.hooks if name not in HOOKS]
     if unknown:
         return f"모르는 hook {unknown}"
+    if prompt.notice and tool.kind != "READ":
+        return "notice는 READ 도구만"
     for param in _all_params(tool.params):
         if param.type not in _PY_TYPES and param.type not in (ARRAY, FILE):
             return f"지원하지 않는 칸 타입 {param.type}"
@@ -396,6 +401,7 @@ def _entry(tool: CatalogTool, prompt: ToolPrompt) -> CatalogEntry:
         target=prompt.target,
         fixed=dict(prompt.fixed),
         screen=prompt.screen,
+        notice=prompt.notice,
     )
 
 
