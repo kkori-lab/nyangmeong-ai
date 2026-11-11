@@ -17,7 +17,6 @@ from app.character.schemas import (
 from app.character.service import BakeQueue, get_bake_queue
 from app.core import response
 from app.core.auth import require_admin, require_member, require_requested_with
-from app.core.config import Settings, get_settings
 from app.core.image import MAX_IMAGE_BYTES
 
 # 캐릭터(/ai/characters)와 관리자 아이템(/ai/items) : 굽기 코드를 같이 써서 한 라우터
@@ -34,7 +33,6 @@ async def create_character(
     client: Annotated[CharacterClient | None, Depends(get_character_client)],
     repo: Annotated[CharacterJobRepository, Depends(get_character_job_repository)],
     queue: Annotated[BakeQueue, Depends(get_bake_queue)],
-    settings: Annotated[Settings, Depends(get_settings)],
 ) -> JSONResponse:
     # 10MB + 1바이트까지만 읽기 : 초과 판정용
     image = await photo.read(MAX_IMAGE_BYTES + 1)
@@ -47,7 +45,6 @@ async def create_character(
         queue,
         job,
         image,
-        settings.character_bake_enabled,
     )
     return response.success(CharacterCreateResponse(char_crt_job_sn=job.char_crt_job_sn), 202)
 
@@ -61,10 +58,8 @@ async def preview_character(
     client: Annotated[CharacterClient | None, Depends(get_character_client)],
     repo: Annotated[CharacterJobRepository, Depends(get_character_job_repository)],
     queue: Annotated[BakeQueue, Depends(get_bake_queue)],
-    settings: Annotated[Settings, Depends(get_settings)],
 ) -> Response:
-    enabled = settings.character_bake_enabled
-    image = await service.preview(client, repo, queue, pixel_char_sn, body.item_sns, enabled)
+    image = await service.preview(client, repo, queue, pixel_char_sn, body.item_sns)
     if image is not None:
         return Response(image, media_type="image/png")
     # 예외로 끝내면 백그라운드 작업이 버려짐 : 응답으로 반환
@@ -83,12 +78,8 @@ async def save_equipped_image(
     client: Annotated[CharacterClient | None, Depends(get_character_client)],
     repo: Annotated[CharacterJobRepository, Depends(get_character_job_repository)],
     queue: Annotated[BakeQueue, Depends(get_bake_queue)],
-    settings: Annotated[Settings, Depends(get_settings)],
 ) -> JSONResponse:
-    enabled = settings.character_bake_enabled
-    saved = await service.save_equipped_image(
-        client, repo, queue, pixel_char_sn, body.item_sns, enabled
-    )
+    saved = await service.save_equipped_image(client, repo, queue, pixel_char_sn, body.item_sns)
     if saved:
         return response.success(None)
     background_tasks.add_task(queue.drain)
@@ -142,10 +133,8 @@ async def bake_item(
     client: Annotated[CharacterClient | None, Depends(get_character_client)],
     repo: Annotated[CharacterJobRepository, Depends(get_character_job_repository)],
     queue: Annotated[BakeQueue, Depends(get_bake_queue)],
-    settings: Annotated[Settings, Depends(get_settings)],
 ) -> JSONResponse:
-    enabled = settings.character_bake_enabled
-    result = await service.bake_item_batch(client, repo, queue, item_sn, enabled)
+    result = await service.bake_item_batch(client, repo, queue, item_sn)
     return response.success(
         ItemBakeResponse(
             item_sn=item_sn,

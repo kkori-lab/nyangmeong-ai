@@ -143,9 +143,8 @@ async def generate_and_report(
     queue: BakeQueue,
     job: CharacterJob,
     photo: bytes,
-    bake_enabled: bool,
 ) -> None:
-    """FN-MYP-010-09 : 응답 뒤 백그라운드 생성, 결과·상태 Java 보고, 켜져 있으면 이어서 굽기"""
+    """FN-MYP-010-09 : 응답 뒤 백그라운드 생성, 결과·상태 Java 보고, 이어서 굽기"""
     request = CharacterRequest(photo, job.pet_se_cd, job.vrty_nm, job.colr_nm, job.chrc_cn)
     try:
         character = await client.generate(request)
@@ -163,8 +162,6 @@ async def generate_and_report(
     except Exception:
         # 보고 실패로 멈춘 작업은 Java가 타임아웃으로 정리
         logger.exception("캐릭터 성공 보고 실패: charCrtJobSn=%d", job.char_crt_job_sn)
-        return
-    if not bake_enabled:
         return
     # FN-MYP-011-01 : 사자마자 입도록 전 아이템 미리 굽기
     try:
@@ -252,7 +249,6 @@ async def preview(
     queue: BakeQueue,
     pixel_char_sn: int,
     item_sns: Sequence[int],
-    bake_enabled: bool,
 ) -> bytes | None:
     """FN-MYP-011-01·FN-MYP-010-13 : 합성 PNG, 아직 안 구운 아이템이 있으면 None"""
     targets = await repo.list_bake_items()
@@ -263,16 +259,13 @@ async def preview(
         raise _preview_error()
     missing = [sn for sn in item_sns if sn not in found.sheets]
     if missing:
-        if bake_enabled:
-            if client is None:
-                logger.error("미리보기 불가: 생성기가 아직 연결되지 않았습니다")
-                raise external_error()
-            for sn in reversed(missing):
-                queue.put_first(
-                    BakeTask(
-                        client, repo, pixel_char_sn, sn, chosen[sn], found.sheet, found.pet_se_cd
-                    )
-                )
+        if client is None:
+            logger.error("미리보기 불가: 생성기가 아직 연결되지 않았습니다")
+            raise external_error()
+        for sn in reversed(missing):
+            queue.put_first(
+                BakeTask(client, repo, pixel_char_sn, sn, chosen[sn], found.sheet, found.pet_se_cd)
+            )
         return None
     return await _render(found, chosen)
 
@@ -283,10 +276,9 @@ async def save_equipped_image(
     queue: BakeQueue,
     pixel_char_sn: int,
     item_sns: Sequence[int],
-    bake_enabled: bool,
 ) -> bool:
     """FN-MYP-010-16·13 : [장착] 확정 뒤 착용 모습을 Java에 저장, 안 구운 아이템이 있으면 False"""
-    image = await preview(client, repo, queue, pixel_char_sn, item_sns, bake_enabled)
+    image = await preview(client, repo, queue, pixel_char_sn, item_sns)
     if image is None:
         return False
     await repo.save_equipped_image(pixel_char_sn, item_sns, image)
@@ -394,15 +386,12 @@ async def bake_item_batch(
     repo: CharacterJobRepository,
     queue: BakeQueue,
     item_sn: int,
-    bake_enabled: bool,
 ) -> ItemBakeResult:
     """FN-ADM-070-02 : 안 구운 캐릭터 한 묶음을 관리자 쿠키로 굽고 기다림 -> 결과 수
 
     - 구웠거나 실패 표시한 캐릭터는 Java 목록에서 빠짐 : 매번 첫 페이지만 읽음
     - 관리자 프론트가 last가 될 때까지 다시 부름 : 요청마다 새 쿠키
     """
-    if not bake_enabled:
-        raise AppError("BAKE_DISABLED", 409, "아이템 굽기가 꺼져 있습니다.")
     if client is None:
         logger.error("전체 굽기 불가: 생성기가 아직 연결되지 않았습니다")
         raise external_error()

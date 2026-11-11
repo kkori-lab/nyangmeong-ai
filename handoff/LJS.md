@@ -3,6 +3,9 @@
 ## 지금 하는 것
 SCR-AIM-004 대화창 · 의료 고지를 건강 관련 READ에만 (추가 요청) — 끝 (2026-11-11). READ 고지를 Java `domain` 대신 `tool_prompts.yaml` `notice: true` 5개(건강 지표·검사 수치·관찰 항목·관찰 회차·처방약)로. 일정·케어·일지·검진 기록 답변은 고지 없음. 검증 1회차 통과, 사람 확인
 
+### 추가 요청
+| 추가-1 | `app/core/config.py`, `.env.local.example`, `app/character/router.py`, `app/character/service.py`, `tests/character/`(꺼짐 동작 테스트 삭제·수정, 사람 승인), `docs/design/pixel-character-engine.md`, `docs/api/character.md` | 명령: `sh scripts/check.sh` 종료 코드 0, `grep -rn "bake_enabled\|BAKE_ENABLED" app tests .env.local.example` 0건. 화면: 사람이 프론트에서 직접 확인 | 요청 2026-11-11 21:24 "`CHARACTER_BAKE_ENABLED` 설정 필드를 완전히 지우고 굽기를 항상 켠다" |
+
 ## 다음에 할 것
 - 그림 참고 굽기: 백엔드 세션에 기획 내용 알리기 (LJS → LJS 백엔드, 2026-11-11 결정. 설계·실험 `docs/design/pixel-character-engine.md` 9절): 굽기에 픽셀 아이템 그림을 넣기로 했고, 백엔드가 그 그림을 Python에 내주는 내부 API를 먼저 기획한다. 백엔드 `/start` 때 알릴 것: (1) 굽기 대상 `GET /internal/ai/characters/bake-items` 응답이 `itemSn`·`regnCd`·`bakeHint`뿐이라 아이템 그림 파일 번호(`ITEM.ATCH_FILE_SN`)가 없다 (2) 아이템 그림 내려받기 내부 API가 없다(지금은 캐릭터 시트용 `sheet-files`뿐). 회원 굽기는 주양육자 쿠키, 전체 굽기는 관리자 쿠키로 부른다 (3) 굽기 대상 조건이 `BAKE_HINT IS NOT NULL`이라 굽기 지시 없이 그림만 있는 새 아이템이 목록에서 빠진다 (4) 이미 등록된 아이템은 굽기 지시 방식으로 두므로, 그림 참고로 구울 아이템을 가를 값이 필요하다(상점 그림이 실사 사진인 옛 아이템이 있다) — 정할 것 (5) 굽기 방식이 바뀐 아이템의 이미 구운 착용 시트를 다시 구울지 — 정할 것. 계약이 정해지면 `docs/api/internal.md` 30행을 같은 PR로 고치고, Python 구현(`engine.py` 부위 문장·`clients.py` 그림 2장 호출·`repository.py` 그림 받기)은 그 뒤 `/start`
 - `docs/api/chat.md` 20·80행 고지 문구 (LJS, 2026-11-11 검증 메모, 사람 결정 대기): "SEARCH면 끝에 의료 고지"라고 적혀 있으나 실제는 사용법 안내·가계부 등 READ·잡담에는 없음(READ는 도구별 `notice`, `tool-catalog.md` 1절). 맞출지 정한다. 도구 없이 바로 쓴 글 답변은 지금도 잡담만 빼고 고지
