@@ -42,7 +42,7 @@
 {"id": "T42", "type": "헷갈림", "q": "강아지 키우는 집 생활비 가계부 좀 짜줘 월급 300임", "intent": "반려동물과 무관한 가정 생활비 예산 짜기", "tool": "decline", "unclear": false}
 {"id": "T43", "type": "헷갈림", "q": "건강일지에 체중 적으라던데 코숏 적정 체중이 몇키로야", "intent": "고양이 적정 체중 지식 질문", "tool": "answer"}
 {"id": "T44", "type": "헷갈림", "q": "다음달 3일에 종합백신 맞으러 가는거 캘린더에 넣어줘", "intent": "1회성 병원 일정 등록(캘린더 이동 아님)", "tool": "draft_schedule", "args": {"schdl_knd_cd": "HLTC0057"}}
-{"id": "T45", "type": "수정", "q": "코코 다음 병원 일정 모레로 미뤄줘", "intent": "있는 병원 일정 날짜 바꾸기(먼저 일정 읽기)", "tool": "list_care_schedules"}
+{"id": "T45", "type": "수정", "q": "코코 다음 병원 일정 모레로 미뤄줘", "intent": "있는 병원 일정 날짜 바꾸기(먼저 일정 읽기)", "tool": "list_my_care_schedules"}
 {"id": "T46", "type": "수정", "q": "발톱 깎기 주기 2주로 바꿔 줘", "intent": "있는 케어 항목 주기 바꾸기(먼저 케어 항목 읽기)", "tool": "list_care_items"}
 {"id": "T47", "type": "수정", "q": "어제 사료 산 거 3만 2천원으로 고쳐 줘", "intent": "있는 지출 금액 고치기(먼저 지출 목록 읽기)", "tool": "list_expenses"}
 {"id": "T48", "type": "수정", "q": "코코 목표 체중 4kg로 바꿔 줘", "intent": "반려동물 등록 정보의 목표 체중 바꾸기", "tool": "draft_pet_update", "args": {"goal_bdwg": 4}}
@@ -52,3 +52,22 @@
 {"id": "T52", "type": "케어", "q": "초코 등에 난 혹 오늘 1.2cm야 기록해 줘", "intent": "관찰 항목에 오늘 기록 더하기(먼저 관찰 항목 읽기)", "tool": "list_observation_items"}
 {"id": "T53", "type": "헷갈림", "q": "등에 난 혹 크기 어떻게 변했어?", "intent": "관찰 항목 크기 변화 묻기(관찰 기록 추가 아님)", "tool": "list_observation_items"}
 {"id": "T54", "type": "지식", "q": "전체 반려동물 체중 알려줘", "intent": "모든 아이의 체중 추이 읽기", "tool": "get_health_indicators"}
+{"id": "T55", "type": "지식", "q": "우리 애들 이번 주 일정 뭐 있어?", "intent": "여러 아이 일정 한 번에 읽기", "tool": "list_my_care_schedules"}
+{"id": "T56", "type": "지식", "q": "코코랑 보리 다음 병원 언제야?", "intent": "두 아이의 다음 병원 일정 읽기", "tool": "list_my_care_schedules"}
+{"id": "T57", "type": "지식", "q": "우리 애들 누구누구 있어?", "intent": "내 반려동물 목록 읽기", "tool": "list_pets"}
+{"id": "T58", "type": "지식", "q": "코코 생일 언제야?", "intent": "한 아이 등록 정보 읽기", "tool": "get_pet"}
+{"id": "T59", "type": "헷갈림", "q": "코코 등록할 때 넣은 몸무게 몇이었지?", "intent": "체중 기록이 아닌 등록 몸무게 읽기", "tool": "get_pet"}
+{"id": "T60", "type": "지식", "q": "내 포인트 얼마야?", "intent": "포인트 잔액 읽기", "tool": "get_points"}
+{"id": "T61", "type": "헷갈림", "q": "이번 달 포인트 어디서 받았어?", "intent": "지출이 아닌 포인트 내역 읽기", "tool": "list_point_ledgers"}
+{"id": "T62", "type": "헷갈림", "q": "오늘 케어미션 뭐야?", "intent": "케어 항목이 아닌 오늘 미션 읽기", "tool": "list_daily_missions"}
+{"id": "T63", "type": "지식", "q": "코코 공동양육자 누구야?", "intent": "공동양육자 목록 읽기", "tool": "list_caregivers"}
+{"id": "T64", "type": "지식", "q": "내가 보낸 공동양육 초대 수락됐어?", "intent": "보낸 초대 상태 읽기", "tool": "list_sent_caregiver_invitations"}
+{"id": "T65", "type": "이동", "q": "캐릭터 꾸미러 가자", "intent": "캐릭터 꾸미기 화면 열기", "tool": "navigate", "scr_id": "SCR-MYP-010"}
+{"id": "T66", "type": "지식", "q": "상점에 모자 뭐 있어?", "intent": "캐릭터 목록을 먼저 읽고 상점 아이템 읽기", "tool": "list_pixel_characters"}
+{"id": "T67", "type": "지식", "q": "자유게시판 최근 글 보여줘", "intent": "게시판 글 목록 읽기", "tool": "list_posts"}
+{"id": "T68", "type": "지식", "q": "최근 실종 신고 올라온 거 있어?", "intent": "실종 신고 목록 읽기", "tool": "list_lost_reports"}
+{"id": "T69", "type": "지식", "q": "이번 주말 펫돌봄 모집 있어?", "intent": "펫돌봄 모집 목록 읽기", "tool": "list_care_recruitments"}
+{"id": "T70", "type": "지식", "q": "요즘 펫 뉴스 뭐 있어?", "intent": "펫뉴스 목록 읽기", "tool": "list_news"}
+{"id": "T71", "type": "지식", "q": "즐겨찾기한 동물병원 어디였지?", "intent": "병원 분류 즐겨찾기 읽기", "tool": "list_place_bookmarks"}
+{"id": "T72", "type": "이동", "q": "실종 신고 글 올리고 싶어", "intent": "쓰기 도구가 없어 실종 신고 화면으로", "tool": "navigate", "scr_id": "SCR-CMU-002"}
+{"id": "T73", "type": "헷갈림", "q": "공동양육자 초대 어떻게 해?", "intent": "초대 목록이 아닌 사용법", "tool": "search_guide", "scr_id": "SCR-MYP-004"}

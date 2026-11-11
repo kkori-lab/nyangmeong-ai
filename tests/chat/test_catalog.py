@@ -42,7 +42,7 @@ READ = {
     "get_health_indicators",
     "list_care_completions",
     "list_care_items",
-    "list_care_schedules",
+    "list_my_care_schedules",
     "list_checkups",
     "list_daily_health_records",
     "list_etc_inspections",
@@ -58,7 +58,30 @@ READ = {
     "list_expense_months",
     "list_expense_pets",
     "list_expenses",
+    # 반려동물·캐릭터(2026-11-11)
+    "get_pet",
+    "get_pixel_character",
+    "get_points",
+    "list_caregivers",
+    "list_daily_missions",
+    "list_pets",
+    "list_pixel_characters",
+    "list_point_ledgers",
+    "list_sent_caregiver_invitations",
+    "list_shop_items",
+    # 커뮤니티·플레이스(2026-11-11)
+    "get_popular_photo",
+    "get_post",
+    "list_care_recruitments",
+    "list_comments",
+    "list_health_tips",
+    "list_lost_reports",
+    "list_news",
+    "list_place_bookmarks",
+    "list_posts",
 }
+# 일부러 싣지 않는 Java 도구(tool_prompts.yaml skip)
+SKIP = {"list_care_schedules", "draft_receipt_save", "list_places", "list_faqs"}
 # 스냅샷(코드 값 없음)으로도 싣는 READ : 코드 칸 없음
 READ_WITHOUT_CODES = {
     "get_checkup",
@@ -72,6 +95,19 @@ READ_WITHOUT_CODES = {
     "get_receipt",
     "list_expense_months",
     "list_expense_pets",
+    "get_pet",
+    "get_pixel_character",
+    "get_points",
+    "list_caregivers",
+    "list_daily_missions",
+    "list_pets",
+    "list_pixel_characters",
+    "list_point_ledgers",
+    "list_sent_caregiver_invitations",
+    "get_popular_photo",
+    "get_post",
+    "list_comments",
+    "list_health_tips",
 }
 
 
@@ -95,7 +131,11 @@ def test_스냅샷의_CARD_도구마다_설명이_있고_설명의_Java_도구�
     prompts = catalog.tool_prompts()
     snapshot = catalog.read_snapshot().tools
     cards = {tool.name for tool in snapshot if tool.kind == "CARD"}
-    java_prompts = {name for name, prompt in prompts.items() if not prompt.builtin}
+    java_prompts = {
+        name for name, prompt in prompts.items() if not prompt.builtin and prompt.skip is None
+    }
+    assert {name for name, prompt in prompts.items() if prompt.skip is not None} == SKIP
+    assert {tool.name for tool in snapshot} >= SKIP
 
     assert cards >= REGISTER
     assert java_prompts == REGISTER | READ | ACTION
@@ -468,3 +508,34 @@ def test_Java_주소_꼴이_틀려도_예외_없이_스냅샷으로_떠야_한�
 
     assert loaded.source == "snapshot"
     assert "주소 꼴 틀림 InvalidURL" in caplog.text
+
+
+def test_skip_도구는_싣지_않고_경고_없이_info_로그만_남겨야_한다(caplog):
+    with caplog.at_level(logging.INFO, logger="app.chat.catalog"):
+        built = build(fake_catalog_json())
+
+    assert not SKIP & set(built.entries)
+    assert "설명 없음" not in caplog.text
+    for name in SKIP:
+        record = next(r for r in caplog.records if f"{name} 싣지 않음(" in r.getMessage())
+        assert record.levelno == logging.INFO
+
+
+def test_skip_항목에_다른_칸이_있으면_경고하고_싣지_않아야_한다(caplog):
+    prompts = catalog.tool_prompts() | {
+        "list_places": catalog.ToolPrompt.model_validate(
+            {"skip": "좌표 칸", "description": "장소를 찾는다"}
+        )
+    }
+    with caplog.at_level(logging.INFO, logger="app.chat.catalog"):
+        built = catalog.build(
+            catalog.ToolCatalogResponse.model_validate(fake_catalog_json()), prompts=prompts
+        )
+
+    assert "list_places" not in built.entries
+    assert "list_places skip 항목에 다른 칸 description" in caplog.text
+
+
+def test_설명도_skip도_없는_설명_항목은_만들_수_없어야_한다():
+    with pytest.raises(ValueError):
+        catalog.ToolPrompt.model_validate({"hooks": ["pet"]})

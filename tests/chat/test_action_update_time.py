@@ -26,7 +26,7 @@ def schedule_card(client, java, row: dict, raw: dict) -> dict:
     use_agent(
         client,
         FakeToolAgent(
-            "list_care_schedules", {}, follow_tool="draft_schedule_update", follow_raw=raw
+            "list_my_care_schedules", {}, follow_tool="draft_schedule_update", follow_raw=raw
         ),
     )
     room = room_of(client, java, pet_sn=CHOCO)
