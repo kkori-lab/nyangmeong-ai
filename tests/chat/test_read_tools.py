@@ -342,7 +342,7 @@ def test_앞_결과의_번호로_상세를_읽을_때는_그_번호가_나온_�
     assert len(agent.results) == 2
 
 
-def test_READ_시간을_마리_수와_함께_로그로_남겨야_한다(client, java, caplog):
+def test_READ_시간을_Java_호출_수와_함께_로그로_남겨야_한다(client, java, caplog):
     use_agent(client, FakeToolAgent("get_health_indicators", {}))
     use_reader(client, FakeToolReader())
     room = room_of(client, java)
@@ -352,7 +352,20 @@ def test_READ_시간을_마리_수와_함께_로그로_남겨야_한다(client, 
 
     lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("READ 도구 시간")]
     assert len(lines) == 1
-    assert re.fullmatch(r"READ 도구 시간: get_health_indicators 2마리 \d+ms", lines[0])
+    assert re.fullmatch(r"READ 도구 시간: get_health_indicators Java 2번 \d+ms", lines[0])
+
+
+def test_여러_아이_일정_READ는_시간_로그에_Java_1번으로_남겨야_한다(client, java, caplog):
+    use_agent(client, FakeToolAgent("list_my_care_schedules", {}))
+    use_reader(client, FakeToolReader([{"schdlSn": 7, "petSn": 2}]))
+    room = room_of(client, java)
+
+    with caplog.at_level("INFO", logger="app.chat.service"):
+        events(send(client, room, "우리 애들 이번 달 일정 알려줘"))
+
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("READ 도구 시간")]
+    assert len(lines) == 1
+    assert re.fullmatch(r"READ 도구 시간: list_my_care_schedules Java 1번 \d+ms", lines[0])
 
 
 def test_반려동물이_없으면_등록을_안내해야_한다(client, java):
@@ -389,6 +402,22 @@ def test_결과가_길면_앞부분만_잘라_표시해야_한다():
 
     assert len(text) == rules.READ_RESULT_MAX_CHARS + len(rules.READ_TRUNCATED)
     assert text.endswith(rules.READ_TRUNCATED)
+
+
+def test_결과의_날짜와_일시에_요일을_붙여야_한다():
+    data = {"a": "2026-11-01", "b": "2026-11-11T09:30:00", "c": ["2026-11-11"]}
+
+    text = rules.read_result_text(data)
+
+    assert "2026-11-01 (일)" in text
+    assert "2026-11-11 (수)T09:30:00" in text
+    assert '["2026-11-11 (수)"]' in text
+
+
+def test_날짜가_아닌_값은_요일을_붙이지_않아야_한다():
+    data = {"a": "2026년", "b": "12-34", "c": "2026-13-01", "d": 20261101, "e": "x2026-11-01"}
+
+    assert rules.read_result_text(data) == json.dumps(data, ensure_ascii=False)
 
 
 def test_Java_READ는_브라우저_쿠키를_실어_공개_API_data를_읽어야_한다():

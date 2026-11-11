@@ -1,10 +1,10 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-004 대화창 · 여러 아이 케어 일정 READ (`list_my_care_schedules`, 추가 요청) — 끝 (2026-11-11). 일정 READ를 `GET /api/care-schedules?petSns=` 하나로(새 hook `pet_list`: 이름 > 펫 태그 > 모두, 모두면 `petSns` 비움, Java 1번 호출, 결과 앞 `이름(petSn 번호)` 줄). `list_care_schedules`는 설명을 지워 싣지 않음. 검증 1회차 통과, 사람 확인
+SCR-AIM-004 대화창 · 여러 아이 일정 READ 후속 (결과 날짜 요일·READ 시간 로그 호출 수, 추가 요청) — 끝 (2026-11-11). READ 결과의 `YYYY-MM-DD`로 시작하는 값에 ` (요일)`을 붙임(`rules.read_result_text`, 시스템 프롬프트 변경 없음), `READ 도구 시간` 로그를 `Java N번`(실제 요청 수)으로. 검증 1회차 통과, 사람 확인
 
 ## 다음에 할 것
-- 여러 아이 일정 READ 후속 (LJS): `uv run python -m scripts.tool_eval` 재측정(T45 정답 변경, T55·T56 추가, 외부 API라 검증에서 안 돌림). `READ 도구 시간` 로그의 "N마리"가 Java 요청 수라 `list_my_care_schedules`는 여러 아이여도 "1마리"로 찍힘 — 문구를 "N번 호출"로 바꿀지. 첫 답변에서 LLM이 요일을 틀림(11-01을 토, 11-11을 화 — 실제 일·수), 시스템 날짜에 요일을 함께 줄지 정한다. 반려동물 몸무게(`petBdwg` 등) `scale 3`은 PR #221 범위 밖(담당자에게 전달됨). 옛 등록 카드(`draft`·REGISTER·등록 칸 추출 LLM)는 프론트 범용 카드 전환 뒤 삭제. Python은 도구 목록을 기동 때 1회만 받으므로 Java를 다시 띄우면 Python도 다시 띄운다
+- 여러 아이 일정 READ 남은 메모 (LJS): tool_eval T45·T55·T56 재측정 결과 줄은 이 세션에 기록되지 않음 — 다음 재측정 때 마일스톤 결과에 적는다. 반려동물 몸무게(`petBdwg` 등) `scale 3`은 PR #221 범위 밖(담당자에게 전달됨). 옛 등록 카드(`draft`·REGISTER·등록 칸 추출 LLM)는 프론트 범용 카드 전환 뒤 삭제. Python은 도구 목록을 기동 때 1회만 받으므로 Java를 다시 띄우면 Python도 다시 띄운다
 - 도구 도메인 고르기·설명 빠진 22개 (LJS, backend-79 요청 2026-11-11): Java 도구 52개를 다 싣지 않고 도메인별로 싣는 방법(설계 `docs/design/tool-catalog.md` 9절 "결정 남음")부터 `/start`로 기획. 분류 LLM은 이미 지워 "분류 LLM 도메인 칸" 안은 자리가 없음, 스냅샷에 도구별 `domain` 칸이 이미 있음(회신함). 22개 설명은 도메인 담당자 확인(반려동물 LJS/SJM, 커뮤니티 KSJ, 고객센터 YAY). Java 쪽(`@AiRequiredIf`·`@AiOneOf` 칸 이름 검사)은 백엔드 세션이 맡음
 - 연결 남음: FN-ADM-070-02 관리자 프론트 아이템 등록 (관리자 프론트): 사진을 고르면 [픽셀로 만들기] `POST /ai/items/pixel-image`(form `image`·`regnCd`·`itemNm`, 응답 `image/png`, 30~40초·이미지 1장 과금) → 미리보기 → [이 그림 쓰기]면 그 PNG를 Java 아이템 등록 이미지로(원본 사진 그대로 쓰는 선택도 남김, 2026-11-11). [굽기 지시 만들기](`POST /ai/items/bake-hints`)·[시험해 보기](`POST /ai/items/trial-preview`), 등록 뒤 `POST /ai/items/{itemSn}/bake`를 `lastYn` true까지 반복(한 번 30~40초, 매 호출 전 토큰 갱신, 502면 멈춤)
 - 연관 바로가기 프론트 확인 (LJS 프론트): 도구 흐름 글 답변(READ·바로 답)에도 `done.shortcut`(Intent ROUTE)이 온다. 버튼으로 그리는지, 확인 카드와 함께는 안 온다는 것 알림. 키워드에 안 걸리는 건강 지식 답("예방접종 언제 맞아?")은 바로가기 없음 — 필요하면 도구 고르기 LLM이 관련 화면을 고르게(도구 정의 변경). 등록 요청꼴 문장에 LLM이 글로 답해도 키워드 바로가기가 붙을 수 있음(검증 메모) (2026-11-10)

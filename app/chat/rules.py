@@ -628,12 +628,29 @@ READ_FAILED = "기록을 불러오지 못함. 앱의 해당 화면에서 확인�
 READ_NOT_RUN = "이 도구는 실행하지 않음. 앞서 받은 결과만으로 답한다."
 
 
+_DATE_HEAD = re.compile(r"\d{4}-\d{2}-\d{2}(?![\d])")
+
+
+def _with_weekday(text: str) -> str:
+    # 날짜(일시)로 시작하는 값 : LLM이 요일을 직접 계산하지 않게 (요일) 붙임
+    match = _DATE_HEAD.match(text)
+    if match is None:
+        return text
+    try:
+        day = date.fromisoformat(match.group())
+    except ValueError:
+        return text
+    return f"{match.group()} ({WEEKDAYS[day.weekday()]}){text[match.end() :]}"
+
+
 def _drop_free_text(value: object) -> object:
     # 내용(…Cn) 칸 : 메모·자유 입력 글이라 외부 AI API로 보내지 않음
     if isinstance(value, dict):
         return {k: _drop_free_text(v) for k, v in value.items() if not k.endswith("Cn")}
     if isinstance(value, list):
         return [_drop_free_text(item) for item in value]
+    if isinstance(value, str):
+        return _with_weekday(value)
     return value
 
 

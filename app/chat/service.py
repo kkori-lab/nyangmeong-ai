@@ -453,9 +453,9 @@ async def _read_once(
     started = time.perf_counter()
     datas = await asyncio.gather(*(fetch(r) for r in requests if r is not None))
     logger.info(
-        "READ 도구 시간: %s %d마리 %dms",
+        "READ 도구 시간: %s Java %d번 %dms",
         entry.name,
-        len(targets),
+        len(requests),
         (time.perf_counter() - started) * 1000,
     )
     if all(data is None for data in datas):
