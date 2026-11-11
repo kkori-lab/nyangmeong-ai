@@ -147,7 +147,7 @@ LLM 없이 검색 단계만 비교했다. 질문 50개(사용법 45, 범위 밖 
 | 할 일 | 비고 |
 | --- | --- |
 | AI매니저 기능명세서에 사용법 안내 기능 ID 추가 | 명세 먼저(AGENTS.md 흐름) |
-| `ClassifiedKind.GUIDE` 추가와 분류 프롬프트 수정 | 지금 질문꼴 입력은 `question_markers`로 AI 분류에 가지만 갈 곳이 없다 |
+| `ClassifiedKind.GUIDE` 추가와 분류 프롬프트 수정 | (질문꼴 표지 `question_markers`와 분류 LLM은 2026-11-11 삭제됨, 지금은 도구 흐름) |
 | `data/guide/*.yaml` 넣기 | 초안은 프론트 세션에서 만든 `service_guide.yaml`(화면 34행, task 138개 + 공통 6개). 도메인별로 나눠 넣는다 |
 | 색인·조회 구현 | `app/chat/rules.py` 옆. 평가 스크립트 `run_eval.py`의 M1을 옮기면 된다 |
 | 2단계 LLM 목차 선택 구현 | 구조화 출력으로 청크 ID 하나 또는 없음 |
