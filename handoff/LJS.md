@@ -1,11 +1,20 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-MYP-011 아이템 굽기 · 그림 참고 굽기 Java 연결 (SCR-MYP-010·ADM-070 공통) — 끝 (2026-11-12). 백엔드 PR #232 확정 계약(`bake-items`의 `bakeImgRefYn`, `GET /internal/ai/items/{itemSn}/bake-image`)으로 바꿈. `bakeImgRefYn`은 필수 칸이라 백엔드 #232가 먼저 병합·배포돼야 한다. 검증 1회차(확인 못 함 있음: 연결 남음만), 사람 확인: 로컬 Java로 그림 참고 굽기 머리·가방 각 1마리 통과
+SCR-MYP-011 아이템 굽기 · 전체 굽기 맨몸 시트 파일 없음 처리 (SCR-ADM-070 공통, 추가 요청) — 진행 중 (중간 저장 2026-11-12, 승인 09:59, 시작 09:55). 구현·검증 명령·테스트 끝, 검증 2회차 `실패`(사유는 `화면:` 확인 못 함뿐)
+
+- 재현: 전체 굽기 대상에 맨몸 시트 파일이 없는 캐릭터만 있으면 `find_sheets`가 Java 404 `FILE_NOT_FOUND`(`BackendError`)를 내고, `_bake_one`(`app/character/service.py` 196~200행)이 실패 표시 없이 `None` → 묶음 저장 0·실패 0 → 502. Java `bake-targets`는 같은 캐릭터를 다시 내므로 `lastYn`에 못 닿는다
+- 결정(제안): `_bake_one`의 맨몸 시트 조회에서 Java 404이고 본문 `code`가 `FILE_NOT_FOUND`일 때만 `report_bake_failure`로 굽기 실패 표시하고 `"failed"`로 센다. 403·그 밖의 4xx·502·통신 실패는 지금처럼 남겨 둔다(일시 오류일 수 있음). 굽기 생성기는 부르지 않는다(비용 0)
+- FN-ADM-070-02 바꿀 파일: `app/character/service.py`(`_bake_one`), `tests/character/test_items.py`(재현 테스트). 부를 API: 기존 `POST /internal/ai/characters/{pixelCharSn}/item-sheets/{itemSn}/failure`(LJS 백엔드, 있음, 관리자 쿠키 허용). 계약 변경 없음
+  - 완료 조건 `명령:` `sh scripts/check.sh` 종료 코드 0. 새 테스트 2개: ① 캐릭터 3마리 중 1마리가 404 `FILE_NOT_FOUND`면 `bakedCnt 2·failedCnt 1·lastYn true`, 그 캐릭터는 굽기 실패 표시, 생성기 호출 2회 ② 3마리 모두 404 `FILE_NOT_FOUND`면 200 `bakedCnt 0·failedCnt 3`(502 아님). 기존 `test_bake_맨몸_시트를_못_받으면_굽지_않고_남겨_둔다`(403)·`..._하나도_처리하지_못하면_502`는 그대로 통과
+  - 완료 조건 `화면:` 로컬 Java로 시트 파일 없는 캐릭터가 대상에 있는 아이템에 `POST /ai/items/{itemSn}/bake`(관리자 쿠키)를 `lastYn` true까지 반복해 502 없이 끝남, 서버 로그에 실패 표시 한 줄
+- 새 의존성: 없음
+- 화면 확인 (2026-11-12 10:07, 사람 승인 뒤 대화 세션이 실측, 사람 `확인`): 로컬 Java 관리자(mbrSn 2) 쿠키로 `POST /ai/items/51/bake` 1회 → 200 `{"bakedCnt":0,"failedCnt":9,"lastYn":true}`, 로그 `맨몸 시트 파일 없음, 굽기 실패 표시` 9줄, 생성기 호출 없음. 테스트 4개(새 2·기존 403·502) 통과, 새 2개는 수정 전 코드에서 실패
 
 ## 다음에 할 것
-- 전체 굽기 502 (LJS, 2026-11-12 로컬 확인 중 발견): 맨몸 시트 파일이 없는 캐릭터(Java `sheet-files` 404 `FILE_NOT_FOUND`, DB 행은 있고 디스크에 파일 없음)가 대상에 있으면 `service.py` `_bake_one`이 실패 표시 없이 건너뛰어(196~200행) 묶음이 저장 0·실패 표시 0 → 502, 다음 호출에도 같은 캐릭터가 나와 `lastYn`에 못 닿는다. 운영에서도 파일 하나가 사라지면 그 아이템 전체 굽기가 멈춘다. 고치는 방향(404면 굽기 실패로 표시할지 등)은 `/start`에서 정한다
-- 병합 순서: 백엔드 PR #232(`bakeImgRefYn`·`bake-image`·`ITEM.BAKE_IMG_REF_YN`) 먼저 → AI `LJS` PR. 각자 로컬 DB에 v0.14 (11) 실행 (LJS 백엔드)
+- 검증 루프 2회차 실패로 보관 중. 기획은 고치지 않는다. 루프를 버리려면 `! sh scripts/verify-loop.sh clear`. 1·2회차 실패 항목은 같다: FN-ADM-070-02 `화면:`(로컬 Java 전체 굽기 `lastYn`까지 502 없음) 확인 못 함. 검증 에이전트는 대화를 보지 않아 위 "화면 확인" 실측을 모르고, 관리자 번호·DB 쓰기·비용 때문에 직접 돌리지 않는다. 사람 결정(2026-11-12): 루프 한계로 받아들이고 중간 저장. 끝내려면 다음 세션 `/verify`가 그 실측을 볼 수 있게 하거나(아래 하네스 공백) 사람이 루프를 버리고 `/end`
+- 로컬 DB 정리 (LJS 백엔드): 화면 확인으로 캐릭터 601·603·604·608~612·614 × 아이템 51 굽기 실패 행 9개 생김
+- 백엔드 PR #232 병합됨(2026-11-12 확인). 각자 로컬 DB에 v0.14 (11) 실행 (LJS 백엔드)
 - 연결 남음: FN-MYP-011-01·FN-MYP-010-13·FN-ADM-070-02 그림 참고 굽기 남은 사람 확인 (LJS): 설계 9절 "확인하지 않은 것"(강아지·어두운 털·얼굴·의상·여러 부위 동시 착용)과 그림 한 장 더 넣는 굽기 단가. 로컬은 시트 파일이 있는 캐릭터가 흰 고양이 1마리뿐이라 못 봄. 시험 굽기 `/ai/items/trial-preview`의 그림 참고는 React 요청 계약 변경과 함께(관리자 프론트). 로컬 시험 아이템 51(머리 거북이)·53(가방 거북이)은 판매 중지나 정리
 - `docs/api/chat.md` 20·80행 고지 문구 (LJS, 2026-11-11 검증 메모, 사람 결정 대기): "SEARCH면 끝에 의료 고지"라고 적혀 있으나 실제는 사용법 안내·가계부 등 READ·잡담에는 없음(READ는 도구별 `notice`, `tool-catalog.md` 1절). 맞출지 정한다. 도구 없이 바로 쓴 글 답변은 지금도 잡담만 빼고 고지
 - tool search 전환 (LJS, 2026-11-11 tool_eval 4회차 판정, 마일스톤 절 `대기`): 도구 52개 모두 싣기에서 T01~T44 판정 지연 중앙값 2,235·2,322ms로 기준 1,640ms 초과. 2026-11-11 `/start` 기획 초안(승인 전 보류, 사람이 다음 마일스톤으로 미룸): Java 도구만 `defer_loading`, builtin 3개는 싣기, `tool_definitions(search)`·`AnthropicToolAgent(tool_search=)`·`tool_eval --tool-search bm25|regex`, 기준(T01~T44 36/44 이상·쓰기 잘못 0·지연 1,640ms 이하·78문항 71/78에서 3문항 넘게 안 떨어짐)을 넘을 때만 앱에서 켬. 주의: 검색 단계가 늘어 지연이 줄지 않을 수 있음, 한국어 BM25, 검색 전 글. 대안: 지연 수용, search_guide·글 답변 출력 줄이기, 자주 쓰는 READ만 싣기 — `/start`로 다시 기획
@@ -40,8 +49,7 @@ SCR-MYP-011 아이템 굽기 · 그림 참고 굽기 Java 연결 (SCR-MYP-010·A
 - 연결 남음: FN-MYP-010-16 프론트 꾸미기 [장착] (SJM): Java `PUT equipped-items` 성공 뒤 `POST /ai/characters/{pixelCharSn}/equipped-image` `{itemSns}`
 - 연결 남음: FN-MAN-006 메인 위젯 (프론트, Java 내부 API 연결은 2026-11-10 끝·로컬 확인): `AiReportCard.jsx`가 `GET /ai/pets/{petSn}/health-report`. `rptTtl`을 "{petNm}는 지금 ___"에, `tips`·`notice`, `staleYn`·`dataLackYn` 안내, `rfrshPsblYn`으로 새로고침(`POST .../refresh`, 409 `HEALTH_REPORT_REFRESH_LIMIT`), 은/는 받침, 3~6초 로딩
 - 연결 남음: FN-MYP-031-03·05 프론트 가계부 (SJM): `recognizeReceipt` 가짜 → `POST /ai/receipts`(`ocrRqstSrcCd=AIMC0027`, `petSn` 없음), `data.ocr`의 `ckupYmd`·`recptAmt` → `expndYmd`·`expndAmt`, 0건은 값이 모두 null인 200, 504·502는 "영수증을 읽지 못했어요"
-- 병합 대기: FN-MYP-031-05·03 Java 백엔드 PR #124(backend-95). 병합 전까지 develop에서 가계부 출처 인식은 Java가 거절. 병합 뒤 실제 가계부 영수증 1건으로 확인 (LJS 백엔드)
-- 병합 순서: 백엔드 PR #149(대표 이미지 저장·관리자 쿠키 시트 허용·`CharacterSpec.FACE` `(96, 32, 320, 320)`) 먼저 → AI `LJS` PR. 각자 로컬 DB에 `PIXEL_CHAR.WEAR_IMG_FILE_SN` ALTER(v0.13 (1)) (LJS 백엔드)
+- FN-MYP-031-05·03: 백엔드 PR #124 병합됨(2026-11-12 확인). 실제 가계부 영수증 1건으로 확인 (LJS 백엔드)
 - 연결 남음(JAJ): register-context `careArtclNms`가 빈 배열이라 같은 이름 안내(FN-AIM-012-08, ④부터 ActionCard `notice`)가 실제로는 안 뜸
 - JAJ에 요청(2026-10-30): 검사결과지 PDF 분석은 React → Python `POST /ai/checkups/lab-results`로 고정, 백엔드 `docs/api/health.md`의 Java `.../analyses`와 InspectionAnalysisResponse는 지운다. HLTG12에 SDMA 코드가 없어 직접입력명 `SDMA` — 넣으려면 JAJ가 코드 추가 후 `data/lab_items.yaml`에 `cd`. 인식률은 합성 결과지 1건만 확인
 - 백엔드에 요청(LJS 백엔드): Java `/api/receipts`·`/{recptSn}/analyze`·`FakeOcrClient` 흐름 정리(`/internal/v1/ocr` 삭제와 함께, Postman이 8080으로 가면 가짜 결과), AI 설정값 조회 내부 API(연결되면 가짜 `get_ai_settings` 교체), AI 역할 메시지 `cnvrsCn` 1,000자 상한 확대. 계약은 백엔드 PR과 함께(`AGENTS.md` 4번): 백엔드 LJS `ai` 도메인(대화 내부 API)·서버 간 키 제거와 `docs/api/internal.md`를 같은 때 병합
@@ -54,6 +62,6 @@ SCR-MYP-011 아이템 굽기 · 그림 참고 굽기 Java 연결 (SCR-MYP-010·A
 - 캐릭터 위험 (LJS): 고양이 꼬리 경계선·다리 사이 분홍 점 원인 미확인, 정렬 2단계 탐색은 촘촘한 무늬에서 빗나갈 수 있음, `dog_fluffy` 512 재검출이 눈 아닌 쌍을 잡음(배치 샘플 10건은 맞음, 검은 털 눈 높이 미측정). 약한 테스트: EXIF 테스트 입력에 EXIF 없음, 고양이 분기는 가짜가 짝수 `petSn`일 때만 `PETC0002`
 - 서비스 안내 후속 (LJS): 놓침 R13·R15·R24·R36, 로그인·비밀번호 찾기는 안내서 밖(R18), 2회차 답변 정확도 사람 채점 안 함, 실제 대화 로그 평가 아직
 - 각자 `.env.local` (디스코드 갱신): `HEALTH_REPORT_TIMEOUT_SEC=20`(없어도 기본 20), `GOOGLE_VISION_API_KEY`, `OCR_TIMEOUT_SEC` 15, `BACKEND_BASE_URL` 필수. 지울 것: `CHAT_TOOL_AGENT`(2026-11-09 삭제, 남아도 무시), `GOOGLE_APPLICATION_CREDENTIALS`·`BACKEND_INTERNAL_KEY`·`INTERNAL_API_KEY`·`APP_PROFILE`·`*_DB_*`·`CONVERSATION_ENC_KEY`. 운영 Nginx가 `/internal`을 막는지 확인
-- 공용 하네스 PR 후보: `impl-check.sh:18`이 "질문" 글자가 든 줄(예: "질문꼴")을 모두 질문으로 읽음(2026-11-09 재현), `verify-loop.sh guard`가 읽기 전용 비교(`git diff --no-index`)까지 막음, macOS BSD `sed`(`milestone-status.sh`·`impl-check.sh`·`api-row.sh`, 실패해도 종료 0), `verify-collect.sh` 37행 `case` 문법(종료 2)·18행 `cut -c8-` 멀티바이트 잘림. 커밋 안 한 평가 스크립트: `scripts/guide_eval.py`·`scripts/tool_eval_old.py`(옛 로컬 초안, 원격 `scripts/tool_eval.py`와 다름), `scripts/llm_smoke.py` 분류 로그 INFO
+- 공용 하네스 PR 후보: 사람이 승인해 실측한 `화면:` 결과를 검증 에이전트에 넘길 칸이 없어 관리자 권한·DB 쓰기·비용이 드는 `화면:` 조건은 회차와 무관하게 `실패`(2026-11-12, 전체 굽기 시트 파일 없음 마일스톤이 이것으로 `진행`), `impl-check.sh:18`이 "질문" 글자가 든 줄(예: "질문꼴")을 모두 질문으로 읽음(2026-11-09 재현), `verify-loop.sh guard`가 읽기 전용 비교(`git diff --no-index`)까지 막음, macOS BSD `sed`(`milestone-status.sh`·`impl-check.sh`·`api-row.sh`, 실패해도 종료 0), `verify-collect.sh` 37행 `case` 문법(종료 2)·18행 `cut -c8-` 멀티바이트 잘림. 커밋 안 한 평가 스크립트: `scripts/guide_eval.py`·`scripts/tool_eval_old.py`(옛 로컬 초안, 원격 `scripts/tool_eval.py`와 다름), `scripts/llm_smoke.py` 분류 로그 INFO
 - 이 PC는 애플리케이션 제어 정책이 `.venv\Scripts\*.exe`(uvicorn 등)를 막는다. `uv run python -m uvicorn ...`으로 띄운다
 - 스냅샷 자동화 보류 (LJS, 2026-11-11 결정, 설계 8절 6번): 손으로 찍는 게 불편해지면 그때 한다. 지금 방법은 로컬 Java `GET /internal/ai/tools` 응답의 `data`에서 `codes`만 빼서 지금 서식(`call`·칸 한 줄)으로 쓰기(2026-11-11 확인: Java가 이름순으로 주고, 그렇게 만든 결과가 지금 스냅샷과 같음). 할 때는 ① 스크립트 `scripts/tools_snapshot.py`부터. 배포 때 서버에서 돌리는 방식은 안 됨(git 파일이 안 바뀌고 다음 배포 `git pull`이 충돌)

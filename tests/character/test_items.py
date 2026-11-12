@@ -327,6 +327,39 @@ def test_bake_묶음을_하나도_처리하지_못하면_502(monkeypatch, repo) 
     assert generator.calls == []
 
 
+def _sheet_files_missing_for(repo, broken: set[int]) -> None:
+    """Java sheet-files 404 FILE_NOT_FOUND : DB 행은 있고 디스크에 파일 없음"""
+    original = repo.find_sheets
+
+    async def find_sheets(pixel_char_sn, item_sns):
+        if pixel_char_sn in broken:
+            raise BackendError(404, b'{"code":"FILE_NOT_FOUND"}', "application/json", [])
+        return await original(pixel_char_sn, item_sns)
+
+    repo.find_sheets = find_sheets
+
+
+def test_bake_맨몸_시트_파일이_없으면_굽기_실패로_표시하고_넘어가야_한다(monkeypatch, repo) -> None:
+    _sheet_files_missing_for(repo, {2})
+    generator = BakeClient()
+    res = post_bake(make_client(monkeypatch, repo, generator))
+    assert res.status_code == 200
+    assert res.json()["data"] == {"itemSn": SWEATER, "bakedCnt": 2, "failedCnt": 1, "lastYn": True}
+    assert len(generator.calls) == 2
+    assert SWEATER in repo.jobs[2].failed_items
+    assert SWEATER not in repo.jobs[2].item_sheets
+
+
+def test_bake_묶음_전부_시트_파일이_없으면_502_대신_실패로_세야_한다(monkeypatch, repo) -> None:
+    _sheet_files_missing_for(repo, {1, 2, 3})
+    generator = BakeClient()
+    res = post_bake(make_client(monkeypatch, repo, generator))
+    assert res.status_code == 200
+    assert res.json()["data"] == {"itemSn": SWEATER, "bakedCnt": 0, "failedCnt": 3, "lastYn": True}
+    assert generator.calls == []
+    assert all(SWEATER in saved.failed_items for saved in repo.jobs.values())
+
+
 def test_bake_대상_목록의_Java_4xx는_그대로(monkeypatch, repo) -> None:
     async def list_bake_targets(item_sn):
         raise BackendError(404, b'{"code":"ITEM_NOT_FOUND"}', "application/json", [])

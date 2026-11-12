@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import time
 from collections import deque
@@ -16,7 +17,7 @@ from app.character.repository import (
 )
 from app.character.rules import matches_spec
 from app.character.schemas import PetSeCd
-from app.core.backend import external_error
+from app.core.backend import BackendError, external_error
 from app.core.image import validate_upload
 from app.core.response import AppError
 
@@ -195,7 +196,15 @@ async def _bake_one(task: BakeTask) -> BakeOutcome:
     if task.sheet is None or task.pet_se_cd is None:
         try:
             found = await task.repo.find_sheets(task.pixel_char_sn, [])
-        except Exception:
+        except Exception as exc:
+            if _sheet_file_missing(exc):
+                # 파일이 사라진 캐릭터 : 실패 표시로 Java 목록에서 빼야 다음 묶음으로 넘어감
+                logger.warning(
+                    "맨몸 시트 파일 없음, 굽기 실패 표시: %d, itemSn=%d",
+                    task.pixel_char_sn,
+                    task.item_sn,
+                )
+                return await _mark_bake_failed(task)
             logger.exception("굽기용 맨몸 시트 조회 실패: %d", task.pixel_char_sn)
             return None
         task = replace(task, sheet=found.sheet, pet_se_cd=found.pet_se_cd)
@@ -219,6 +228,25 @@ async def _bake_one(task: BakeTask) -> BakeOutcome:
     except Exception:
         logger.exception("굽기 결과 보고 실패: %d, itemSn=%d", task.pixel_char_sn, task.item_sn)
         return None
+
+
+def _sheet_file_missing(exc: Exception) -> bool:
+    # 403·그 밖의 4xx·502는 일시 오류일 수 있어 남겨 둔다
+    if not isinstance(exc, BackendError) or exc.status_code != 404:
+        return False
+    try:
+        return json.loads(exc.body).get("code") == "FILE_NOT_FOUND"
+    except (ValueError, AttributeError):
+        return False
+
+
+async def _mark_bake_failed(task: BakeTask) -> BakeOutcome:
+    try:
+        await task.repo.report_bake_failure(task.pixel_char_sn, task.item_sn)
+    except Exception:
+        logger.exception("굽기 실패 표시 실패: %d, itemSn=%d", task.pixel_char_sn, task.item_sn)
+        return None
+    return "failed"
 
 
 async def _draw(task: BakeTask) -> tuple[bytes | None, int]:
