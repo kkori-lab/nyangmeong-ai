@@ -108,7 +108,15 @@ def test_report_failure는_쿠키와_함께_사유를_보낸다() -> None:
 
 def test_list_bake_items는_번호와_부위_굽기_지시를_돌려준다() -> None:
     requests: list[httpx2.Request] = []
-    data = [{"itemSn": 5, "regnCd": "MYPC0002", "bakeHint": "round thin black glasses"}]
+    data = [
+        {
+            "itemSn": 5,
+            "regnCd": "MYPC0002",
+            "bakeHint": "round thin black glasses",
+            "bakeImgRefYn": False,
+            "atchFileSn": 31,
+        }
+    ]
 
     targets = asyncio.run(make_repo(lambda _: ok(data), requests).list_bake_items())
 

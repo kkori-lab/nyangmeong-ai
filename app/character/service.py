@@ -243,11 +243,11 @@ async def _bake_once(
     item: engine.BakeItem,
 ) -> bytes:
     source = await asyncio.to_thread(bake.bake_source, sheet, item.regn_cd)
-    if item.image_file_sn is None:
+    if not item.by_image:
         worn = await client.bake(source, pet_se_cd, item)
     else:
         # 그림 참고 굽기 : 받기 실패도 굽기 실패와 같이 다시 시도
-        item_image = await repo.fetch_item_image(item.image_file_sn)
+        item_image = await repo.fetch_item_image(item.item_sn)
         worn = await client.bake(source, pet_se_cd, item, item_image)
     await asyncio.to_thread(bake.validate, sheet, worn, item.regn_cd)
     return worn

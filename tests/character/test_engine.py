@@ -254,7 +254,7 @@ def test_bake_외부_오류는_CharacterApiError():
 
 
 # 그림 참고 굽기 (설계 9절) : 아이템 그림을 둘째 그림으로
-BAG_BY_IMAGE = engine.BakeItem(8, "MYPC0005", None, 77)
+BAG_BY_IMAGE = engine.BakeItem(8, "MYPC0005", None, True)
 BAG_BY_HINT = engine.BakeItem(9, "MYPC0005", "a small red dog backpack")
 
 
@@ -312,7 +312,7 @@ def test_bake_굽기_지시_아이템은_그림_한_장과_지금_프롬프트()
     ],
 )
 def test_build_wear_prompt_그림_참고는_부위마다_착용_문장이_있다(regn_cd, text):
-    prompt = engine.build_wear_prompt("cat", engine.BakeItem(1, regn_cd, None, 5), by_image=True)
+    prompt = engine.build_wear_prompt("cat", engine.BakeItem(1, regn_cd, None, True), by_image=True)
     assert text in prompt
     assert "the one shown in the LAST image" in prompt
     assert "{" not in prompt

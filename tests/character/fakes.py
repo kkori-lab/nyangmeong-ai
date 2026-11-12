@@ -100,7 +100,7 @@ class FakeCharacterJobRepository:
         self._next = 1
         # 대표 이미지 저장 때 Java 4xx 흉내 (예: 409 EQUIPPED_ITEMS_CHANGED)
         self.equip_error: BackendError | None = None
-        # 가짜 Java item-files : bakeImageFileSn -> 아이템 그림
+        # 가짜 Java bake-image : itemSn -> 아이템 그림
         self.item_images: dict[int, bytes] = {}
 
     async def create_job(self, pet_sn: int) -> CharacterJob:
@@ -127,8 +127,8 @@ class FakeCharacterJobRepository:
     async def list_bake_items(self) -> dict[int, BakeItem]:
         return fake_items()
 
-    async def fetch_item_image(self, atch_file_sn: int) -> bytes:
-        image = self.item_images.get(atch_file_sn)
+    async def fetch_item_image(self, item_sn: int) -> bytes:
+        image = self.item_images.get(item_sn)
         if image is None:
             raise BackendError(404, b'{"code":"FILE_NOT_FOUND"}', "application/json", [])
         return image
