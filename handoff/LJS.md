@@ -1,9 +1,10 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-004 대화창 · 의료 고지를 건강 관련 READ에만 (추가 요청) — 끝 (2026-11-11). READ 고지를 Java `domain` 대신 `tool_prompts.yaml` `notice: true` 5개(건강 지표·검사 수치·관찰 항목·관찰 회차·처방약)로. 일정·케어·일지·검진 기록 답변은 고지 없음. 검증 1회차 통과, 사람 확인
+SCR-MYP-011 아이템 굽기 · 픽셀 아이템 그림을 참고로 굽기 (SCR-ADM-070 공통, 추가 요청) — 끝 (2026-11-12). Java 계약 초안(`docs/api/internal.md` `bake-items`의 `bakeImageFileSn`·새 `item-files`)과 가짜 응답으로 구현: 그림 번호가 있으면 시트와 아이템 그림 2장·부위 문장(가방 백팩·목 띠)으로, 없으면 지금처럼 굽기 지시로 굽는다. 검증 1회차 통과, 사람 확인(테스트)
 
 ## 다음에 할 것
+- 연결 남음: FN-MYP-011-01·FN-MYP-010-13·FN-ADM-070-02 그림 참고 굽기 Java 연결 (LJS 백엔드, 2026-11-12. 설계 `docs/design/pixel-character-engine.md` 9절): Python은 초안 계약으로 구현됨 — `GET /internal/ai/characters/bake-items` 항목에 `bakeImageFileSn: Long?`(있으면 그림 참고, 그림 참고로 구울 아이템은 Java가 이 값으로 가른다. 상점 그림이 실사 사진인 옛 아이템은 null)·`bakeHint` null 허용, 새 `GET /internal/ai/characters/item-files/{atchFileSn}`(`image/png`, 쿠키 로그인만. 회원 굽기는 주양육자 쿠키, 전체 굽기는 관리자 쿠키). 백엔드 `/start` 때 알릴 것: 굽기 대상 조건 `BAKE_HINT IS NOT NULL`을 그림만 있는 아이템도 나오게, 굽기 방식이 바뀐 아이템의 이미 구운 착용 시트를 다시 구울지 정할 것. 확정안이 초안과 다르면 `repository.py` `_BakeItem`·`fetch_item_image`와 `internal.md` 두 행을 같은 PR로 고친다. 연결 뒤 사람 확인: 실제 굽기 결과가 상점 그림과 같은지, 강아지·어두운 털·얼굴·의상·여러 부위 동시 착용(9절 "확인하지 않은 것"), 그림 한 장 더 넣는 굽기 단가. 이번에 안 한 것: 시험 굽기 `/ai/items/trial-preview`는 굽기 지시만 받음 — 그림 참고 시험은 React 요청 계약 변경과 함께(관리자 프론트)
 - `docs/api/chat.md` 20·80행 고지 문구 (LJS, 2026-11-11 검증 메모, 사람 결정 대기): "SEARCH면 끝에 의료 고지"라고 적혀 있으나 실제는 사용법 안내·가계부 등 READ·잡담에는 없음(READ는 도구별 `notice`, `tool-catalog.md` 1절). 맞출지 정한다. 도구 없이 바로 쓴 글 답변은 지금도 잡담만 빼고 고지
 - tool search 전환 (LJS, 2026-11-11 tool_eval 4회차 판정, 마일스톤 절 `대기`): 도구 52개 모두 싣기에서 T01~T44 판정 지연 중앙값 2,235·2,322ms로 기준 1,640ms 초과. 2026-11-11 `/start` 기획 초안(승인 전 보류, 사람이 다음 마일스톤으로 미룸): Java 도구만 `defer_loading`, builtin 3개는 싣기, `tool_definitions(search)`·`AnthropicToolAgent(tool_search=)`·`tool_eval --tool-search bm25|regex`, 기준(T01~T44 36/44 이상·쓰기 잘못 0·지연 1,640ms 이하·78문항 71/78에서 3문항 넘게 안 떨어짐)을 넘을 때만 앱에서 켬. 주의: 검색 단계가 늘어 지연이 줄지 않을 수 있음, 한국어 BM25, 검색 전 글. 대안: 지연 수용, search_guide·글 답변 출력 줄이기, 자주 쓰는 READ만 싣기 — `/start`로 다시 기획
 - tool_eval 정답·설명 고칠 거리 (LJS, 4회차): T15·T16·T17 정답이 READ 열기 전 `navigate`라 `get_expense_total`·`list_inspection_values`·`get_points`로, T66 정답(`list_pixel_characters` vs 고른 `list_shop_items`) 확인, T67 "자유게시판 최근 글"이 `navigate`로 감(설명), T03·T05·T08·T09 `search_guide` 화면, T36·T42 범위 밖 거절

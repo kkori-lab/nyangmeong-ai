@@ -100,6 +100,8 @@ class FakeCharacterJobRepository:
         self._next = 1
         # 대표 이미지 저장 때 Java 4xx 흉내 (예: 409 EQUIPPED_ITEMS_CHANGED)
         self.equip_error: BackendError | None = None
+        # 가짜 Java item-files : bakeImageFileSn -> 아이템 그림
+        self.item_images: dict[int, bytes] = {}
 
     async def create_job(self, pet_sn: int) -> CharacterJob:
         job = CharacterJob(self._next, "PETC0002" if pet_sn % 2 == 0 else "PETC0001")
@@ -124,6 +126,12 @@ class FakeCharacterJobRepository:
 
     async def list_bake_items(self) -> dict[int, BakeItem]:
         return fake_items()
+
+    async def fetch_item_image(self, atch_file_sn: int) -> bytes:
+        image = self.item_images.get(atch_file_sn)
+        if image is None:
+            raise BackendError(404, b'{"code":"FILE_NOT_FOUND"}', "application/json", [])
+        return image
 
     async def list_bake_targets(self, item_sn: int) -> BakeTargetPage:
         # 맨몸 시트가 있고 그 아이템을 굽지도 실패하지도 않은 캐릭터의 첫 페이지

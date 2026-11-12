@@ -253,6 +253,78 @@ def test_bake_외부_오류는_CharacterApiError():
         _bake(FakeOpenAI(RuntimeError("api down")), _sheet())
 
 
+# 그림 참고 굽기 (설계 9절) : 아이템 그림을 둘째 그림으로
+BAG_BY_IMAGE = engine.BakeItem(8, "MYPC0005", None, 77)
+BAG_BY_HINT = engine.BakeItem(9, "MYPC0005", "a small red dog backpack")
+
+
+def _item_png() -> bytes:
+    image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    ImageDraw.Draw(image).rectangle((16, 16, 48, 48), fill=(30, 160, 60, 255))
+    buffer = io.BytesIO()
+    image.save(buffer, "PNG")
+    return buffer.getvalue()
+
+
+def _bake_item(fake: FakeOpenAI, item: engine.BakeItem, item_image: bytes | None) -> dict:
+    client = OpenAICharacterClient(fake, "image-model", "vision-model")
+    asyncio.run(client.bake(_sheet(), "PETC0001", item, item_image))
+    return fake.edits[0]
+
+
+def test_bake_그림_참고는_시트와_아이템_그림_두_장을_보낸다():
+    edit = _bake_item(FakeOpenAI(_sheet()), BAG_BY_IMAGE, _item_png())
+    [(first, sheet, _), (last, reference, mime)] = edit["image"]
+    assert (first, last, mime) == ("character.png", "item.png", "image/png")
+    assert sheet.getvalue() == _sheet()
+    # 투명 배경은 흰 바탕으로 올려 보낸다
+    pixels = Image.open(reference).convert("RGB")
+    assert pixels.getpixel((0, 0)) == (255, 255, 255)
+    assert pixels.getpixel((32, 32)) == (30, 160, 60)
+
+
+def test_bake_그림_참고_프롬프트는_머리말과_부위_문장을_쓴다():
+    prompt = _bake_item(FakeOpenAI(_sheet()), BAG_BY_IMAGE, _item_png())["prompt"]
+    assert prompt.startswith("Two images are given.")
+    assert "The FIRST image is a 2x2 sheet" in prompt
+    assert "item exactly like the one shown in the LAST image" in prompt
+    assert "worn as a backpack in all four figures" in prompt
+    assert "{" not in prompt
+
+
+def test_bake_굽기_지시_아이템은_그림_한_장과_지금_프롬프트():
+    edit = _bake_item(FakeOpenAI(_sheet()), BAG_BY_HINT, None)
+    assert [name for name, _, _ in edit["image"]] == ["character.png"]
+    template = (engine.PROMPTS / "chibi_wear.txt").read_text(encoding="utf-8")
+    assert edit["prompt"] == template.format(species="dog", wear="a small red dog backpack")
+    assert "LAST image" not in edit["prompt"]
+    assert "worn as a backpack" not in edit["prompt"]
+
+
+@pytest.mark.parametrize(
+    ("regn_cd", "text"),
+    [
+        ("MYPC0001", "on its head in all four figures"),
+        ("MYPC0002", "on its face in all four figures"),
+        ("MYPC0003", "around its neck in all four figures: a snug band"),
+        ("MYPC0004", "on its torso in all four figures"),
+        ("MYPC0005", "worn as a backpack in all four figures"),
+    ],
+)
+def test_build_wear_prompt_그림_참고는_부위마다_착용_문장이_있다(regn_cd, text):
+    prompt = engine.build_wear_prompt("cat", engine.BakeItem(1, regn_cd, None, 5), by_image=True)
+    assert text in prompt
+    assert "the one shown in the LAST image" in prompt
+    assert "{" not in prompt
+
+
+def test_build_wear_prompt_굽기_지시_목_아이템은_부위_문장을_붙이지_않는다():
+    item = engine.BakeItem(1, "MYPC0003", "a red collar with a bell around its neck")
+    prompt = engine.build_wear_prompt("dog", item)
+    assert "wearing a red collar with a bell around its neck." in prompt
+    assert "a snug band" not in prompt
+
+
 def test_get_character_client_키가_없으면_None():
     assert get_character_client(get_settings()) is None
 

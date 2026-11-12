@@ -11,7 +11,7 @@ Python ↔ Java ↔ React 계약 초안이다. **코드 없음, 팀 확인 전.*
 | 이식 방식 | 엔진 파이썬 코드를 이 저장소 `app/character/`로 옮겨 `CharacterClient`(`clients.py`) 구현으로 붙인다(HTTP 위임 아님) |
 | 아이템 | 목록은 공용(`ITEM`), 그림은 캐릭터마다 굽는다 |
 | 합성 | 서버가 한다. 프론트는 겹치지 않는다 |
-| 굽는 시점 | 캐릭터 생성 직후 전 아이템을 미리 굽는다. 사자마자 바로 장착. `CHARACTER_BAKE_ENABLED` 기본 꺼짐: 비용 결정·Java 시트 저장 연결 뒤 켠다. 꺼져 있으면 이미지 API를 부르지 않고 미리보기는 맨몸 외 409 |
+| 굽는 시점 | 캐릭터 생성 직후 전 아이템을 미리 굽는다. 사자마자 바로 장착. 굽기는 항상 켜져 있다(2026-11-11 `CHARACTER_BAKE_ENABLED` 설정 삭제). 안 구운 아이템 미리보기는 409 뒤 구워 둔다 |
 | 지원 부위 | 머리·얼굴·목·의상·가방 5부위, 아이템 26개. 신발은 넣지 않는다(2026-11-02) |
 | 표시 컷 | 서기 정면 1컷, 512×512, 얼굴 영역 `(96, 32, 320, 320)` 규격 유지(2026-11-04 변경, 백엔드 `CharacterSpec.FACE`와 같음. 옛 값 `(128, 64, 256, 256)`) |
 | 캔버스 배치 | 4번 "V4a56" |
@@ -58,6 +58,7 @@ Python ↔ Java ↔ React 계약 초안이다. **코드 없음, 팀 확인 전.*
 | 굽기 대상 아이템 목록 조회 | `ITEM` 중 판매 중 + 엔진이 아는 아이템 |
 | 합성용 시트 조회 | 맨몸 시트 + 요청 장비의 착용 시트 |
 | 대표 이미지 저장 | `PUT /internal/ai/characters/{pixelCharSn}/equipped-image`, 지금 착용 목록과 같을 때만 |
+| 굽기용 아이템 그림 내려받기 | `GET /internal/ai/characters/item-files/{atchFileSn}`(초안, 9절). `bake-items`의 `bakeImageFileSn`이 있는 아이템만 받는다 |
 | 반려동물 정보 | 작업 생성이 이미 `petSeCd`·`vrtyNm`·`colrNm`·`chrcCn`을 돌려준다(`CharacterRequest`). 엔진이 쓰는 성별(`PET_GNDR_CD`)만 없다 — 추가 여부 결정 |
 | 사진 원본 조회 | 굽기는 맨몸 시트로 하므로 생성 뒤에는 필요 없다(생성 때는 요청에 사진이 온다) |
 
@@ -152,3 +153,77 @@ AI가 그린 머리 착용 그림을 바탕으로 쓰고 몸 아이템 레이어
 | 14 | 약 $0.88 |
 | 30 | 약 $1.89 |
 | 50 | 약 $3.15 |
+
+## 9. 그림 참고 굽기 (2026-11-11 실험·결정, LJS. Python은 가짜 Java 응답으로 구현, Java 연결 전)
+
+지금 굽기는 맨몸 시트 한 장과 굽기 지시 문장만 모델에 보낸다. 아이템 그림은 보내지 않는다.
+그래서 상점 그림과 착용 모습이 따로 만들어지고, 문장에 담기지 않은 모양은 사라진다
+(사람 확인 2026-11-11: 거북이 인형 가방이 초록 크로스백으로 구워짐).
+
+### 결정
+
+1. 굽기에 픽셀 아이템 그림(`/ai/items/pixel-image`로 만든 상점 그림)을 둘째 그림으로 넣는다.
+   아이템 생김새는 그림이 전하고, 문장의 `{hint}` 자리는 "마지막 그림의 아이템"으로 바꾼다.
+2. 부위마다 "어떻게 입는지" 문장을 둔다. 그림은 생김새만 알려 주고 착용 방식은 알려 주지 않는다.
+   머리·얼굴·의상은 지금 `_WEAR_SLOT` 문장을 쓰고, 가방·목은 아래 문장을 새로 둔다.
+3. 가방 부위의 기본 착용 방식은 백팩이다(등에 엎드린 모습). 크로스백 등 다른 방식을 아이템마다 고르게 할지는 정하지 않았다.
+4. 이미 등록된 아이템은 지금 방식(굽기 지시 문장)으로 둔다. 새 부위 문장은 그림 참고로 굽는 경우에만 쓴다.
+   기존 가방·목 아이템은 굽기 지시 안에 착용 방식이 들어 있어, 부위 문장을 같이 붙이면 지시가 겹친다.
+5. Python이 아이템 그림을 받는 Java 내부 API를 먼저 만든다(백엔드 몫, 2절 "Python → Java"에 추가).
+   지금 `bake-items` 응답에는 그림 정보가 없고, 파일 내려받기는 캐릭터 시트용만 있다.
+6. Python 구현(2026-11-11, 계약은 `docs/api/internal.md`의 초안): `bake-items` 항목에 `bakeImageFileSn`이 있으면
+   `item-files`로 그림을 받아 그림 참고로 굽고(`engine._REF_WEAR_SLOT`), 없으면 `bakeHint`로 굽는다. 둘 다 없는 행은 뺀다.
+   그림 받기 실패는 굽기 실패와 같이 한 번 다시 해 보고 실패로 보고한다. 시험 굽기(`/ai/items/trial-preview`)는 굽기 지시만 받는다.
+
+### 프롬프트 (실험에 쓴 원문)
+
+그림 순서는 맨몸 시트가 첫째, 아이템 그림이 마지막이다. 아이템 그림은 `normalize_item_image`로 흰 바탕에 올려 보낸다.
+
+머리말(`chibi_wear.txt` 앞에 붙임. 본문의 "The image"는 "The FIRST image"로 바꿈):
+
+```
+Two images are given. The FIRST image is the character sheet to edit. The LAST image is only a reference picture of the item to wear: copy how the item looks, never its background, its size on the canvas or its position.
+```
+
+`{hint}` 자리:
+
+```
+item exactly like the one shown in the LAST image (same colors, pattern, material and shape)
+```
+
+가방 MYPC0005:
+
+```
+ONE {hint} worn as a backpack in all four figures: two thin shoulder straps go over the shoulders and the bag lies face-down flat against the back, its underside pressed to the back and its top surface facing away from the body, at the same place and the same size in every figure; in the side views the bag is drawn in PROFILE, seen from its own side as a low dome hugging the line of the back - the viewer must NOT see the bag's top surface as a full round shape; in the front views the straps show on the chest and the bag only peeks out from behind the body; the bag stays below the head and never touches the head or the ears
+```
+
+목 MYPC0003:
+
+```
+ONE {hint} around its neck in all four figures: a snug band circling the neck just under the chin, at the same place and the same width in every figure; in the front views its front part (buckle, tag or charm) shows centered under the chin, in the side views it is seen from the side as a band across the neck; it sits on the neck only and never covers the face, the ears or the chest
+```
+
+### 실험 (2026-11-11, 사람 판정)
+
+고양이 캐릭터 1마리(실사 사진으로 새로 생성), 운영과 같은 모델·1024·medium, 조건마다 2장. 스크립트는 저장소 밖에서 돌렸다.
+이미지 28장(캐릭터 1, 픽셀 아이템 5, 굽기 22), 비전 4회. 굽기 한 장은 두 방식 모두 30~34초.
+
+| 아이템(부위) | 문장만(자동 초안) | 그림만 | 그림 + 부위 문장 |
+| --- | --- | --- | --- |
+| 갈색 털모자(머리) | 매끈한 갈색 캡에 곰 귀 | 복슬한 질감, 얼굴을 감싸는 모양 | 머리는 `_WEAR_SLOT` 문장이 이미 있어 "그림만"과 같은 조건 |
+| 흰 털모자(머리) | 주황 지그재그 한 줄 | 여러 색 무늬 밴드, 로고 패치 | 위와 같음 |
+| 거북이 가방(가방) | 등껍질 무늬 둥근 가방, 머리·다리 없음 | 거북이 전체. 메는 위치가 컷마다·장마다 다름 | 크로스백 문장: 위치 일정하나 착용 방식이 틀림 / 백팩 문장: 일정 / 엎드린 백팩 문장: 일정, 옆모습이 등에 엎드린 옆면 |
+| 빨간 목줄(목) | 굽지 않음 | 굽지 않음 | 네 컷 모두 턱 아래 빨간 띠와 은색 버클, 두 장이 거의 같음 |
+| 과일 목걸이(목) | 굽지 않음 | 굽지 않음 | 네 컷 모두 구슬 줄과 딸기·별·방울 장식, 두 장이 거의 같음. 장식은 가슴 쪽으로 내려옴 |
+
+- 판정: 그림을 넣은 쪽이 세 아이템 모두 픽셀 아이템에 더 가깝다. 캐릭터 본체는 눈으로 보기에 유지됐다(화소 비교는 안 함). 가방은 엎드린 백팩 문장, 목은 위 목 문장으로 정했다.
+- 가방을 등에 엎드리게 하면 옆모습에서 윗면 무늬가 얇게 눌려, 두 장 중 한 장은 거북이로 알아보기 어려웠다.
+- 백팩은 서기 정면 컷에서 어깨끈만 보이고 가방은 몸 뒤로 조금만 보인다.
+
+### 확인하지 않은 것
+
+- 강아지, 어두운 털(밝힌 시트로 굽는 경로, 5절), 얼굴·의상 부위.
+- 512 합성 결과와 여러 부위 동시 착용(모자 + 백팩 등).
+- `bake.validate`는 아이템 레이어가 비지 않았는지만 본다(머리는 2×2로 잘리는지만). 위치가 틀리거나 다른 부위 영역을 침범해도 통과한다 — 실험의 22장이 모두 통과했다.
+- 그림을 한 장 더 넣을 때의 굽기 단가(8절 표는 그림 한 장 기준).
+- 실사 사진이 상점 그림으로 등록된 기존 아이템에 이 방식을 쓰면 어떻게 나오는지.

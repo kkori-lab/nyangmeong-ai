@@ -45,7 +45,13 @@ class GeneratedCharacter:
 class CharacterClient(Protocol):
     async def generate(self, request: CharacterRequest) -> GeneratedCharacter: ...
 
-    async def bake(self, sheet: bytes, pet_se_cd: PetSeCd, item: engine.BakeItem) -> bytes: ...
+    async def bake(
+        self,
+        sheet: bytes,
+        pet_se_cd: PetSeCd,
+        item: engine.BakeItem,
+        item_image: bytes | None = None,
+    ) -> bytes: ...
 
     async def describe_item(self, image: bytes, regn_cd: str, item_nm: str) -> str: ...
 
@@ -78,16 +84,34 @@ class OpenAICharacterClient:
             logger.warning("캐릭터가 512 캔버스 밖으로 잘림: 배율 %.3f", rendered.placement.scale)
         return GeneratedCharacter(rendered.placement.png, rendered.sheet, rendered.placement.layout)
 
-    async def bake(self, sheet: bytes, pet_se_cd: PetSeCd, item: engine.BakeItem) -> bytes:
-        return await asyncio.to_thread(self._bake, sheet, pet_se_cd, item)
+    async def bake(
+        self,
+        sheet: bytes,
+        pet_se_cd: PetSeCd,
+        item: engine.BakeItem,
+        item_image: bytes | None = None,
+    ) -> bytes:
+        return await asyncio.to_thread(self._bake, sheet, pet_se_cd, item, item_image)
 
-    def _bake(self, sheet: bytes, pet_se_cd: PetSeCd, item: engine.BakeItem) -> bytes:
+    def _bake(
+        self,
+        sheet: bytes,
+        pet_se_cd: PetSeCd,
+        item: engine.BakeItem,
+        item_image: bytes | None,
+    ) -> bytes:
         try:
-            prompt = engine.build_wear_prompt(engine.species_of(pet_se_cd), item)
+            species = engine.species_of(pet_se_cd)
+            prompt = engine.build_wear_prompt(species, item, by_image=item_image is not None)
+            images = [("character.png", io.BytesIO(sheet), "image/png")]
+            if item_image is not None:
+                # 그림 순서 : 맨몸 시트가 첫째, 아이템 그림이 마지막 (프롬프트 머리말과 짝)
+                reference = engine.normalize_item_image(item_image)
+                images.append(("item.png", io.BytesIO(reference), "image/png"))
             response = self._client.images.edit(
                 model=self._image_model,
                 prompt=prompt,
-                image=[("character.png", io.BytesIO(sheet), "image/png")],
+                image=images,
                 size=IMAGE_SIZE,
                 quality=IMAGE_QUALITY,
                 n=1,

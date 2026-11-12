@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -19,6 +20,8 @@ from app.core.backend import (
     get_backend_client,
 )
 from app.core.config import Settings, get_settings
+
+logger = logging.getLogger(__name__)
 
 # Java 캐릭터 내부 API (docs/api/internal.md "Python → Java")
 CHARACTERS_PATH = "/internal/ai/characters"
@@ -68,6 +71,8 @@ class CharacterJobRepository(Protocol):
 
     async def list_bake_items(self) -> dict[int, engine.BakeItem]: ...
 
+    async def fetch_item_image(self, atch_file_sn: int) -> bytes: ...
+
     async def list_bake_targets(self, item_sn: int) -> "BakeTargetPage": ...
 
     async def save_item_sheet(self, pixel_char_sn: int, item_sn: int, sheet: bytes) -> None: ...
@@ -96,7 +101,8 @@ class _SuccessResponse(BaseModel):
 class _BakeItem(BaseModel):
     item_sn: int = Field(alias="itemSn")
     regn_cd: str = Field(alias="regnCd")
-    bake_hint: str = Field(alias="bakeHint", min_length=1)
+    bake_hint: str | None = Field(default=None, alias="bakeHint", min_length=1)
+    image_file_sn: int | None = Field(default=None, alias="bakeImageFileSn")
 
 
 class BakeTargetPage(BaseModel):
@@ -185,10 +191,25 @@ class JavaCharacterJobRepository:
             items = [_BakeItem.model_validate(item) for item in data]
         except (TypeError, ValidationError):
             raise external_error() from None
-        return {
-            item.item_sn: engine.BakeItem(item.item_sn, item.regn_cd, item.bake_hint)
-            for item in items
-        }
+        found: dict[int, engine.BakeItem] = {}
+        for item in items:
+            if item.bake_hint is None and item.image_file_sn is None:
+                # 굽기 지시도 그림도 없는 행 : 구울 방법이 없어 제외
+                logger.warning("굽기 지시·그림이 모두 없는 아이템 제외: itemSn=%d", item.item_sn)
+                continue
+            found[item.item_sn] = engine.BakeItem(
+                item.item_sn, item.regn_cd, item.bake_hint, item.image_file_sn
+            )
+        return found
+
+    async def fetch_item_image(self, atch_file_sn: int) -> bytes:
+        return await fetch_backend_bytes(
+            self._client,
+            self._settings,
+            f"{CHARACTERS_PATH}/item-files/{atch_file_sn}",
+            headers=self._headers,
+            timeout=SHEET_TIMEOUT_SEC,
+        )
 
     async def list_bake_targets(self, item_sn: int) -> BakeTargetPage:
         # FN-ADM-070-02 : 아직 안 구운 캐릭터 첫 페이지 (관리자 판정은 Java)

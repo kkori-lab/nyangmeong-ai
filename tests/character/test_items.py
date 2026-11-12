@@ -88,9 +88,8 @@ def repo() -> FakeCharacterJobRepository:
     return fake
 
 
-def make_client(monkeypatch, repo, generator, enabled: bool = True) -> TestClient:
+def make_client(monkeypatch, repo, generator) -> TestClient:
     monkeypatch.setenv("BACKEND_BASE_URL", "http://backend.test")
-    monkeypatch.setenv("CHARACTER_BAKE_ENABLED", "true" if enabled else "false")
     get_settings.cache_clear()
     app = create_app()
     backend = httpx2.AsyncClient(transport=httpx2.MockTransport(fake_auth_check))
@@ -190,7 +189,7 @@ def post_trial(client: TestClient, headers=ADMIN, **body):
 
 def test_trial_preview_지시대로_한_번_구워_입힌_512_PNG_저장하지_않는다(monkeypatch, repo) -> None:
     generator = BakeClient()
-    res = post_trial(make_client(monkeypatch, repo, generator, enabled=False))
+    res = post_trial(make_client(monkeypatch, repo, generator))
     assert res.status_code == 200
     assert res.headers["content-type"] == "image/png"
     assert matches_spec(res.content)
@@ -277,14 +276,6 @@ def test_bake_대상이_없으면_0과_lastYn(monkeypatch, repo) -> None:
     assert len(generator.calls) == 3
 
 
-def test_bake_굽기가_꺼져_있으면_409이고_이미지_API를_부르지_않는다(monkeypatch, repo) -> None:
-    generator = BakeClient()
-    res = post_bake(make_client(monkeypatch, repo, generator, enabled=False))
-    assert res.status_code == 409
-    assert res.json()["code"] == "BAKE_DISABLED"
-    assert generator.calls == []
-
-
 def test_bake_굽기_대상_아이템이_아니면_400(monkeypatch, repo) -> None:
     generator = BakeClient()
     res = post_bake(make_client(monkeypatch, repo, generator), item_sn=999)
@@ -361,7 +352,7 @@ def test_bake_회원_미리보기가_먼저_굽고_같은_키는_다시_굽지_�
     preview = BakeTask(generator, repo, 3, SWEATER, fake_item("green-sweater"), sheet(), "PETC0001")
 
     async def scenario():
-        batch = asyncio.create_task(service.bake_item_batch(generator, repo, queue, SWEATER, True))
+        batch = asyncio.create_task(service.bake_item_batch(generator, repo, queue, SWEATER))
         await asyncio.sleep(0)
         queue.put_first(preview)
         return await batch
@@ -491,7 +482,6 @@ def test_bake_Java_호출에_요청의_관리자_쿠키가_실린다(monkeypatch
         return httpx2.Response(200, json={"data": None})
 
     monkeypatch.setenv("BACKEND_BASE_URL", "http://backend.test")
-    monkeypatch.setenv("CHARACTER_BAKE_ENABLED", "true")
     get_settings.cache_clear()
     app = create_app()
     backend = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
