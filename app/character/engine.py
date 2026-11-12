@@ -153,13 +153,13 @@ class Cut:
 class BakeItem:
     """FN-MYP-011-01 : Java ITEM의 굽기 대상 (지시 문장은 관리자 등록값)
 
-    - image_file_sn이 있으면 그 아이템 그림을 참고로 굽고 bake_hint는 쓰지 않음
+    - by_image면 아이템 그림을 참고로 굽고 bake_hint는 쓰지 않음
     """
 
     item_sn: int
     regn_cd: str
     bake_hint: str | None
-    image_file_sn: int | None = None
+    by_image: bool = False
 
 
 def species_of(pet_se_cd: PetSeCd) -> str:

@@ -463,7 +463,15 @@ def test_bake_Java_호출에_요청의_관리자_쿠키가_실린다(monkeypatch
             return fake_auth_check(request)
         seen.append(request)
         if path.endswith("/bake-items"):
-            items = [{"itemSn": SWEATER, "regnCd": "MYPC0004", "bakeHint": HINT}]
+            items = [
+                {
+                    "itemSn": SWEATER,
+                    "regnCd": "MYPC0004",
+                    "bakeHint": HINT,
+                    "bakeImgRefYn": False,
+                    "atchFileSn": 31,
+                }
+            ]
             return httpx2.Response(200, json={"data": items})
         if path.endswith("/bake-targets"):
             return httpx2.Response(200, json={"data": {"pixelCharSns": [5], "last": True}})

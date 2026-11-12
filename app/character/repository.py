@@ -71,7 +71,7 @@ class CharacterJobRepository(Protocol):
 
     async def list_bake_items(self) -> dict[int, engine.BakeItem]: ...
 
-    async def fetch_item_image(self, atch_file_sn: int) -> bytes: ...
+    async def fetch_item_image(self, item_sn: int) -> bytes: ...
 
     async def list_bake_targets(self, item_sn: int) -> "BakeTargetPage": ...
 
@@ -102,7 +102,7 @@ class _BakeItem(BaseModel):
     item_sn: int = Field(alias="itemSn")
     regn_cd: str = Field(alias="regnCd")
     bake_hint: str | None = Field(default=None, alias="bakeHint", min_length=1)
-    image_file_sn: int | None = Field(default=None, alias="bakeImageFileSn")
+    by_image: bool = Field(alias="bakeImgRefYn")
 
 
 class BakeTargetPage(BaseModel):
@@ -193,20 +193,20 @@ class JavaCharacterJobRepository:
             raise external_error() from None
         found: dict[int, engine.BakeItem] = {}
         for item in items:
-            if item.bake_hint is None and item.image_file_sn is None:
+            if item.bake_hint is None and not item.by_image:
                 # 굽기 지시도 그림도 없는 행 : 구울 방법이 없어 제외
                 logger.warning("굽기 지시·그림이 모두 없는 아이템 제외: itemSn=%d", item.item_sn)
                 continue
             found[item.item_sn] = engine.BakeItem(
-                item.item_sn, item.regn_cd, item.bake_hint, item.image_file_sn
+                item.item_sn, item.regn_cd, item.bake_hint, item.by_image
             )
         return found
 
-    async def fetch_item_image(self, atch_file_sn: int) -> bytes:
+    async def fetch_item_image(self, item_sn: int) -> bytes:
         return await fetch_backend_bytes(
             self._client,
             self._settings,
-            f"{CHARACTERS_PATH}/item-files/{atch_file_sn}",
+            f"{ITEMS_PATH}/{item_sn}/bake-image",
             headers=self._headers,
             timeout=SHEET_TIMEOUT_SEC,
         )

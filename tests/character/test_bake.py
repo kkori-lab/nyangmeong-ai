@@ -13,6 +13,8 @@ from app.character.clients import CharacterApiError, GeneratedCharacter, OpenAIC
 from app.character.repository import CharacterJob
 from app.character.rules import matches_spec
 from app.character.schemas import FACE_W, FACE_X, FACE_Y
+from app.core.backend import external_error
+from app.core.response import AppError
 from tests.character.fakes import (
     FakeCharacterJobRepository,
     FakeImagesOpenAI,
@@ -20,7 +22,7 @@ from tests.character.fakes import (
     fake_item,
     seed_rows,
 )
-from tests.character.test_repository import BASE, COOKIE, make_repo, ok
+from tests.character.test_repository import COOKIE, make_repo, ok
 
 MAGENTA = (255, 0, 255, 255)
 FUR = (200, 150, 100, 255)
@@ -378,9 +380,9 @@ def test_합성_구간별_시간을_남긴다(caplog: pytest.LogCaptureFixture):
     assert "합성 시간: 아이템 1개" in caplog.text
 
 
-# 그림 참고 굽기 (설계 9절, Java 계약은 초안 : 가짜 응답 기준)
-IMAGE_FILE_SN = 77
-BY_IMAGE = engine.BakeItem(1, BODY, None, IMAGE_FILE_SN)
+# 그림 참고 굽기 (설계 9절, Java 계약은 백엔드 PR #232)
+ITEMS_BASE = "http://backend.test/internal/ai/items"
+BY_IMAGE = engine.BakeItem(1, BODY, None, True)
 BY_HINT = engine.BakeItem(2, BODY, "a green knitted dog sweater")
 
 
@@ -408,33 +410,62 @@ class ImageRepo(FakeCharacterJobRepository):
     def __init__(self, *, with_image: bool = True) -> None:
         super().__init__()
         if with_image:
-            self.item_images[IMAGE_FILE_SN] = item_png()
+            self.item_images[BY_IMAGE.item_sn] = item_png()
 
     async def list_bake_items(self) -> dict[int, engine.BakeItem]:
         return {BY_IMAGE.item_sn: BY_IMAGE, BY_HINT.item_sn: BY_HINT}
 
 
-def test_list_bake_items_그림_참고_아이템은_그림_번호를_돌려주고_둘_다_없으면_뺀다():
-    data = [
-        {"itemSn": 5, "regnCd": "MYPC0005", "bakeHint": None, "bakeImageFileSn": 77},
-        {"itemSn": 6, "regnCd": "MYPC0002", "bakeHint": "round thin black glasses"},
-        {"itemSn": 7, "regnCd": "MYPC0001", "bakeHint": None, "bakeImageFileSn": None},
-        {"itemSn": 8, "regnCd": "MYPC0003"},
-    ]
-    targets = asyncio.run(make_repo(lambda _: ok(data)).list_bake_items())
-    assert targets == {
-        5: engine.BakeItem(5, "MYPC0005", None, 77),
-        6: engine.BakeItem(6, "MYPC0002", "round thin black glasses", None),
+def bake_row(item_sn: int, regn_cd: str, hint: str | None, by_image: bool) -> dict:
+    """Java BakeItemSummary 한 행 (atchFileSn은 Python이 읽지 않는다)"""
+    return {
+        "itemSn": item_sn,
+        "regnCd": regn_cd,
+        "bakeHint": hint,
+        "bakeImgRefYn": by_image,
+        "atchFileSn": 70 + item_sn,
     }
 
 
-def test_fetch_item_image는_쿠키와_함께_item_files에서_받는다():
+def test_list_bake_items_그림_참고_여부를_돌려주고_둘_다_없으면_뺀다():
+    data = [
+        bake_row(5, "MYPC0005", None, True),
+        bake_row(6, "MYPC0002", "round thin black glasses", False),
+        bake_row(7, "MYPC0001", None, False),
+        bake_row(8, "MYPC0003", "a red collar", True),
+    ]
+    targets = asyncio.run(make_repo(lambda _: ok(data)).list_bake_items())
+    assert targets == {
+        5: engine.BakeItem(5, "MYPC0005", None, True),
+        6: engine.BakeItem(6, "MYPC0002", "round thin black glasses", False),
+        8: engine.BakeItem(8, "MYPC0003", "a red collar", True),
+    }
+
+
+def test_list_bake_items_bakeImgRefYn이_없는_응답은_외부_오류다():
+    data = [{"itemSn": 6, "regnCd": "MYPC0002", "bakeHint": "round thin black glasses"}]
+    with pytest.raises(AppError) as raised:
+        asyncio.run(make_repo(lambda _: ok(data)).list_bake_items())
+    assert raised.value.code == external_error().code
+
+
+def test_fetch_item_image는_쿠키와_함께_bake_image에서_받는다():
     requests: list = []
     repo = make_repo(lambda _: httpx2.Response(200, content=b"png"), requests)
-    assert asyncio.run(repo.fetch_item_image(IMAGE_FILE_SN)) == b"png"
+    assert asyncio.run(repo.fetch_item_image(BY_IMAGE.item_sn)) == b"png"
     request = requests[0]
-    assert (request.method, str(request.url)) == ("GET", f"{BASE}/item-files/{IMAGE_FILE_SN}")
+    assert (request.method, str(request.url)) == (
+        "GET",
+        f"{ITEMS_BASE}/{BY_IMAGE.item_sn}/bake-image",
+    )
     assert request.headers["cookie"] == COOKIE
+
+
+def test_jpg_아이템_그림도_PNG로_정규화된다():
+    buffer = io.BytesIO()
+    Image.new("RGB", (64, 64), GREEN[:3]).save(buffer, "JPEG")
+    flat = Image.open(io.BytesIO(engine.normalize_item_image(buffer.getvalue())))
+    assert (flat.format, flat.mode, flat.size) == ("PNG", "RGB", (64, 64))
 
 
 def test_그림_참고_아이템만_아이템_그림을_받아_굽는다():

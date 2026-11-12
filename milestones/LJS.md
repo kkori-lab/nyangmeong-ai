@@ -470,6 +470,14 @@
 - 결과 (2026-11-12): 검증 1회차 통과, 사람 확인(테스트. Java API가 없어 화면 확인 없음). Java 계약 초안(`bake-items`의 `bakeImageFileSn`, 새 `item-files`)과 가짜 응답으로 구현. 시험 굽기(`trial-preview`)는 굽기 지시만 받는다
 - 연결 남음: FN-MYP-011-01·FN-MYP-010-13·FN-ADM-070-02 (Java `bake-items` 새 필드·`item-files` 내부 API 확정과 연결, 연결 뒤 실제 굽기 사람 확인, LJS 백엔드)
 
+## SCR-MYP-011 아이템 굽기 · 그림 참고 굽기 Java 연결 (SCR-MYP-010·ADM-070 공통) — 끝
+- 기능: FN-MYP-011-01·FN-MYP-010-13·FN-ADM-070-02 그림 참고 굽기를 Java 확정 계약(`bake-items`의 `bakeImgRefYn`, `GET /internal/ai/items/{itemSn}/bake-image`)에 연결하고 실제 굽기를 사람이 확인한다 (위 `끝` 절의 "연결 남음". 대조에 다시 세지 않는다)
+- 기다리는 것: 백엔드 PR #232 병합 (LJS 백엔드, AI PR보다 먼저)
+- 완료 조건: `/start` 기획의 완료 조건을 따른다. 계약 변경은 백엔드 PR과 함께 낸다.
+- 결과 (2026-11-12): 검증 1회차(확인 못 함 있음: 연결 남음만), 추가-1(기획 밖 테스트 3개의 가짜 응답·인자를 확정 계약 모양으로) 통과. 사람 확인: 로컬 Java로 그림 참고 굽기 머리·가방 각 1마리, 상점 그림과 같은 물건·부위대로 착용
+- 연결 남음: FN-MYP-011-01·FN-MYP-010-13·FN-ADM-070-02 (백엔드 PR #232 병합, LJS 백엔드)
+- 연결 남음: FN-MYP-011-01·FN-MYP-010-13·FN-ADM-070-02 (설계 9절 "확인하지 않은 것"·굽기 단가 사람 확인, 시트 있는 캐릭터가 더 필요, LJS)
+
 ## SCR-AIM-004 대화창 · tool search 전환 (`defer_loading`, tool_eval 5회차, 추가 요청) — 대기
 - 기능: 도구 고르기 LLM 요청에 Anthropic tool search 도구를 넣고 Java 목록 도구를 `defer_loading`으로 미뤄, 같은 78문항으로 정확도·지연을 다시 잰다. 기준을 넘으면 앱 기본으로 켜고, 못 넘으면 끈 채로 결과만 남긴다. 기능 ID 추가 없음(위 `끝` 절에서 센 기능)
 - 요청: 2026-11-11 LJS (핸드오프 다음에 할 것, tool_eval 4회차 판정)
