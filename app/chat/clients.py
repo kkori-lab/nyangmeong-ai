@@ -311,6 +311,10 @@ def tool_system_blocks(today: date, hint: rules.RouteRow | None = None) -> list[
     note = _tool_hint(hint)
     if note:
         blocks.append({"type": "text", "text": note})
+    now = rules.now_kst()
+    if now.date() == today:
+        # '방금·지금' 기록의 시각 (2026-11-13). 평가처럼 다른 날을 오늘로 줄 때는 빼고 보냄
+        blocks.append({"type": "text", "text": f"지금 시각: {now:%H:%M}"})
     return blocks
 
 

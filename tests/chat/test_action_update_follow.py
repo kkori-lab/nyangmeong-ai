@@ -76,7 +76,7 @@ def test_READ_두_번_뒤에도_수정_카드를_고를_수_있어야_한다(cli
 
     assert len(reader.calls) == 2
     assert isinstance(agent.results[1], ReadMore)
-    assert agent.results[2] == ACTION_SHOWN
+    assert agent.results[2].startswith(ACTION_SHOWN.split("{summary}")[0])
     action = evs[-1][1]["action"]
     assert action["tool"] == "draft_schedule_update"
     assert action["input"]["schdlSn"] == 31
@@ -115,7 +115,8 @@ def test_카드를_띄운_뒤_고른_쓰기_도구는_실행하지_않아야_한
 
     evs = events(send(client, room, "일정 이름 바꿔 줘"))
 
-    assert agent.results[1:] == [ACTION_SHOWN, None]
+    assert agent.results[1].startswith(ACTION_SHOWN.split("{summary}")[0])
+    assert agent.results[2:] == [None]
     assert evs[-1][1]["action"]["tool"] == "draft_schedule_update"
 
 

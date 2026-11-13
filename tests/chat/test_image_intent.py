@@ -8,6 +8,7 @@ from app.chat import clients
 from app.chat.clients import ImageIntentError
 from app.chat.schemas import ImageIntentKind
 from tests.chat.conftest import AJAX, as_member
+from tests.chat.test_messages import MessageJava
 
 URL = "/ai/image-intent"
 
@@ -32,6 +33,12 @@ class FakeImageIntentJudge:
 
 
 @pytest.fixture
+def java() -> MessageJava:
+    # 2026-11-13 : 판단 뒤 사진 턴을 대화방에 저장(방 생성·메시지 추가)
+    return MessageJava()
+
+
+@pytest.fixture
 def judge(client: TestClient) -> FakeImageIntentJudge:
     fake = FakeImageIntentJudge()
     client.app.dependency_overrides[clients.get_image_intent_judge] = lambda: fake
@@ -50,7 +57,7 @@ def test_image_intent_판단_결과를_그대로_돌려줌(client, judge, kind):
     judge.kind = kind
     res = post(client, {"cnvrsCn": "이거 봐줘", "petSn": "3"})
     assert res.status_code == 200
-    assert res.json()["data"] == {"kind": kind.value}
+    assert res.json()["data"]["kind"] == kind.value
 
 
 def test_image_intent_글과_축소한_jpeg를_넘김(client, judge):
@@ -81,7 +88,7 @@ def test_image_intent_판단_실패는_ASK(client, judge):
     judge.fail = True
     res = post(client, {"cnvrsCn": "이거 뭐야"})
     assert res.status_code == 200
-    assert res.json()["data"] == {"kind": "ASK"}
+    assert res.json()["data"]["kind"] == "ASK"
 
 
 # 인증·검증 실패는 판단기 미호출

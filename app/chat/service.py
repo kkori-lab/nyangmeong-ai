@@ -45,6 +45,7 @@ from app.chat.schemas import (
     ConversationMessage,
     ConversationSummary,
     ImageIntentKind,
+    ImageIntentResult,
     Intent,
     IntentKind,
     PetChoice,
@@ -126,9 +127,16 @@ READ_CONCURRENCY = 4
 READ_PET_LABEL = "조회한 반려동물: {name}"
 # READ 결과를 본 LLM이 쓰기 도구를 고른 경우의 tool_result : 카드는 done.action으로
 ACTION_SHOWN = (
-    "확인 카드를 띄움. 회원이 카드에서 [확인]을 누르기 전에는 저장되지 않음. "
-    "카드 내용을 확인하고 [확인]을 눌러 달라고 한두 문장으로 안내한다."
+    "확인 카드를 만듦(아직 저장 안 됨). 카드 내용: {summary}. "
+    "회원이 대화로 '등록해 줘'라고 말해야 저장된다. 카드 내용을 그대로 보여 주고, "
+    "맞으면 '등록해 줘'라고 말해 달라고 한두 문장으로 안내한다."
 )
+# 확인 카드를 모달 대신 채팅으로 확인 (2026-11-13) : 카드 턴의 저장 글과 다음 턴의 확인·취소
+ACTION_ASK_TEMPLATE = "이렇게 할까요?\n{summary}"
+ACTION_ASK_MISSING = "아직 {names} 비어 있어요. 말로 알려 주세요."
+ACTION_ASK_CONFIRM = "맞으면 '등록해 줘'라고 말해 주세요. 바꿀 내용은 말로 알려 주시면 고칠게요."
+ACTION_EXECUTE_MESSAGE = "등록할게요."
+ACTION_DROP_MESSAGE = "등록하지 않았어요."
 # 수정 도구(경로 번호 칸) : 번호를 이 턴 READ 결과에서 못 정하면 카드 없이 (SCR-AIM-012 2단계 ②)
 ACTION_TARGET_MISSING = (
     "바꿀 대상을 이 턴 읽기 결과에서 찾지 못해 카드를 띄우지 않음. "
@@ -142,7 +150,7 @@ ACTION_ADD_TARGET_MISSING = (
 )
 ADD_TARGET_MISSING_MESSAGE = "기록할 {target}을 찾지 못했어요. 이름을 넣어 다시 말해 주세요."
 # READ 답변이 오류 없이 0자로 끝남(실측 2026-11-09, READ 2번 뒤) : 오류 대신 안내 글
-READ_EMPTY_CARD_MESSAGE = "카드 내용을 확인하고 [확인]을 눌러 주세요."
+READ_EMPTY_CARD_MESSAGE = "카드 내용이 맞으면 '등록해 줘'라고 말해 주세요."
 READ_EMPTY_MESSAGE = "요청을 처리하지 못했어요. 이름이나 날짜를 넣어 다시 말해 주세요."
 
 
@@ -301,6 +309,9 @@ def _tool_judged(
         # 돌려받은 카드와 같은 도구면 그 input을 바탕으로 이 메시지 칸을 덮어씀
         base = prior.values if prior is not None and prior.tool == call.name else None
         args = call.args.model_dump(exclude_none=True)
+        if now is not None and rules.mentions_now(text):
+            # '방금·지금' : LLM이 비운 날짜·시각을 오늘·지금으로 (2026-11-13)
+            args = catalog.fill_now(card, args, now)
         if base:
             # 추가-1 : 날짜를 말하지 않았으면 돌려받은 카드의 날짜를 유지
             date_said = rules.mentions_date(text)
@@ -522,8 +533,9 @@ async def _read_answer(
             if catalog.missing_target_ids(card, values):
                 logger.info("쓰기 도구 대상 번호 없음: %s", call.name)
                 return _target_missing_note(card)
-            cards.append(action_card(card, values, found, pets.named(found), None, read.room_pet))
-            return ACTION_SHOWN
+            shown = action_card(card, values, found, pets.named(found), None, read.room_pet)
+            cards.append(shown)
+            return ACTION_SHOWN.format(summary=action_summary(shown))
         # 한 턴 READ 최대 2번 : 두 번째는 읽기 도구만, 반려동물을 못 정하면 불러오지 못함
         second = tools.read_entry(call.name)
         if second is None or call.args is None or reads >= 2:
@@ -675,6 +687,12 @@ async def _run_turn(
     try:
         text = turn.question.cnvrs_cn
         card = None
+        if register is not None and turn.action is not None:
+            # 돌려받은 확인 카드 + 확인·취소 말 : LLM 없이 실행 지시·취소 (2026-11-13)
+            reply = rules.action_reply_kind(text)
+            if reply is not None:
+                await _action_answer(reply, turn, repo, register, emit)
+                return
         if register is not None and turn.draft is not None:
             # FN-AIM-012-05·10 : 초안이 있으면 이 메시지로 칸 채움·수정
             # 뽑힌 칸이 없으면 일반 판정
@@ -733,7 +751,10 @@ async def _run_turn(
             )
             await _register_reply(repo, turn.room_sn, card, emit)
         elif kind is IntentKind.ACTION and register is not None:
-            emit(("done", AnswerDone(action=await _action_reply(text, turn, judged, register))))
+            action = await _action_reply(text, turn, judged, register)
+            # 카드 요약을 글로 저장 : 모달 대신 채팅으로 확인, 다음 턴 맥락에도 남음 (2026-11-13)
+            saved = await _save(repo, turn.room_sn, action_ask_message(action), True)
+            emit(("done", AnswerDone(message=saved, action=action)))
         else:
             # RECEIPT는 SCR-AIM-013에서 잇는다
             emit(("done", AnswerDone()))
@@ -1184,6 +1205,95 @@ async def _action_reply(
     return action_card(entry, judged.action or {}, pets, named, draft_pet, turn.pet_sn)
 
 
+def action_summary(card: ActionCard) -> str:
+    """카드 input 요약 한 줄 : action-result 요약과 같은 글(번호·petSn·참거짓·파일 칸 빼고)"""
+    entry = tools.card_entry(card.tool)
+    label = card.label or card.tool
+    if entry is None:
+        return label
+    values = {name: value for name, value in card.values.items() if value is not None}
+    clock = values.get(catalog.HR_INPUT) is not False
+    parts = [
+        _input_text(param, values[name], clock)
+        for name, param in entry.params.items()
+        if name in values and name not in entry.fixed and _summarized(name, param)
+    ]
+    parts = [part for part in parts if part]
+    head = f"{card.pet_nm} " if card.pet_nm else ""
+    return f"{head}{label}" + (f" — {' · '.join(parts)}" if parts else "")
+
+
+def action_ask_message(card: ActionCard) -> str:
+    """확인 카드 턴의 저장 글 : 요약 + 빈 칸 안내 또는 확인 말 안내"""
+    lines = [ACTION_ASK_TEMPLATE.format(summary=action_summary(card))]
+    if card.missing:
+        lines.append(ACTION_ASK_MISSING.format(names=_names_subject(_missing_names(card))))
+    else:
+        lines.append(ACTION_ASK_CONFIRM)
+    return "\n".join(lines)
+
+
+def _missing_names(card: ActionCard) -> list[str]:
+    # 빈 Java 칸 -> 도구 설명의 LLM 칸 설명 앞부분("기록 날짜"), 없으면 Java 칸 이름
+    entry = tools.card_entry(card.tool)
+    prompt = catalog.tool_prompts().get(card.tool)
+    by_java = {java: name for name, java in entry.to_java_name.items()} if entry else {}
+    roles = entry.hook_roles if entry else {}
+    ymd = next((name for name, role in roles.items() if role == "date:ymd"), None)
+    names: list[str] = []
+    for java in card.missing:
+        if java == catalog.PET_SN:
+            names.append("반려동물")
+            continue
+        key = re.sub(r"\[\d+\]", "[]", java)
+        llm = by_java.get(key)
+        param = entry.params.get(java) if entry else None
+        if llm is None and param is not None and param.type == "datetime":
+            llm = ymd
+        desc = prompt.params[llm].description if prompt and llm in prompt.params else ""
+        # "기록 날짜 YYYY-MM-DD. …" -> "기록 날짜" : 형식 표기(영문·숫자)와 괄호·마침표 뒤는 뗀다
+        name = re.split(r"[.(:,]|\s+(?=[A-Z0-9])", desc, maxsplit=1)[0].strip() or java
+        if name not in names:
+            names.append(name)
+    return names
+
+
+def _names_subject(names: list[str]) -> str:
+    # "기록 날짜, 반려동물" + 이/가 (마지막 글자 받침 기준)
+    joined = ", ".join(names)
+    last = joined[-1] if joined else ""
+    batchim = "가" <= last <= "힣" and (ord(last) - ord("가")) % 28 != 0
+    return joined + ("이" if batchim else "가")
+
+
+async def _action_answer(
+    reply: str,
+    turn: Turn,
+    repo: ConversationRepository,
+    register: RegisterDeps,
+    emit: Callable[[Event | None], None],
+) -> None:
+    # 확인 말 : 빈 칸이 없으면 React에 실행 지시(execute), 있으면 빈 칸 되물음. 취소 말 : 카드 버림
+    prior = turn.action
+    entry = tools.card_entry(prior.tool)
+    emit(("intent", Intent(kind=IntentKind.ACTION)))
+    if reply == rules.ACTION_CANCEL or entry is None:
+        saved = await _save(repo, turn.room_sn, ACTION_DROP_MESSAGE, True)
+        emit(("done", AnswerDone(message=saved)))
+        return
+    pets = await register.contexts.get_pets() if _uses_pets(entry) else []
+    values = catalog.card_input(entry, {}, None, {}, prior.values)
+    card = action_card(entry, values, pets, [], prior.values.get(catalog.PET_SN), turn.pet_sn)
+    if card.missing:
+        text = ACTION_ASK_MISSING.format(names=_names_subject(_missing_names(card)))
+        saved = await _save(repo, turn.room_sn, text, True)
+        emit(("done", AnswerDone(message=saved, action=card)))
+        return
+    logger.info("확인 카드 실행 지시: %s", entry.name)
+    saved = await _save(repo, turn.room_sn, ACTION_EXECUTE_MESSAGE, True)
+    emit(("done", AnswerDone(message=saved, action=card, execute=True)))
+
+
 def _uses_pets(entry: "catalog.CatalogEntry") -> bool:
     # 반려동물 목록이 필요한 카드 : 카드의 petSn(pet) 또는 배열 줄의 petSn(line_pet)
     return "pet" in entry.hooks or "line_pet" in entry.hooks
@@ -1301,3 +1411,41 @@ async def judge_image_intent(
     except ImageIntentError:
         # 판단 실패 : 오류 대신 되물음(React 칩)
         return ImageIntentKind.ASK
+
+
+# 사진 턴 저장 (FN-AIM-013-02, 2026-11-13) : 사진 파일은 저장하지 않고 자리 표시 글만
+IMAGE_MARK = "[사진]"
+IMAGE_TITLE = "사진 대화"
+# 용도별 고정 안내. 동물병원 영수증은 결과 요약을 receipt-result가 저장해 여기선 없음
+IMAGE_MESSAGES = {
+    ImageIntentKind.ASK: "이 사진으로 무엇을 할까요? 캐릭터 만들기나 영수증 분석을 골라 주세요.",
+    ImageIntentKind.CHARACTER: "캐릭터 만들기로 이어 갈게요.",
+    ImageIntentKind.EXPENSE_RECEIPT: "가계부 영수증은 본창 가계부에서 등록할 수 있어요.",
+}
+
+
+async def save_image_turn(
+    repo: ConversationRepository,
+    titles: TitleGenerator,
+    room_sn: int | None,
+    pet_sn: int | None,
+    text: str | None,
+    kind: ImageIntentKind,
+) -> ImageIntentResult:
+    """사진 턴을 대화방에 저장 : 사용자 "[사진] <글>" + 용도별 안내 AI 메시지
+    - 방 번호가 없으면 방을 만듦(첫 메시지가 사진 메시지, 글이 없으면 제목 LLM 미호출)"""
+    text = text.strip() if text and text.strip() else None
+    user_cn = f"{IMAGE_MARK} {text}" if text else IMAGE_MARK
+    saved: list[ConversationMessage] = []
+    if room_sn is None:
+        title = _cut_title(await titles.generate(text)) if text else IMAGE_TITLE
+        room = await repo.create_room(pet_sn, title or DEFAULT_TITLE, user_cn)
+        room_sn = room.ai_cnvrs_room_sn
+        detail = await repo.get_room(room_sn)
+        saved.extend(m for m in detail.messages if m.role_cd == ROLE_USER)
+    else:
+        saved.append(await repo.add_message(room_sn, ROLE_USER, user_cn))
+    guide = IMAGE_MESSAGES.get(kind)
+    if guide is not None:
+        saved.append(await repo.add_message(room_sn, ROLE_AI, guide))
+    return ImageIntentResult(kind=kind, ai_cnvrs_room_sn=room_sn, messages=saved)
