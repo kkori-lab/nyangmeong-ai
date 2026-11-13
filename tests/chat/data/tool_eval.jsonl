@@ -76,3 +76,9 @@
 {"id": "T76", "type": "이동", "q": "동물병원 찾아 줘", "intent": "지역·상호명 없는 분류만 검색은 플레이스 화면으로", "tool": "navigate", "scr_id": "SCR-HOS-001"}
 {"id": "T77", "type": "지식", "q": "해피동물병원 전화번호 알려 줘", "intent": "상호명을 말한 장소 검색", "tool": "list_places"}
 {"id": "T78", "type": "지식", "q": "즐겨찾기한 장소 다 보여 줘", "intent": "분류 없는 즐겨찾기는 전체 분류", "tool": "list_place_bookmarks"}
+{"id": "T79", "type": "섞임", "q": "가계부 열어서 이번 달 지출 얼마인지 알려 줘", "intent": "이동 + 지출 합계 읽기 : 읽기 먼저, 이동은 결과 뒤 바로가기", "tool": ["get_expense_total", "get_expense_statistics"]}
+{"id": "T80", "type": "섞임", "q": "일정 화면 가서 코코 이번 주 일정 보여 줘", "intent": "이동 + 일정 읽기 : 읽기 먼저", "tool": "list_my_care_schedules"}
+{"id": "T81", "type": "섞임", "q": "체중 기록은 어디서 해? 그리고 코코 최근 몸무게도 알려 줘", "intent": "사용법 + 체중 기록 읽기 : 읽기 먼저, 사용법은 결과 뒤", "tool": ["list_daily_health_records", "get_health_indicators", "search_guide"]}
+{"id": "T82", "type": "섞임", "q": "가계부 열어서 한도 설정은 어떻게 하는지 알려 줘", "intent": "이동 + 사용법만(다른 일 없음) : 지금처럼 사용법", "tool": "search_guide", "scr_id": "SCR-MYP-030"}
+{"id": "T83", "type": "섞임", "q": "코코 마지막 검진 상세랑 이번 달 병원비 알려 줘", "intent": "READ 3번(검진 목록 → 상세 → 지출) : 첫 도구 검진 목록", "tool": "list_checkups"}
+{"id": "T84", "type": "섞임", "q": "코코 몸무게 4.2kg 기록하고 건강 화면 열어 줘", "intent": "쓰기 + 이동 : 쓰기 카드 먼저(이동 안 함)", "tool": "draft_daily_health_record", "args": {"daily_rcd_idct_cd": "HLTC0014"}}

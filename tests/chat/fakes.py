@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from datetime import date
 
 from app.chat import catalog, tools
-from app.chat.clients import ClassifyError, ToolDecision
+from app.chat.clients import FOLLOW_ROUNDS, ClassifyError, ReadMore, ToolDecision
 from app.chat.rules import RouteRow
 from app.core.backend import external_error
 
@@ -43,6 +43,8 @@ class FakeToolAgent:
     """[가짜 도구 고르기 LLM]
     - tool·raw : 고를 도구와 원 인자, texts : 도구 대신 글 답변, fail : ClassifyError
     - follow_tool·follow_raw : 결과를 받은 뒤 한 번 더 고를 도구(follow가 있을 때만)
+    - follows : 결과 뒤 차례로 고를 (도구, 원 인자) 목록. 실제처럼 결과가 ReadMore일 때만
+      다음 것을 고르고 FOLLOW_ROUNDS번까지 (follow_tool이 있으면 그 하나로)
     - 받은 호출(decides)과 서버 도구 결과(results, 두 번째 결과 포함) 기록"""
 
     def __init__(
@@ -54,6 +56,7 @@ class FakeToolAgent:
         answer_chunks: tuple[str, ...] = ("안내서대로 ", "답할게요."),
         follow_tool: str | None = None,
         follow_raw: dict | None = None,
+        follows: tuple[tuple[str, dict], ...] = (),
     ) -> None:
         self.tool = tool
         self.raw = raw or {}
@@ -62,6 +65,7 @@ class FakeToolAgent:
         self.answer_chunks = answer_chunks
         self.follow_tool = follow_tool
         self.follow_raw = follow_raw or {}
+        self.follows = ((follow_tool, self.follow_raw),) if follow_tool is not None else follows
         self.decides: list[tuple[list[dict], date, RouteRow | None]] = []
         self.results: list[str | None] = []
 
@@ -88,10 +92,13 @@ class FakeToolAgent:
         follow=None,
     ) -> AsyncIterator[str]:
         self.results.append(result)
-        if follow is not None and self.follow_tool is not None:
-            call = tools.parse(self.follow_tool, self.follow_raw, "toolu_2")
-            second = await follow(call)
-            self.results.append(second)
+        if follow is not None:
+            for round_no, (name, raw) in enumerate(self.follows[:FOLLOW_ROUNDS], start=2):
+                call = tools.parse(name, raw, f"toolu_{round_no}")
+                second = await follow(call)
+                self.results.append(second)
+                if not isinstance(second, ReadMore):
+                    break
         for chunk in self.answer_chunks:
             yield chunk
 

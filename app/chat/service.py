@@ -13,6 +13,7 @@ from pydantic.alias_generators import to_camel
 
 from app.chat import catalog, rules, tools
 from app.chat.clients import (
+    READ_LIMIT,
     AnswerError,
     ClassifyError,
     ImageIntentError,
@@ -126,6 +127,11 @@ READ_CONCURRENCY = 4
 # READ 결과 글의 마리별 머리줄 : LLM이 "선택된 반려동물 기준" 같은 말을 지어내지 않게
 READ_PET_LABEL = "조회한 반려동물: {name}"
 # READ 결과를 본 LLM이 쓰기 도구를 고른 경우의 tool_result : 카드는 done.action으로
+# 결과 뒤 navigate의 결과 글 : 화면은 옮기지 않고 답 아래 바로가기 버튼(done.shortcut)
+ROUTE_SHOWN = (
+    "화면을 옮기지 않음. 답 아래에 '{name}' 바로가기 버튼을 보여 줌. "
+    "답 끝에 그 버튼으로 갈 수 있다고 한 문장으로 안내한다."
+)
 ACTION_SHOWN = (
     "확인 카드를 만듦(아직 저장 안 됨). 카드 내용: {summary}. "
     "회원이 대화로 '등록해 줘'라고 말해야 저장된다. 카드 내용을 그대로 보여 주고, "
@@ -227,6 +233,8 @@ class Judged:
     notice: bool = True
     # SEARCH(READ) : 성공한 고지 READ(도구 notice) 이름, 답변 스트림이 채움. 하나라도 있을 때만 고지
     notice_reads: set[str] | None = None
+    # SEARCH(READ) : 결과 뒤 고른 이동·사용법 도구의 바로가기, 답변 스트림이 채움. 앞이 우선
+    follow_shortcuts: list[Intent] | None = None
 
 
 def _guide_shortcut(chunk_id: str) -> Intent | None:
@@ -331,8 +339,19 @@ def _tool_judged(
         # Java 호출은 답변 스트림 안 : 첫 글자 제한이 Java 호출까지 덮음
         cards: list[ActionCard] = []
         notice_reads: set[str] = set()
+        shortcuts: list[Intent] = []
         stream = _read_answer(
-            text, context, agent, decision, entry, max_tokens, today, read, cards, notice_reads
+            text,
+            context,
+            agent,
+            decision,
+            entry,
+            max_tokens,
+            today,
+            read,
+            cards,
+            notice_reads,
+            shortcuts,
         )
         return Judged(
             Intent(kind=IntentKind.SEARCH),
@@ -340,17 +359,36 @@ def _tool_judged(
             stream=stream,
             cards=cards,
             notice_reads=notice_reads,
+            follow_shortcuts=shortcuts,
         )
     ids = tuple(tools.guide_ids(call, text))
     if not ids:
         logger.info("사용법 안내: 안내서 청크 없음")
         return Judged(Intent(kind=IntentKind.FALLBACK), out_of_scope=True)
     logger.info("사용법 안내: 도구 %d개 %s", len(ids), ",".join(ids))
-    stream = agent.answer(context, decision, guide_text(ids) or "", max_tokens, today)
     shortcut = _guide_shortcut(ids[0])
-    # FN-AIM-002-03 : 사용법 안내는 건강 관련 응답이 아님
+    guide = guide_text(ids) or ""
+    if read is None:
+        stream = agent.answer(context, decision, guide, max_tokens, today)
+        # FN-AIM-002-03 : 사용법 안내는 건강 관련 응답이 아님
+        return Judged(
+            Intent(kind=IntentKind.SEARCH), shortcut, guide_ids=ids, stream=stream, notice=False
+        )
+    # 사용법을 먼저 골라도 함께 물은 기록은 결과 뒤 도구로 읽음(2026-11-13 추가-5)
+    # 고지는 결과 뒤 고지 READ가 성공했을 때만(사용법만이면 notice_reads가 비어 고지 없음)
+    cards: list[ActionCard] = []
+    notice_reads: set[str] = set()
+    shortcuts: list[Intent] = []
+    follow = _Follow(text, read, cards, notice_reads, shortcuts)
+    stream = agent.answer(context, decision, guide, max_tokens, today, follow)
     return Judged(
-        Intent(kind=IntentKind.SEARCH), shortcut, guide_ids=ids, stream=stream, notice=False
+        Intent(kind=IntentKind.SEARCH),
+        shortcut,
+        guide_ids=ids,
+        stream=stream,
+        cards=cards,
+        notice_reads=notice_reads,
+        follow_shortcuts=shortcuts,
     )
 
 
@@ -505,48 +543,17 @@ async def _read_answer(
     read: ReadDeps,
     cards: list[ActionCard] | None = None,
     notice_reads: set[str] | None = None,
+    shortcuts: list[Intent] | None = None,
 ) -> AsyncIterator[str]:
-    pets = _ReadPets(text, read)
-    # 번호 칸은 이 턴 READ 결과에 나온 값만 (catalog.read_request)
-    seen: dict[str, set[int]] = {}
-    # 번호별 원래 행 : 수정 카드가 날짜만 바꿀 때 원래 시간을 씀(추가-3)
-    rows: catalog.Rows = {}
+    follow = _Follow(text, read, cards, notice_reads, shortcuts)
     # 되물음·실패만이거나 고지 READ가 아니면 notice_reads가 비어 고지 없음(FN-AIM-002-03)
-    first = await _read_once(entry, decision.call, pets, seen, notice_reads, rows)
+    first = await _read_once(
+        entry, decision.call, follow.pets, follow.seen, notice_reads, follow.rows
+    )
     if first.ask is not None:
         yield first.ask
         return
-
-    reads = 1
-
-    async def follow(call: tools.ToolCall) -> str | None:
-        nonlocal reads
-        # 결과를 보고 고른 쓰기 도구 : 번호 칸은 이 턴 READ 결과 값만, 카드로 끝냄(목록→완료 체크)
-        card = tools.card_entry(call.name)
-        if card is not None and call.args is not None and cards is not None:
-            if cards:
-                logger.info("쓰기 도구 두 번째 실행 안 함: %s", call.name)
-                return None
-            found = await pets.pets() if _uses_pets(card) else []
-            values = call.args.model_dump(exclude_none=True)
-            values = catalog.card_input(card, values, read.now, seen, rows=rows)
-            if catalog.missing_target_ids(card, values):
-                logger.info("쓰기 도구 대상 번호 없음: %s", call.name)
-                return _target_missing_note(card)
-            shown = action_card(card, values, found, pets.named(found), None, read.room_pet)
-            cards.append(shown)
-            return ACTION_SHOWN.format(summary=action_summary(shown))
-        # 한 턴 READ 최대 2번 : 두 번째는 읽기 도구만, 반려동물을 못 정하면 불러오지 못함
-        second = tools.read_entry(call.name)
-        if second is None or call.args is None or reads >= 2:
-            logger.info("두 번째 도구 실행 안 함: %s", call.name)
-            return None
-        reads += 1
-        outcome = await _read_once(second, call, pets, seen, notice_reads, rows)
-        if outcome.ask is not None:
-            return rules.READ_FAILED
-        # READ 2번 뒤에도 쓰기 카드는 한 번 고를 수 있게 (2단계 ②, 목록 두 번 → 수정 카드)
-        return ReadMore(outcome.result)
+    follow.reads = 1
 
     answer = agent.answer(context, decision, first.result, max_tokens, today, follow)
     produced = False
@@ -560,6 +567,86 @@ async def _read_answer(
     if not produced:
         logger.info("READ 답변 0자: 안내 글로")
         yield READ_EMPTY_CARD_MESSAGE if cards else READ_EMPTY_MESSAGE
+
+
+class _Follow:
+    """결과 답변 중 LLM이 고른 도구 실행(FollowRead). READ 답변·사용법 답변이 같이 쓴다
+    - 쓰기 도구 : 번호 칸은 이 턴 READ 결과 값만, 카드 1개로 끝냄(목록→완료 체크)
+    - 이동·사용법 : 화면을 옮기지 않고 바로가기(한 메시지 여러 일 ①)
+    - 읽기 도구 : 한 턴 최대 READ_LIMIT번, 반려동물을 못 정하면 불러오지 못함"""
+
+    def __init__(
+        self,
+        text: str,
+        read: ReadDeps,
+        cards: list[ActionCard] | None,
+        notice_reads: set[str] | None,
+        shortcuts: list[Intent] | None,
+    ) -> None:
+        self.text = text
+        self.read = read
+        self.pets = _ReadPets(text, read)
+        # 번호 칸은 이 턴 READ 결과에 나온 값만 (catalog.read_request)
+        self.seen: dict[str, set[int]] = {}
+        # 번호별 원래 행 : 수정 카드가 날짜만 바꿀 때 원래 시간을 씀(추가-3)
+        self.rows: catalog.Rows = {}
+        self.cards = cards
+        self.notice_reads = notice_reads
+        self.shortcuts = shortcuts
+        self.reads = 0
+
+    async def __call__(self, call: tools.ToolCall) -> str | None:
+        card = tools.card_entry(call.name)
+        if card is not None and call.args is not None and self.cards is not None:
+            if self.cards:
+                logger.info("쓰기 도구 두 번째 실행 안 함: %s", call.name)
+                return None
+            found = await self.pets.pets() if _uses_pets(card) else []
+            values = call.args.model_dump(exclude_none=True)
+            values = catalog.card_input(card, values, self.read.now, self.seen, rows=self.rows)
+            if catalog.missing_target_ids(card, values):
+                logger.info("쓰기 도구 대상 번호 없음: %s", call.name)
+                return _target_missing_note(card)
+            named = self.pets.named(found)
+            shown = action_card(card, values, found, named, None, self.read.room_pet)
+            self.cards.append(shown)
+            return ACTION_SHOWN.format(summary=action_summary(shown))
+        if call.name in (tools.NAVIGATE, tools.SEARCH_GUIDE) and call.args is not None:
+            return _follow_screen(call, self.text, self.shortcuts)
+        entry = tools.read_entry(call.name)
+        if entry is None or call.args is None or self.reads >= READ_LIMIT:
+            logger.info("결과 뒤 도구 실행 안 함: %s", call.name)
+            return None
+        self.reads += 1
+        outcome = await _read_once(entry, call, self.pets, self.seen, self.notice_reads, self.rows)
+        if outcome.ask is not None:
+            return rules.READ_FAILED
+        # READ 뒤에도 쓰기 카드는 한 번 고를 수 있게 (2단계 ②, 목록 두 번 → 수정 카드)
+        return ReadMore(outcome.result)
+
+
+def _follow_screen(call: tools.ToolCall, text: str, shortcuts: list[Intent] | None) -> str | None:
+    # 결과 뒤 navigate : 그 화면 바로가기(안내서 화면보다 우선), search_guide : 안내서 글을 결과로
+    # 라운드가 남으면 이어서 도구를 고를 수 있게 ReadMore. READ 횟수에는 세지 않음
+    if call.name == tools.NAVIGATE:
+        row = tools.route_row(call)
+        if row is None:
+            logger.info("결과 뒤 이동 화면 없음: %s", call.name)
+            return None
+        if shortcuts is not None:
+            shortcuts.insert(0, row.to_intent())
+        logger.info("결과 뒤 이동은 바로가기로: %s", row.scr_id)
+        return ReadMore(ROUTE_SHOWN.format(name=row.name))
+    ids = tuple(tools.guide_ids(call, text))
+    guide = guide_text(ids) if ids else None
+    if guide is None:
+        logger.info("결과 뒤 사용법 안내: 안내서 청크 없음")
+        return None
+    logger.info("결과 뒤 사용법 안내: 도구 %d개 %s", len(ids), ",".join(ids))
+    shortcut = _guide_shortcut(ids[0])
+    if shortcut is not None and shortcuts is not None:
+        shortcuts.append(shortcut)
+    return ReadMore(guide)
 
 
 def guide_text(ids: tuple[str, ...]) -> str | None:
@@ -735,6 +822,7 @@ async def _run_turn(
                 judged.stream,
                 judged.cards,
                 _notice(judged),
+                judged.follow_shortcuts,
             )
             if answer is not None and titles is not None and _is_first_answer(turn):
                 await _retitle(repo, titles, turn, answer)
@@ -777,8 +865,10 @@ async def _search_answer(
     stream: AsyncIterator[str],
     cards: list[ActionCard] | None = None,
     notice: Callable[[], bool] = lambda: True,
+    follow_shortcuts: list[Intent] | None = None,
 ) -> str | None:
     # FN-AIM-002-02·07 : 완료면 고지 전 본문 반환(제목 요약용), 실패·미완료면 None
+    # follow_shortcuts : 결과 뒤 고른 이동·사용법 화면, 스트림이 끝난 뒤 첫 READ 화면보다 우선
     # stream : 도구 흐름이 이미 시작한 답변 스트림
     loop = asyncio.get_running_loop()
     started_at = loop.time()
@@ -834,6 +924,8 @@ async def _search_answer(
         text += DISCLAIMER
     message = await _save(repo, turn.room_sn, text, complete)
     action = cards[0] if cards else None
+    if follow_shortcuts:
+        shortcut = follow_shortcuts[0]
     # FN-AIM-002-04 : 확인 카드가 같이 나가는 턴은 바로가기 없음
     shortcut = None if action is not None else shortcut
     emit(("done", AnswerDone(message=message, shortcut=shortcut, action=action)))
