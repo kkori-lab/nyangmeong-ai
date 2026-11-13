@@ -1,6 +1,6 @@
 """tool calling 1단계 평가(docs/design/tool-calling.md 7-1절). 실제 Anthropic 호출(비용이 든다)
 
-돌리기: uv run python -m scripts.tool_eval [--sonnet] [--answer]
+돌리기: uv run python -m scripts.tool_eval [--sonnet] [--answer] [--only T01,T05]
 - 도구 흐름(service.judge_tools)을 잰다(옛 판정 service.judge는 2026-11-11 삭제)
 - 도구 목록 : 테스트와 같은 가짜 Java 목록(스냅샷 + 코드 값), Java는 부르지 않는다
 - 문항별 결과 : .cache/tool_eval/<시각>.jsonl (git 제외)
@@ -29,6 +29,8 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "tests/chat/data/tool_eval.jsonl"
 OUT_DIR = ROOT / ".cache/tool_eval"
 SONNET = "claude-sonnet-5-5"
+# 도구 고르기 기준 문항(tool-calling.md 7-1절 4회차 판정) : T01~T44
+CORE = 44
 TYPES = ("사용법", "이동", "일정", "케어", "지식", "범위밖", "헷갈림", "수정")
 
 
@@ -54,6 +56,8 @@ class Result:
     ms: float = 0.0
     answer: str | None = None
     error: str | None = None
+    # 글 답변 뒤에 도구 호출이 붙은 응답 수
+    text_then_tool: int = 0
 
 
 def _register_kind(values: dict) -> str:
@@ -71,10 +75,16 @@ class _DecisionRecorder(AnthropicToolAgent):
     """도구 고르기 결과를 남긴다 : READ(Java 없이 실행 불가)·ACTION을 고른 도구 이름으로 세려고"""
 
     decision: ToolDecision | None = None
+    text_then_tool: int = 0
 
     async def decide(self, *args, **kwargs) -> ToolDecision:
         self.decision = await super().decide(*args, **kwargs)
         return self.decision
+
+    def _log(self, final, task: str, started: float, length: int | None = None) -> None:
+        if length is not None and any(block.type == "tool_use" for block in final.content):
+            self.text_then_tool += 1
+        super()._log(final, task, started, length)
 
 
 def _picked(agent: _DecisionRecorder) -> tuple[str, dict] | None:
@@ -106,9 +116,21 @@ async def run_tools(client, model: str, q: str, today, keep_answer: bool) -> Res
             parts = [part async for part in judged.stream]
             text = "".join(parts)
     except Exception as error:
-        return Result("error", usage=usage, error=type(error).__name__)
+        return Result(
+            "error",
+            usage=usage,
+            error=type(error).__name__,
+            text_then_tool=agent.text_then_tool,
+        )
     ms = (time.monotonic() - started) * 1000
-    answer = text if keep_answer else None
+    result = _result(judged, agent, usage, ms, text if keep_answer else None)
+    result.text_then_tool = agent.text_then_tool
+    return result
+
+
+def _result(
+    judged: service.Judged, agent: _DecisionRecorder, usage: Usage, ms: float, answer: str | None
+) -> Result:
     kind = judged.intent.kind
     if kind is IntentKind.ROUTE:
         return Result(tools.NAVIGATE, {"scr_id": judged.intent.scr_id}, usage, ms, answer)
@@ -166,10 +188,28 @@ def summary(name: str, rows: list[dict], results: list[Result], scores: list[dic
         "output": sum(r.usage.output for r in measured) / n,
         "ms": statistics.median([r.ms for r in measured]) if measured else 0.0,
         "errors": len(results) - len(measured),
+        "text_then_tool": sum(r.text_then_tool for r in results),
+        "core": _core(rows, results, scores),
         "by_type": {
             t: sum(s["tool_ok"] for row, s in zip(rows, scores, strict=True) if row["type"] == t)
             for t in TYPES
         },
+    }
+
+
+def _core(rows: list[dict], results: list[Result], scores: list[dict]) -> dict:
+    # T01~T44만 : 켜는 기준(정확 36/44·쓰기 잘못 0·지연 중앙값 1,640ms)과 비교
+    picked = [
+        (result, mark)
+        for row, result, mark in zip(rows, results, scores, strict=True)
+        if int(row["id"][1:]) <= CORE
+    ]
+    measured = [result.ms for result, _ in picked if result.error is None]
+    return {
+        "total": len(picked),
+        "tool_ok": sum(mark["tool_ok"] for _, mark in picked),
+        "write_wrong": sum(mark["write_wrong"] for _, mark in picked),
+        "ms": statistics.median(measured) if measured else 0.0,
     }
 
 
@@ -189,6 +229,15 @@ def print_tables(rows: list[dict], sums: list[dict]) -> None:
             f"| {tokens} | {s['ms']:,.0f}ms |"
         )
     print()
+    print(f"| 흐름 | T01~T{CORE} 도구 정확 | 쓰기 도구 잘못 | 판정 지연 중앙값 | 글 뒤 도구 |")
+    print("| --- | --- | --- | --- | --- |")
+    for s in sums:
+        core = s["core"]
+        print(
+            f"| {s['name']} | {core['tool_ok']}/{core['total']} | {core['write_wrong']} "
+            f"| {core['ms']:,.0f}ms | {s['text_then_tool']} |"
+        )
+    print()
     print("| 유형 | 문항 | " + " | ".join(s["name"] for s in sums) + " |")
     print("| --- | --- | " + " | ".join("---" for _ in sums) + " |")
     for t in TYPES:
@@ -200,6 +249,7 @@ async def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--sonnet", action="store_true", help="도구 흐름을 Sonnet 5.5로도 잰다")
     parser.add_argument("--answer", action="store_true", help="글 답변 본문을 결과 파일에 남긴다")
+    parser.add_argument("--only", help="이 문항만 잰다(쉼표로 구분, 예: T01,T05)")
     options = parser.parse_args()
 
     settings = get_settings()
@@ -207,6 +257,9 @@ async def main() -> None:
     tools.use_catalog(fake_catalog())
     print("도구 순서:", ", ".join(d["name"] for d in tools.tool_definitions()))
     rows = [json.loads(line) for line in DATA.read_text(encoding="utf-8").splitlines() if line]
+    if options.only:
+        only = set(options.only.split(","))
+        rows = [row for row in rows if row["id"] in only]
     today = rules.today_kst()
 
     flows = [
