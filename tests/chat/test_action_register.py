@@ -44,7 +44,7 @@ def test_병원_일정_요청은_일정_등록_API를_부르는_확인_카드여
     assert evs[0][1]["kind"] == "ACTION"
     done = evs[-1][1]
     assert done["card"] is None
-    assert done["message"] is None
+    assert done["message"]["cnvrsCn"].startswith("이렇게 할까요?")  # 2026-11-13
     action = done["action"]
     assert (action["tool"], action["label"]) == ("draft_schedule", "일정 등록")
     assert action["call"] == {"method": "POST", "path": "/api/pets/{petSn}/care-schedules"}
@@ -54,7 +54,7 @@ def test_병원_일정_요청은_일정_등록_API를_부르는_확인_카드여
     assert (values["hsptlNm"], values["ckupTypeCd"]) == ("메이 동물병원", "HLTC0002")
     assert action["missing"] == []
     # 카드는 저장하지 않음 : 되물음 글도 없음
-    assert java.ai_messages(room) == []
+    assert len(java.ai_messages(room)) == 1  # 카드 요약 글 (2026-11-13)
 
 
 def test_일정_카드에는_출처_코드를_넣지_않아야_한다(client, java):

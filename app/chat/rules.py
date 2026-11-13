@@ -389,6 +389,9 @@ def _next_month_day(today: date, day: int) -> date | None:
     return _ymd(month_of.year, month_of.month, day)
 
 
+# 지금 시각을 뜻하는 말 : 날짜는 오늘, 시각을 말하지 않았으면 지금 (2026-11-13)
+_NOW_WORDS = r"방금|지금|아까|금방"
+
 _RELATIVE_DAYS = {"오늘": 0, "내일": 1, "모레": 2, "글피": 3, "어제": -1, "그제": -2}
 
 # 순서대로 대조, 맞은 자리는 가림 (뒤 규칙의 재판독 방지). 띄어쓰기 허용
@@ -400,6 +403,8 @@ _DATE_RULES = (
     (r"(?<![\d/])(\d{1,2})/(\d{1,2})(?![\d/])", lambda m, t: _ymd(t.year, int(m[1]), int(m[2]))),
     (r"(\d{1,3})\s*일\s*(후|뒤)", lambda m, t: t + timedelta(days=int(m[1]))),
     (r"오늘|내일|모레|글피|어제|그제", lambda m, t: t + timedelta(days=_RELATIVE_DAYS[m[0]])),
+    # '방금·지금·아까·금방' : 오늘 (시각은 mentions_now로 지금, 2026-11-13 추가 요청)
+    (_NOW_WORDS, lambda m, t: t),
     (r"([월화수목금토일])요일", lambda m, t: _bare_weekday(t, m[1])),
     (
         r"(?<!\d)(\d{1,2})\s*일(?!\s*(마다|에\s*한\s*번|간|동안))",
@@ -424,6 +429,39 @@ _CYCLE_RULES = (
 
 _CLOCK = re.compile(r"(오전|오후|아침|저녁|밤|낮|새벽)?\s*(\d{1,2})\s*시\s*(반|(\d{1,2})\s*분)?")
 _HH_MM = re.compile(r"(?<![\d:])([01]?\d|2[0-3]):([0-5]\d)(?![\d:])")
+
+
+# 돌려받은 확인 카드에 대한 짧은 답 (2026-11-13 채팅으로 확인) : 띄어쓰기·끝 문장부호를 뗀 문장 전체
+ACTION_CONFIRM = "confirm"
+ACTION_CANCEL = "cancel"
+_YES = r"(응|어|네|넵|예|ㅇㅇ|ㅇㅋ|오케이|좋아요?|그래요?|맞아요?|확인)"
+_DO = r"(등록|저장|추가|기록|체크|완료|진행|그대로)(해|해줘|해주세요|해줄래|해요|하자|해주라|ㄱ)?"
+_CONFIRM = re.compile(rf"^(?:{_YES}(?:{_DO})?|{_DO})$")
+_NO = r"(아니|아니요|아뇨|아니야)"
+_STOP = (
+    r"(취소|취소해|취소해줘|취소해주세요|됐어|됐어요|그만|그만해"
+    r"|하지마|하지마요|안할래|등록하지마|저장하지마|등록안해|안해)"
+)
+_CANCEL = re.compile(rf"^(?:{_NO}{_STOP}?|{_STOP})$")
+
+
+def action_reply_kind(text: str) -> str | None:
+    """확인 말이면 ACTION_CONFIRM, 취소 말이면 ACTION_CANCEL, 그 밖(칸 고치기 등)이면 None"""
+    compact = re.sub(r"[\s.!~?ㅎㅋ^]+", "", text)
+    if _CONFIRM.match(compact):
+        return ACTION_CONFIRM
+    if _CANCEL.match(compact):
+        return ACTION_CANCEL
+    return None
+
+
+def mentions_now(text: str) -> bool:
+    """문장에 '방금·지금·아까·금방'이 있는지 : 날짜·시각을 비우면 오늘·지금으로 채운다"""
+    return re.search(_NOW_WORDS, text) is not None
+
+
+def now_kst() -> datetime:
+    return datetime.now(KST)
 
 
 def mentions_date(text: str) -> bool:

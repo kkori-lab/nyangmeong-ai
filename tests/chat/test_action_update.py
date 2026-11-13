@@ -47,7 +47,7 @@ def test_일정_목록을_읽은_뒤_고른_일정_수정은_목록의_번호와
     evs = events(send(client, room, "다음 병원 일정 모레로 미뤄줘"))
 
     assert evs[0][1]["kind"] == "SEARCH"
-    assert agent.results[1] == ACTION_SHOWN
+    assert agent.results[1].startswith(ACTION_SHOWN.split("{summary}")[0])
     action = evs[-1][1]["action"]
     assert action["tool"] == "draft_schedule_update"
     assert action["label"] == "일정 수정"

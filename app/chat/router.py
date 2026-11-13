@@ -62,14 +62,20 @@ async def me(mbr_sn: Member) -> JSONResponse:
 async def judge_image_intent(
     file: UploadFile,
     judge: Annotated[ImageIntentJudge, Depends(get_image_intent_judge)],
+    repo: Repo,
+    titles: Annotated[TitleGenerator, Depends(get_title_generator)],
     cnvrs_cn: Annotated[str | None, Form(alias="cnvrsCn", max_length=MAX_MESSAGE_LENGTH)] = None,
-    # 판단 미사용 : React가 다음 요청(영수증·캐릭터)에 사용
+    # 판단 미사용 : 새 방의 펫 태그, React가 다음 요청(영수증·캐릭터)에 사용
     pet_sn: Annotated[int | None, Form(alias="petSn", ge=1)] = None,
+    # 사진 턴을 저장할 방 : 없으면 방을 만듦 (2026-11-13)
+    room_sn: Annotated[int | None, Form(alias="aiCnvrsRoomSn", ge=1)] = None,
 ) -> JSONResponse:
     # 10MB + 1바이트까지만 읽기 : 초과 판정용
     image = await file.read(MAX_IMAGE_BYTES + 1)
+    # 형식·크기 400은 판단 전에 끝남 : 저장 없음
     kind = await service.judge_image_intent(judge, image, file.filename or "", cnvrs_cn)
-    return response.success({"kind": kind})
+    result = await service.save_image_turn(repo, titles, room_sn, pet_sn, cnvrs_cn, kind)
+    return response.success(result.model_dump(by_alias=True, mode="json"))
 
 
 # 생성만 제목 생성(LLM) 전에 인증 확인 : 로그인하지 않은 요청이 LLM을 부르지 않게
