@@ -148,15 +148,23 @@ def _result(
     return Result(tools.DECLINE, {"unclear": not judged.out_of_scope}, usage, ms, answer)
 
 
+def expected_tools(row: dict) -> list[str]:
+    # 정답 도구 : 글자 하나, 또는 같은 사실을 답할 수 있는 READ 여럿의 목록(2026-11-13)
+    tool = row["tool"]
+    return list(tool) if isinstance(tool, list) else [tool]
+
+
 def score(row: dict, result: Result) -> dict:
-    tool_ok = result.tool == row["tool"]
+    tool_ok = result.tool in expected_tools(row)
+    # 아래 갈래는 정답일 때만 : 고른 도구가 곧 정답 도구
+    picked = result.tool
     if not tool_ok:
         args_ok = False
-    elif row["tool"] in (tools.NAVIGATE, tools.SEARCH_GUIDE):
+    elif picked in (tools.NAVIGATE, tools.SEARCH_GUIDE):
         args_ok = result.args.get("scr_id") == row.get("scr_id")
-    elif row["tool"] == tools.DECLINE:
+    elif picked == tools.DECLINE:
         args_ok = result.args.get("unclear") == row.get("unclear", False)
-    elif row["tool"] in tools.REGISTER_TOOLS or tools.card_entry(row["tool"]) is not None:
+    elif picked in tools.REGISTER_TOOLS or tools.card_entry(picked) is not None:
         args_ok = all(result.args.get(k) == v for k, v in row.get("args", {}).items())
     else:
         args_ok = True
