@@ -1,11 +1,21 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-004 대화창 · 한 메시지 여러 일 ① — 끝 (2026-11-13, 검증 통과, 사람 확인). 한 턴 READ 상한 3번, 결과 뒤 고른 이동·사용법은 화면 이동 대신 `done.shortcut` 바로가기·안내서 결과, 사용법을 먼저 골라도 결과 뒤 READ로 함께 물은 기록을 읽음(추가-5). tool_eval 섞인 문항 T79~T84·목록 정답(6회차 `docs/design/tool-calling.md`). `scripts/tool_eval.py`의 목록 정답(`expected_tools`)은 공용 하네스라 커밋에서 뺌
+SCR-AIM-004 대화창 · 이동 먼저 고른 섞인 메시지 — 기획 (시작 2026-11-13 16:28)
+
+배경: 첫 고르기가 `navigate`면 LLM 답변 없이 이동으로 끝나, "가계부 열어서 이번 달 지출 알려 줘"에서 지출을 못 읽는다. 6회차 `--only` 3회는 `navigate` 0건이라 지금 새는 문항은 없다. 이번 일은 LLM이 흔들려도 새지 않게 막는 구조 안전망이다. 이동마다 LLM을 한 번 더 부르면 평범한 이동이 1~2초 느려지므로(6회차 메모), 이동 뒤에 다른 일을 이어 말한 메시지만 한 번 더 부른다.
+
+- 이어 말한 이동 판별 (기능 ID 추가 없음, SCR-AIM-004 라우팅): `app/chat/rules.py`에 `chains_after_move(text)`. 이어 주는 이동 말(`열어서·열고·가서·가고·들어가서·이동해서·이동하고·띄워서`) 뒤에 글이 더 있으면 참. "가계부 열어 줘"·"가계부 보여 줘"·"가계부"는 거짓. 부를 API 없음.
+  - 완료 조건 `명령:` 새 `tests/chat/test_navigate_mixed.py`에 참 3건(T79·T80·T82 문장), 거짓 4건("가계부 열어 줘"·"가계부 보여 줘"·"가계부"·"가계부 열어서").
+- 이동 먼저 고른 섞인 메시지 답변: `app/chat/service.py` `_tool_judged`의 `navigate` 분기. `read`가 있고 `chains_after_move`가 참이면 이동(ROUTE) 대신 SEARCH로 판정하고, 첫 도구 결과를 `ROUTE_SHOWN`(화면 안 옮김·바로가기 안내)으로 `agent.answer(..., follow=_Follow(...))`를 부른다. 바로가기(`shortcut`)는 고른 화면, 결과 뒤 READ(상한 3번)·사용법·쓰기 카드 1개는 기존 `_Follow` 그대로. 답변이 0자면 `'{화면명}' 바로가기를 눌러 주세요` 같은 고정 글(새 상수). 고지는 결과 뒤 고지 READ가 성공했을 때만(사용법 경로와 같음). `read`가 없거나 이어 말한 글이 없으면 지금처럼 이동. 응답 계약(`docs/api/chat.md`) 그대로: `intent`가 SEARCH, `done.shortcut`이 그 화면(이미 있는 필드). 부를 API: 결과 뒤 READ의 Java 내부 API(이미 있음, LJS 백엔드).
+  - 완료 조건 `명령:` 새 `tests/chat/test_navigate_mixed.py`(가짜 에이전트 `tests/chat/fakes.py`): ① 첫 도구 `navigate` + "가계부 열어서 이번 달 지출 알려 줘" → `intent` SEARCH, 결과 뒤 `get_expense_total` 실행, `done.shortcut`이 가계부 화면, 이동 이벤트 없음 ② "가계부 열어 줘" + `navigate` → 지금처럼 이동, 에이전트 `answer` 안 부름 ③ 이어 말했지만 결과 뒤 도구 없이 글만 → 글 + 바로가기 ④ 답변 0자 → 고정 글 + 바로가기 ⑤ `read` 없음 → 이동. `sh scripts/check.sh` 통과(기존 테스트 그대로 통과).
+  - 완료 조건 `화면:` 서버를 띄워 Postman으로 "가계부 열어서 이번 달 지출 얼마인지 알려 줘"를 보내, LLM이 `navigate`를 고른 경우 서버 로그에 결과 뒤 READ가 찍히고 `done.shortcut`이 가계부, 답에 지출 합계가 나온다(LLM이 처음부터 READ를 고르면 지금 흐름이라 확인 대상 아님 — 로그로 구분). "가계부 열어 줘"는 지금처럼 이동.
+- 문서: `docs/design/tool-calling.md` 6회차 아래 줄 "첫 고르기 `navigate`면 … 남는다"를 "이어 말한 이동만 한 번 더 부른다"로 고친다. tool_eval 기준은 그대로(첫 도구 LLM 측정이라 `navigate` 0건 기준 유지, 이번 구조는 단위 테스트로 잰다). 핸드오프 다음에 할 것에서 이 항목을 지운다.
+  - 완료 조건 `명령:` `sh scripts/check.sh`.
+
+새 의존성: 없음
 
 ## 다음에 할 것
-- `scripts/tool_eval.py` 공용 하네스 PR (LJS): `tool`에 목록이면 목록 안 도구를 정답으로(`expected_tools`, 2026-11-13). 커밋에서 빼 둠(작업 트리에 남음) — 이것 없이는 T79·T81 목록 정답을 오답으로 셈. 따로 PR
-- 이동 먼저 고른 섞인 메시지 (LJS, 2026-11-13 한 메시지 여러 일 ① 6회차): 첫 고르기가 `navigate`면 LLM 답변 없이 이동으로 끝나 함께 물은 기록을 못 읽음(사용법 먼저는 추가-5로 결과 뒤 도구를 열어 해결). 이동마다 LLM을 한 번 더 부르지 않고 막을 방법(키워드 힌트·질문꼴이면 이동 대신 읽기)을 섞인 문항이 더 새면 본다
 - tool_eval 정답 목록화·겹치는 READ (LJS, 추가-4): 같은 사실을 답하는 READ 둘은 `tool` 목록으로 둘 다 정답(T79·T81부터). T15·T16·T17·T66도 이 기준으로 다시 본다. `get_expense_total`↔`get_expense_statistics`, `list_daily_health_records`↔`get_health_indicators`처럼 겹치는 도구를 합치거나 `skip`할지는 비용·지연(통계는 출력이 큼)으로 백엔드와 정한다 / 4회차 메모: T15·T16·T17 정답이 READ 열기 전 `navigate`라 `get_expense_total`·`list_inspection_values`·`get_points`로, T66 정답(`list_pixel_characters` vs 고른 `list_shop_items`) 확인, T67 "자유게시판 최근 글"이 `navigate`로 감(설명), T03·T05·T08·T09 `search_guide` 화면, T36·T42 범위 밖 거절
 - 한 메시지 여러 명령 ② (LJS·프론트, 계약 변경): 쓰기 확인 카드 여러 개("몸무게 기록하고 일정도 잡아줘"). `done.action` 하나 → 목록, "확인" 한 번에 모두 저장할지 하나씩 물을지·부분 실패 처리 먼저 정함. `docs/api/chat.md` 계약이라 프론트와 함께(AGENTS.md 4번)
 - 대화창 판정 지연 (LJS): tool search를 빼도 T01~T44 판정 지연 중앙값 2,054ms로 기준 1,640ms 초과(5회차 끔). 자주 쓰는 READ만 싣기·search_guide·글 답변 출력 줄이기로 본다
