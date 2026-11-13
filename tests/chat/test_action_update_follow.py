@@ -82,12 +82,13 @@ def test_READ_두_번_뒤에도_수정_카드를_고를_수_있어야_한다(cli
     assert action["input"]["schdlSn"] == 31
 
 
-def test_세_번째_READ는_실행하지_않아야_한다(client, java):
+def test_네_번째_READ는_실행하지_않아야_한다(client, java):
+    # 한 턴 READ 상한 2 → 3번(2026-11-13, 한 메시지 여러 일 ①)
     agent = use_agent(
         client,
         ChainAgent(
             "list_my_care_schedules",
-            [("list_my_care_schedules", {}), ("list_care_items", {})],
+            [("list_my_care_schedules", {}), ("list_care_items", {}), ("list_checkups", {})],
             ("일정이에요.",),
         ),
     )
@@ -96,8 +97,8 @@ def test_세_번째_READ는_실행하지_않아야_한다(client, java):
 
     events(send(client, room, "일정 알려 줘"))
 
-    assert len(reader.calls) == 2
-    assert agent.results[2] is None
+    assert len(reader.calls) == 3
+    assert agent.results[3] is None
 
 
 def test_카드를_띄운_뒤_고른_쓰기_도구는_실행하지_않아야_한다(client, java):
@@ -179,10 +180,12 @@ def test_follow가_ReadMore를_주면_한_번_더_도구를_고를_수_있어야
     assert third["tool_choice"] == {"type": "none"}
 
 
-def test_ReadMore가_두_번_와도_도구는_두_번까지만_고른다():
+def test_ReadMore가_계속_와도_결과_뒤_도구는_세_번까지만_고른다():
+    # 결과 뒤 도구 고르기 2 → 3라운드(2026-11-13, READ 상한 3번)
     bodies = [
         tool_sse("list_my_care_schedules", {}),
         tool_sse("list_care_items", {}),
+        tool_sse("list_checkups", {}),
         sse(["답이에요."]),
     ]
     fake = FakeAnthropic(lambda _: sse_response(bodies[len(fake.requests) - 1]))
@@ -196,5 +199,6 @@ def test_ReadMore가_두_번_와도_도구는_두_번까지만_고른다():
         return [t async for t in stream]
 
     assert asyncio.run(run()) == ["답이에요."]
-    assert len(fake.requests) == 3
-    assert fake.requests[2]["tool_choice"] == {"type": "none"}
+    assert len(fake.requests) == 4
+    assert [r["tool_choice"]["type"] for r in fake.requests[:3]] == ["auto"] * 3
+    assert fake.requests[3]["tool_choice"] == {"type": "none"}

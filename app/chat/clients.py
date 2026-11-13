@@ -229,19 +229,22 @@ class ToolDecision:
 
 
 class ReadMore(str):
-    """follow 결과 글 : 이 결과 뒤 한 번 더 도구를 고를 수 있음 (READ 2번 뒤 수정 카드, 2단계 ②)"""
+    """follow 결과 글 : 이 결과 뒤 한 번 더 도구를 고를 수 있음 (READ 뒤 수정 카드, 2단계 ②)"""
 
 
-# 결과 답변 중 LLM이 고른 두 번째 도구 실행 : 결과 글, 읽기 도구가 아니면 None
+# 결과 답변 중 LLM이 고른 도구 실행 : 결과 글, 실행하지 않은 도구면 None
 FollowRead = Callable[[tools.ToolCall], Awaitable[str | None]]
-# 결과 답변에서 도구를 고르는 최대 횟수 : 두 번째는 follow가 ReadMore를 줄 때만
-FOLLOW_ROUNDS = 2
+# 한 턴 READ 최대 횟수(첫 고르기 포함) : 첫 글자 제한 10초가 고르기·Java·라운드마다 LLM을 덮음
+READ_LIMIT = 3
+# 결과 답변에서 도구를 고르는 최대 횟수 : 두 번째부터는 follow가 ReadMore를 줄 때만
+# READ_LIMIT번 읽은 뒤에도 쓰기 카드를 한 번 고를 수 있게 READ_LIMIT과 같음
+FOLLOW_ROUNDS = READ_LIMIT
 
 
 class ToolAgent(Protocol):
     # docs/design/tool-calling.md 4절 : 분류·목차 선택·등록 칸 추출을 도구 고르기 한 번으로
     # decide 장애면 ClassifyError, 글 스트림 장애면 AnswerError
-    # answer의 follow : 있으면 결과를 본 LLM이 읽기 도구를 한 번 더 고름(한 턴 READ 최대 2번)
+    # answer의 follow : 있으면 결과를 본 LLM이 도구를 더 고름(한 턴 READ 최대 READ_LIMIT번)
     async def decide(
         self, messages: list[dict], max_tokens: int, today: date, hint: rules.RouteRow | None = None
     ) -> ToolDecision: ...
@@ -264,8 +267,17 @@ TOOL_RULES = (
     "- 서비스 범위 안의 반려동물 건강·생활 정보 질문은 도구 없이 바로 답한다.\n"
     "- 두 도구가 다 맞아 보이면 도구 없이 무엇을 원하는지 짧게 되묻는다.\n"
     "- 도구 인자는 회원이 말한 것만 채우고 모르는 칸은 비운다.\n"
-    "- 읽기 도구 결과를 받은 뒤 상세가 더 필요하면 읽기 도구를 한 번 더 부를 수 있다. "
-    "번호 칸(…_sn)은 받은 결과에 나온 번호만 쓴다.\n"
+    "- 읽기 도구 결과를 받은 뒤 상세나 다른 기록이 더 필요하면 읽기 도구를 두 번까지 더 "
+    "부를 수 있다. 번호 칸(…_sn)은 받은 결과에 나온 번호만 쓴다.\n"
+    # 한 메시지 여러 일 ① (2026-11-13) : 결과 뒤 navigate·search_guide는 바로가기·안내서 결과
+    "- 이동·사용법 요청과 다른 일(기록 조회 등)이 한 메시지에 섞이면 다른 일 도구를 먼저 "
+    "부르고, 이동·사용법은 그 결과를 받은 뒤 navigate·search_guide로 부른다. "
+    "그때는 화면을 옮기지 않고 답 아래 바로가기 버튼으로 보인다. "
+    "'어디서 해?' 같은 사용법 물음이 있어도 내 기록(몸무게·일정·지출 등)을 함께 물으면 "
+    "search_guide를 먼저 부르지 않고 그 기록의 읽기 도구를 먼저 부른다.\n"
+    # 2026-11-13 검증 1회차 : 첫 고르기가 search_guide면 결과 뒤 도구가 없어 답변이 0자로 끝남
+    "- search_guide 결과를 받은 뒤 더 부를 도구가 없으면 받은 안내로 바로 답한다. "
+    "함께 물은 기록은 다시 물어 달라고 한 문장 덧붙인다.\n"
     "- 기록을 읽어 답한 뒤 회원이 다른 반려동물 이름만 말해도 같은 읽기 도구를 다시 부른다.\n"
     "- 읽기 결과의 '조회한 반려동물'을 답에 밝히고, "
     "결과에 없는 반려동물 기준이라고 말하지 않는다.\n"
@@ -301,7 +313,9 @@ def _tool_hint(hint: rules.RouteRow | None) -> str:
         f"이 입력은 키워드로 '{hint.name}' 화면({hint.scr_id})에 걸렸다. "
         "키워드가 걸린 것만으로 범위 안이 아니다. 범위 밖이면 decline, "
         "그 화면으로 가려는 요청이나 그 화면에 있는 내 기록을 묻는 질문이면 navigate"
-        "(건강 기록·일정·검진·약·지출의 내용을 묻는 질문에 맞는 읽기 도구가 있으면 그 도구), "
+        "(건강 기록·일정·검진·약·지출의 내용을 묻는 질문에 맞는 읽기 도구가 있으면 그 도구. "
+        "'열어서 지출 얼마인지 알려 줘'처럼 이동과 내 기록 내용 질문이 섞여도 읽기 도구. "
+        "'열어서 어떻게 하는지 알려 줘'처럼 이동과 사용법이 섞이면 search_guide), "
         "그 화면 기능의 위치·사용법을 묻는 질문이면 search_guide."
     )
 
@@ -432,7 +446,7 @@ class AnthropicToolAgent:
     ) -> AsyncIterator[str]:
         # 서버 도구 결과를 돌려준 뒤 같은 대화로 답변
         # follow 있음 : 첫 블록이 글이면 그대로, 도구면 실행 후 도구 없이(LLM 3번).
-        # follow가 ReadMore를 주면 한 번 더 도구를 고를 수 있음(LLM 최대 4번)
+        # follow가 ReadMore를 주면 FOLLOW_ROUNDS까지 도구를 더 고를 수 있음(LLM 최대 2 + 라운드 수)
         current = _with_result(messages, decision.content, decision.call, result)
         if follow is None:
             request = self._request(current, max_tokens, tool_system_blocks(today))
