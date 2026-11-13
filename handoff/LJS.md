@@ -1,16 +1,17 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-004 대화창 · 사람 확인 피드백 급한 수정 — 끝 (2026-11-13, 검증 1회차 통과, 사람 확인). ① '방금·지금·아까·금방' → 오늘·지금 시각 ② 확인 카드를 채팅 요약 글로, 확인 말이면 `done.execute`·취소 말이면 버림 ③ `/ai/image-intent`가 사진 턴 저장(방 없으면 생성, 응답 `aiCnvrsRoomSn`·`messages`) ④ 안내서 메인 절을 개편된 메인(검색창·바로가기, 같은 창 모달)에 맞춤
+SCR-AIM-004 대화창 · tool search 전환 — 끝 (2026-11-13, 검증 통과, 사람 확인). tool_eval 5회차: BM25 42~43/78·regex 58/78·지연 2.5~3.2초로 켜는 기준 미달 → 쓰지 않고 시험 코드도 지움(추가-2), 결과는 `docs/design/tool-calling.md` 5회차. 추가-1: AI 자신의 동작 방식·내부 구조 질문은 범위 밖 decline(`SERVICE_SCOPE`·`decline` 설명). `scripts/tool_eval.py`의 `--only`·T01~T44 요약 줄은 공용 하네스라 따로 PR
 
 ## 다음에 할 것
+- `scripts/tool_eval.py` 공용 하네스 PR (LJS): `--only`(일부 문항만)·T01~T44 요약 줄(정확·쓰기 잘못·지연 중앙값·글 뒤 도구)을 2026-11-13 커밋에서 빼 둠. 따로 PR
+- 한 메시지 여러 명령 ① (LJS, Python만, 2026-11-13 제안): 한 턴 READ 상한 2 → 3~4(`service.py` `follow`의 `reads`·`FOLLOW_ROUNDS`, 도구 하나마다 LLM 1번·1~2초), 이동·사용법 + 다른 일이면 이동은 하지 않고 `done.shortcut` 바로가기로. `tool_eval`에 섞인 질문 문항 추가해 잼 — `/start`로 기획 / ② (LJS·프론트, 계약 변경): 쓰기 확인 카드 여러 개("몸무게 기록하고 일정도 잡아줘"). `done.action` 하나 → 목록, "확인" 한 번에 모두 저장할지 하나씩 물을지·부분 실패 처리 먼저 정함. `docs/api/chat.md` 계약이라 프론트와 함께(AGENTS.md 4번)
+- 대화창 판정 지연 (LJS): tool search를 빼도 T01~T44 판정 지연 중앙값 2,054ms로 기준 1,640ms 초과(5회차 끔). 자주 쓰는 READ만 싣기·search_guide·글 답변 출력 줄이기로 본다
 - 연결 남음: FN-AIM-012-05·10 채팅으로 등록 확인·FN-AIM-013-02 사진 턴 저장 프론트 연결 (LJS 프론트, frontend 세션): `docs/api/chat.md` 확정(2026-11-13) 알림 보냄. 프론트는 모달 대신 `done.message` 글, `done.execute`면 `call` 실행 뒤 `action-result`, 사진은 `image-intent` 응답 `messages`로 그리고 `aiCnvrsRoomSn`으로 이어 감, MEDICAL_RECEIPT 경로의 `receipt-result`에 `cnvrsCn` 안 보냄. 프론트 몫 1~5(스크롤·유효성 메시지·다른 화면 진입 이력·플로팅 버튼 반려동물·햄버거)도 frontend 세션
 - 채팅 확인 다듬기 (LJS): 빈 칸 이름이 도구 설명 앞부분이라 "병원일 때 검진유형"처럼 어색함(`_missing_names`), "해 줘"만은 확인으로 안 봄 — 실사용 뒤 정한다. `data/tool_prompts.yaml` 카드 도구 설명의 "카드에서 [확인]" 문구도 채팅 확인에 맞출지
-- 로컬 DB 정리 (LJS 백엔드): 2026-11-13 검증으로 mbrSn 1에 대화방 461~468 생김
-- 로컬 DB 정리 (LJS 백엔드): 화면 확인으로 캐릭터 601·603·604·608~612·614 × 아이템 51 굽기 실패 행 9개 생김
+- 로컬 DB 정리 (LJS 백엔드): 2026-11-13 검증으로 mbrSn 1에 대화방 461~468 생김 / 화면 확인으로 캐릭터 601·603·604·608~612·614 × 아이템 51 굽기 실패 행 9개 생김 / 2026-11-13 tool search 검증 방 480·481
 - 연결 남음: FN-MYP-011-01·FN-MYP-010-13·FN-ADM-070-02 그림 참고 굽기 남은 사람 확인 (LJS): 설계 9절 "확인하지 않은 것"(강아지·어두운 털·얼굴·의상·여러 부위 동시 착용)과 그림 한 장 더 넣는 굽기 단가. 로컬은 시트 파일이 있는 캐릭터가 흰 고양이 1마리뿐이라 못 봄. 시험 굽기 `/ai/items/trial-preview`의 그림 참고는 React 요청 계약 변경과 함께(관리자 프론트). 로컬 시험 아이템 51(머리 거북이)·53(가방 거북이)은 판매 중지나 정리
 - `docs/api/chat.md` 20·80행 고지 문구 (LJS, 2026-11-11 검증 메모, 사람 결정 대기): "SEARCH면 끝에 의료 고지"라고 적혀 있으나 실제는 사용법 안내·가계부 등 READ·잡담에는 없음(READ는 도구별 `notice`, `tool-catalog.md` 1절). 맞출지 정한다. 도구 없이 바로 쓴 글 답변은 지금도 잡담만 빼고 고지
-- tool search 전환 (LJS, 2026-11-11 tool_eval 4회차 판정, 마일스톤 절 `대기`): 도구 52개 모두 싣기에서 T01~T44 판정 지연 중앙값 2,235·2,322ms로 기준 1,640ms 초과. 2026-11-11 `/start` 기획 초안(승인 전 보류, 사람이 다음 마일스톤으로 미룸): Java 도구만 `defer_loading`, builtin 3개는 싣기, `tool_definitions(search)`·`AnthropicToolAgent(tool_search=)`·`tool_eval --tool-search bm25|regex`, 기준(T01~T44 36/44 이상·쓰기 잘못 0·지연 1,640ms 이하·78문항 71/78에서 3문항 넘게 안 떨어짐)을 넘을 때만 앱에서 켬. 주의: 검색 단계가 늘어 지연이 줄지 않을 수 있음, 한국어 BM25, 검색 전 글. 대안: 지연 수용, search_guide·글 답변 출력 줄이기, 자주 쓰는 READ만 싣기 — `/start`로 다시 기획. 2026-11-13 재기획(승인 전 보류): `AnthropicToolAgent(tool_search=)`·모듈 상수 `TOOL_SEARCH`(새 환경변수 없음), 검색 블록(`server_tool_use`·`tool_search_tool_result`) 건너뛰고 이력에 남김, `tool_eval --tool-search`에 T01~T44 줄 따로, 1문항 시험 뒤 끔1·bm25 2·regex 1회, 켜는 기준에 78문항 68/78 이상
 - tool_eval 정답·설명 고칠 거리 (LJS, 4회차): T15·T16·T17 정답이 READ 열기 전 `navigate`라 `get_expense_total`·`list_inspection_values`·`get_points`로, T66 정답(`list_pixel_characters` vs 고른 `list_shop_items`) 확인, T67 "자유게시판 최근 글"이 `navigate`로 감(설명), T03·T05·T08·T09 `search_guide` 화면, T36·T42 범위 밖 거절
 - 연결 남음: FN-ADM-070-02 관리자 프론트 아이템 등록 (관리자 프론트): 사진을 고르면 [픽셀로 만들기] `POST /ai/items/pixel-image`(form `image`·`regnCd`·`itemNm`, 응답 `image/png`, 30~40초·이미지 1장 과금) → 미리보기 → [이 그림 쓰기]면 그 PNG를 Java 아이템 등록 이미지로(원본 사진 그대로 쓰는 선택도 남김, 2026-11-11). [굽기 지시 만들기](`POST /ai/items/bake-hints`)·[시험해 보기](`POST /ai/items/trial-preview`), 등록 뒤 `POST /ai/items/{itemSn}/bake`를 `lastYn` true까지 반복(한 번 30~40초, 매 호출 전 토큰 갱신, 502면 멈춤)
 - 연관 바로가기 프론트 확인 (LJS 프론트): 도구 흐름 글 답변(READ·바로 답)에도 `done.shortcut`(Intent ROUTE)이 온다. 버튼으로 그리는지, 확인 카드와 함께는 안 온다는 것 알림. 키워드에 안 걸리는 건강 지식 답("예방접종 언제 맞아?")은 바로가기 없음 — 필요하면 도구 고르기 LLM이 관련 화면을 고르게(도구 정의 변경). 등록 요청꼴 문장에 LLM이 글로 답해도 키워드 바로가기가 붙을 수 있음(검증 메모) (2026-11-10)
@@ -55,6 +56,5 @@ SCR-AIM-004 대화창 · 사람 확인 피드백 급한 수정 — 끝 (2026-11-
 - 여러 아이 일정 READ 남은 메모 (LJS): 반려동물 몸무게(`petBdwg` 등) `scale 3`은 PR #221 범위 밖(담당자에게 전달됨). 옛 등록 카드(`draft`·REGISTER·등록 칸 추출 LLM)는 프론트 범용 카드 전환 뒤 삭제. Python은 도구 목록을 기동 때 1회만 받으므로 Java를 다시 띄우면 Python도 다시 띄운다
 - 로그 파일 배포 전 사람 할 일 (LJS, 다음 main 배포 전): 배포마다 서버 `.env.local`이 secret `ENV_FILE`로 통째로 덮어써지므로, 서버의 지금 `.env.local`·`.env`에 있는 키(`BACKEND_BASE_URL`, AI 키 3개, `CHAT_TOOL_*`, 타임아웃 등)를 빠짐없이 `ENV_FILE`에 옮기고 `LOG_DIR`(Java `app.log.dir`과 같은 폴더)를 추가. 서버에 `deploy` 그룹·SELinux 확인, 배포 사용자와 서비스 사용자가 다르면 600인 `.env.local`을 서비스가 못 읽으니 확인, 워크플로우 변경을 backend-90에 알림. 배포 뒤 폴더 `drwxrws---`·파일 `-rw-rw----`(그룹 deploy)와 요청 줄 확인. 필요하면 배포 전 `.env.local.bak` 백업 단계 추가 검토
 - 로컬 `LOG_DIR` 팀 기본값 (LJS, 사람 결정 대기): 로컬도 서버와 같은 경로로 쓸지. 정하면 `.env.local.example` 설명("개발 PC는 비움")과 디스코드 `.env.local` 값을 바꿈. Windows에서는 지금 드라이브 루트 아래로 풀림. Pylance가 Windows에서 `logs._chmod`의 `os.name` 분기 뒤를 회색 표시(동작 무관), 원하면 분기 삭제
-- 프론트(LJS) 알리기: ②·③·④ 카드분과 추가-1(돌려받은 카드 날짜 유지)이 develop에 병합되면 알림. 사진 의도 판단(SCR-AIM-013) 계약 `POST /ai/image-intent`도 병합 뒤 함께 알림
 - 실제 LLM에서 "코코 오늘 체중 4.2kg 기록해줘"에 `rcd_ymd`를 비워 `missing ["rcdDt"]`가 된 적 있음(2026-11-09 검증, 1/2). 날짜를 말하지 않았으면 서버가 오늘로 채울지 정한다(지금 결정은 "날짜만 오면"만) (LJS). 돌려받은 카드가 있으면 LLM의 "오늘"은 버림(추가-1)
 - 답 없는 질문이 이력에 둘이면 `disable_parallel_tool_use`로도 첫 도구가 이전 질문용(`get_expense_total`, 실측 3/3). 지금 질문만 보게 할지는 tool_eval 문항으로 정한다 (LJS)

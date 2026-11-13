@@ -492,7 +492,7 @@
 - 결과 (2026-11-13): 검증 1회차 통과, 사람 확인. ①~④ 모두 화면 확인(방금 산책 → 오늘·지금 시각, 요약 글·`execute`·취소, 사진 턴 저장·새 방, 안내서 같은 창 모달)
 - 연결 남음: FN-AIM-012-05·10·FN-AIM-013-02 (프론트 연결: 모달 대신 채팅 글·`done.execute` 실행, `image-intent` 응답으로 사진 말풍선, LJS 프론트)
 
-## SCR-AIM-004 대화창 · tool search 전환 (`defer_loading`, tool_eval 5회차, 추가 요청) — 대기
+## SCR-AIM-004 대화창 · tool search 전환 (`defer_loading`, tool_eval 5회차, 추가 요청) — 끝
 - 기능: 도구 고르기 LLM 요청에 Anthropic tool search 도구를 넣고 Java 목록 도구를 `defer_loading`으로 미뤄, 같은 78문항으로 정확도·지연을 다시 잰다. 기준을 넘으면 앱 기본으로 켜고, 못 넘으면 끈 채로 결과만 남긴다. 기능 ID 추가 없음(위 `끝` 절에서 센 기능)
 - 요청: 2026-11-11 LJS (핸드오프 다음에 할 것, tool_eval 4회차 판정)
 - 기다리는 것: 없음
