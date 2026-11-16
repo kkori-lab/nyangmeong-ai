@@ -1,3 +1,4 @@
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, Request, Response, UploadFile
@@ -17,7 +18,10 @@ from app.character.schemas import (
 from app.character.service import BakeQueue, get_bake_queue
 from app.core import response
 from app.core.auth import require_admin, require_member, require_requested_with
+from app.core.backend import external_error
 from app.core.image import MAX_IMAGE_BYTES
+
+logger = logging.getLogger(__name__)
 
 # 캐릭터(/ai/characters)와 관리자 아이템(/ai/items) : 굽기 코드를 같이 써서 한 라우터
 router = APIRouter(prefix="/ai", dependencies=[Depends(require_requested_with)])
@@ -45,8 +49,27 @@ async def create_character(
         queue,
         job,
         image,
+        photo.filename,
     )
     return response.success(CharacterCreateResponse(char_crt_job_sn=job.char_crt_job_sn), 202)
+
+
+# FN-MYP-010-23 : 관리자 무료 재생성. Java가 만든 REGEN 작업 번호만 받고 입력은 Java에서 받음
+@router.post(
+    "/admin/characters/jobs/{char_crt_job_sn}/regenerate", dependencies=[Depends(require_admin)]
+)
+async def regenerate_character(
+    background_tasks: BackgroundTasks,
+    char_crt_job_sn: int,
+    client: Annotated[CharacterClient | None, Depends(get_character_client)],
+    repo: Annotated[CharacterJobRepository, Depends(get_character_job_repository)],
+    queue: Annotated[BakeQueue, Depends(get_bake_queue)],
+) -> JSONResponse:
+    if client is None:
+        logger.error("캐릭터 재생성 불가: 생성기가 아직 연결되지 않았습니다")
+        raise external_error()
+    background_tasks.add_task(service.regenerate_and_report, client, repo, queue, char_crt_job_sn)
+    return response.success(None, 202)
 
 
 @router.post("/characters/{pixel_char_sn}/preview", dependencies=[Depends(require_member)])
