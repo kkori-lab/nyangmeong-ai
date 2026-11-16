@@ -138,14 +138,39 @@ async def create_job(
     return await repo.create_job(pet_sn)
 
 
+async def regenerate_and_report(
+    client: CharacterClient,
+    repo: CharacterJobRepository,
+    queue: BakeQueue,
+    char_crt_job_sn: int,
+) -> None:
+    """FN-MYP-010-23 : 관리자 무료 재생성. 응답 뒤 입력을 받아 생성·보고·굽기"""
+    try:
+        job = await repo.regen_start(char_crt_job_sn)
+    except Exception:
+        # 이미 처리 중(409)·REGEN 작업 아님(404) 등 : 보고할 곳이 없어 Java 시간 초과 배치가 정리
+        logger.exception("재생성 시작 실패: charCrtJobSn=%d", char_crt_job_sn)
+        return
+    try:
+        photo = await repo.fetch_original_photo(char_crt_job_sn)
+    except Exception:
+        logger.exception("재생성 원본 사진 조회 실패: charCrtJobSn=%d", char_crt_job_sn)
+        await _report_failure(repo, job, CharacterFailure.INPUT_ERROR)
+        return
+    # 업로드 때 검증된 원본이라 validate_upload는 다시 돌리지 않음(깨졌으면 생성 오류로 실패 보고)
+    await generate_and_report(client, repo, queue, job, photo)
+
+
 async def generate_and_report(
     client: CharacterClient,
     repo: CharacterJobRepository,
     queue: BakeQueue,
     job: CharacterJob,
     photo: bytes,
+    file_name: str | None = None,
 ) -> None:
-    """FN-MYP-010-09 : 응답 뒤 백그라운드 생성, 결과·상태 Java 보고, 이어서 굽기"""
+    """FN-MYP-010-09 : 응답 뒤 백그라운드 생성, 결과·상태 Java 보고, 이어서 굽기
+    file_name이 있으면(첫 생성) 원본 사진도 success에 실어 무료 재생성 입력으로 남긴다"""
     request = CharacterRequest(photo, job.pet_se_cd, job.vrty_nm, job.colr_nm, job.chrc_cn)
     try:
         character = await client.generate(request)
@@ -157,8 +182,9 @@ async def generate_and_report(
         await _report_failure(repo, job, CharacterFailure.SPEC_MISMATCH)
         return
     try:
+        original = (file_name, photo) if file_name else None
         pixel_char_sn = await repo.report_success(
-            job.char_crt_job_sn, character.image, character.sheet, character.layout
+            job.char_crt_job_sn, character.image, character.sheet, character.layout, original
         )
     except Exception:
         # 보고 실패로 멈춘 작업은 Java가 타임아웃으로 정리

@@ -1,11 +1,10 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-004 대화창 · 한 메시지 여러 일 ① — 끝 (2026-11-13, 검증 통과, 사람 확인). 한 턴 READ 상한 3번, 결과 뒤 고른 이동·사용법은 화면 이동 대신 `done.shortcut` 바로가기·안내서 결과, 사용법을 먼저 골라도 결과 뒤 READ로 함께 물은 기록을 읽음(추가-5). tool_eval 섞인 문항 T79~T84·목록 정답(6회차 `docs/design/tool-calling.md`). `scripts/tool_eval.py`의 목록 정답(`expected_tools`)은 공용 하네스라 커밋에서 뺌
+SCR-MYP-010 픽셀 캐릭터 관리 · 무료 재생성 Python 생성 (FN-MYP-010-23, SCR-ADM-042 공통) — 끝 (2026-11-16, 검증 통과, 사람 확인). `POST /ai/admin/characters/jobs/{sn}/regenerate`(관리자, 202)가 Java `regen-start`·`original-photo`로 입력을 받아 기존 생성·보고·굽기를 재사용. 추가-1 첫 생성 success에 `photo` 파트, 사진 조회 실패 사유 `CHARACTER_INPUT_ERROR`, 추가-2 문서를 백엔드 확정(PR #251)에 맞춤. 러스트 서버 이식은 Python에서 확인한 뒤 따로
 
 ## 다음에 할 것
-- `scripts/tool_eval.py` 공용 하네스 PR (LJS): `tool`에 목록이면 목록 안 도구를 정답으로(`expected_tools`, 2026-11-13). 커밋에서 빼 둠(작업 트리에 남음) — 이것 없이는 T79·T81 목록 정답을 오답으로 셈. 따로 PR
-- 이동 먼저 고른 섞인 메시지 (LJS, 2026-11-13 한 메시지 여러 일 ① 6회차): 첫 고르기가 `navigate`면 LLM 답변 없이 이동으로 끝나 함께 물은 기록을 못 읽음(사용법 먼저는 추가-5로 결과 뒤 도구를 열어 해결). 이동마다 LLM을 한 번 더 부르지 않고 막을 방법(키워드 힌트·질문꼴이면 이동 대신 읽기)을 섞인 문항이 더 새면 본다
+- 연결 남음: FN-MYP-010-23 로컬 화면 확인 (LJS): 관리자 쿠키(mbrSn 2)로 `POST /ai/admin/characters/jobs/{regenJobSn}/regenerate` → 202, 로그 start→사진→생성→보고→굽기, 작업 완료. 2026-11-16 문의 235(회원 1·petSn 1040·pixelCharSn 621)를 CHRC0008로 처리해 `regenJobSn` 810을 만들었으나 regenerate는 안 불렀다(10분 뒤 Java 배치가 실패 처리했을 수 있음). 다시 하려면 문의 처리부터. 621이 `photo` 파트 이전에 만든 캐릭터면 `original-photo` 404라 새로 만든 캐릭터로. 로컬 시험 데이터 정리(백엔드): 문의 235·작업 810·캐릭터 621. 러스트 서버(`nyangmeong-character`)에 재생성 입구를 옮길지는 확인 뒤 결정
 - tool_eval 정답 목록화·겹치는 READ (LJS, 추가-4): 같은 사실을 답하는 READ 둘은 `tool` 목록으로 둘 다 정답(T79·T81부터). T15·T16·T17·T66도 이 기준으로 다시 본다. `get_expense_total`↔`get_expense_statistics`, `list_daily_health_records`↔`get_health_indicators`처럼 겹치는 도구를 합치거나 `skip`할지는 비용·지연(통계는 출력이 큼)으로 백엔드와 정한다 / 4회차 메모: T15·T16·T17 정답이 READ 열기 전 `navigate`라 `get_expense_total`·`list_inspection_values`·`get_points`로, T66 정답(`list_pixel_characters` vs 고른 `list_shop_items`) 확인, T67 "자유게시판 최근 글"이 `navigate`로 감(설명), T03·T05·T08·T09 `search_guide` 화면, T36·T42 범위 밖 거절
 - 한 메시지 여러 명령 ② (LJS·프론트, 계약 변경): 쓰기 확인 카드 여러 개("몸무게 기록하고 일정도 잡아줘"). `done.action` 하나 → 목록, "확인" 한 번에 모두 저장할지 하나씩 물을지·부분 실패 처리 먼저 정함. `docs/api/chat.md` 계약이라 프론트와 함께(AGENTS.md 4번)
 - 대화창 판정 지연 (LJS): tool search를 빼도 T01~T44 판정 지연 중앙값 2,054ms로 기준 1,640ms 초과(5회차 끔). 자주 쓰는 READ만 싣기·search_guide·글 답변 출력 줄이기로 본다

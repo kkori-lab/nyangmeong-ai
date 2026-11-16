@@ -87,6 +87,7 @@ class SavedJob:
     failed_items: set[int] = field(default_factory=set)
     equipped_item_sns: list[int] | None = None
     equipped_image: bytes | None = None
+    original: tuple[str, bytes] | None = None
 
 
 class FakeCharacterJobRepository:
@@ -102,6 +103,26 @@ class FakeCharacterJobRepository:
         self.equip_error: BackendError | None = None
         # 가짜 Java bake-image : itemSn -> 아이템 그림
         self.item_images: dict[int, bytes] = {}
+        # 가짜 Java 재생성(FN-MYP-010-23) : 작업 번호 -> 등록 정보·원본 사진, 오류 흉내
+        self.regen_jobs: dict[int, CharacterJob] = {}
+        self.original_photos: dict[int, bytes] = {}
+        self.regen_start_error: BackendError | None = None
+        self.regen_calls: list[str] = []
+
+    async def regen_start(self, char_crt_job_sn: int) -> CharacterJob:
+        self.regen_calls.append("start")
+        if self.regen_start_error is not None:
+            raise self.regen_start_error
+        job = self.regen_jobs[char_crt_job_sn]
+        self.jobs[job.char_crt_job_sn] = SavedJob(job, 0)
+        return job
+
+    async def fetch_original_photo(self, char_crt_job_sn: int) -> bytes:
+        self.regen_calls.append("photo")
+        photo = self.original_photos.get(char_crt_job_sn)
+        if photo is None:
+            raise BackendError(404, b'{"code":"PIXEL_CHARACTER_NOT_FOUND"}', "application/json", [])
+        return photo
 
     async def create_job(self, pet_sn: int) -> CharacterJob:
         job = CharacterJob(self._next, "PETC0002" if pet_sn % 2 == 0 else "PETC0001")
@@ -111,10 +132,16 @@ class FakeCharacterJobRepository:
         return job
 
     async def report_success(
-        self, char_crt_job_sn: int, image: bytes, sheet: bytes, layout: Layout | None
+        self,
+        char_crt_job_sn: int,
+        image: bytes,
+        sheet: bytes,
+        layout: Layout | None,
+        original: tuple[str, bytes] | None = None,
     ) -> int:
         saved = self.jobs[char_crt_job_sn]
         saved.image, saved.sheet, saved.layout = image, sheet, layout
+        saved.original = original
         logger.info(
             "가짜 Java 캐릭터 성공 보고: charCrtJobSn=%d, %d바이트", char_crt_job_sn, len(image)
         )
