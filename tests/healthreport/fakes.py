@@ -74,5 +74,5 @@ class FakeGenerator:
             raise HealthReportApiError("boom")
         return ReportOutput(
             title="물을 조금 더 마시면 좋아요",
-            tips=["음수량이 평소보다 적어요", "ALT 수치는 수의사와 상담해 보세요"],
+            tips=["수의사 상담 권해요", "음수량이 줄었어요"],
         )
