@@ -1,10 +1,10 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-MYP-010 픽셀 캐릭터 관리 · 무료 재생성 Python 생성 (FN-MYP-010-23, SCR-ADM-042 공통) — 끝 (2026-11-16, 검증 통과, 사람 확인). `POST /ai/admin/characters/jobs/{sn}/regenerate`(관리자, 202)가 Java `regen-start`·`original-photo`로 입력을 받아 기존 생성·보고·굽기를 재사용. 추가-1 첫 생성 success에 `photo` 파트, 사진 조회 실패 사유 `CHARACTER_INPUT_ERROR`, 추가-2 문서를 백엔드 확정(PR #251)에 맞춤. 러스트 서버 이식은 Python에서 확인한 뒤 따로
+SCR-MYP-010 픽셀 캐릭터 관리 · 무료 재생성 로컬 화면 확인 — 끝 (2026-11-17, 검증 확인 못 함 있음 1회차, 실제 흐름 확인은 러스트 서버로 넘김)
 
 ## 다음에 할 것
-- 연결 남음: FN-MYP-010-23 로컬 화면 확인 (LJS): 관리자 쿠키(mbrSn 2)로 `POST /ai/admin/characters/jobs/{regenJobSn}/regenerate` → 202, 로그 start→사진→생성→보고→굽기, 작업 완료. 2026-11-16 문의 235(회원 1·petSn 1040·pixelCharSn 621)를 CHRC0008로 처리해 `regenJobSn` 810을 만들었으나 regenerate는 안 불렀다(10분 뒤 Java 배치가 실패 처리했을 수 있음). 다시 하려면 문의 처리부터. 621이 `photo` 파트 이전에 만든 캐릭터면 `original-photo` 404라 새로 만든 캐릭터로. 로컬 시험 데이터 정리(백엔드): 문의 235·작업 810·캐릭터 621. 러스트 서버(`nyangmeong-character`)에 재생성 입구를 옮길지는 확인 뒤 결정
+- 연결 남음: FN-MYP-010-23 무료 재생성 실제 흐름 확인 (LJS, 러스트 서버 `nyangmeong-character`에서 확인하기로 2026-11-17 결정): 관리자 쿠키로 regenerate → 202, 로그 regen-start→원본 사진→생성→success→굽기, 작업 완료·이미지 바뀜, 같은 번호 재호출은 409 로그만, 회원 쿠키 403. 원본 사진 보존(PR #84) 이후 만든 캐릭터로. 이미지 생성 크레딧 듦. 로컬 시험 데이터 정리(백엔드): 문의 235·작업 810·캐릭터 621
 - tool_eval 정답 목록화·겹치는 READ (LJS, 추가-4): 같은 사실을 답하는 READ 둘은 `tool` 목록으로 둘 다 정답(T79·T81부터). T15·T16·T17·T66도 이 기준으로 다시 본다. `get_expense_total`↔`get_expense_statistics`, `list_daily_health_records`↔`get_health_indicators`처럼 겹치는 도구를 합치거나 `skip`할지는 비용·지연(통계는 출력이 큼)으로 백엔드와 정한다 / 4회차 메모: T15·T16·T17 정답이 READ 열기 전 `navigate`라 `get_expense_total`·`list_inspection_values`·`get_points`로, T66 정답(`list_pixel_characters` vs 고른 `list_shop_items`) 확인, T67 "자유게시판 최근 글"이 `navigate`로 감(설명), T03·T05·T08·T09 `search_guide` 화면, T36·T42 범위 밖 거절
 - 한 메시지 여러 명령 ② (LJS·프론트, 계약 변경): 쓰기 확인 카드 여러 개("몸무게 기록하고 일정도 잡아줘"). `done.action` 하나 → 목록, "확인" 한 번에 모두 저장할지 하나씩 물을지·부분 실패 처리 먼저 정함. `docs/api/chat.md` 계약이라 프론트와 함께(AGENTS.md 4번)
 - 대화창 판정 지연 (LJS): tool search를 빼도 T01~T44 판정 지연 중앙값 2,054ms로 기준 1,640ms 초과(5회차 끔). 자주 쓰는 READ만 싣기·search_guide·글 답변 출력 줄이기로 본다
@@ -42,7 +42,7 @@ SCR-MYP-010 픽셀 캐릭터 관리 · 무료 재생성 Python 생성 (FN-MYP-01
 - 중복 분석 차단(`_in_progress`)은 프로세스 메모리라 워커 1개 전제인데 배포 서버는 uvicorn `--workers 4`(2026-11-08 실측) — 전제가 깨져 있다. 여러 워커면 Java 영수증 상태로 옮긴다. 워커마다 기동 때 도구 목록을 따로 받는다
 - OCR (LJS): 출력 모양(`app/ocr/clients.py` `ReceiptOutput`)에 필드를 더하면 Anthropic이 400 "Schema is too complex"로 거절할 수 있다(2026-11-03 실측) — 더하면 실제 영수증으로 돌려 본다. 인식률은 실제 영수증 1건으로 맞춤(아조딜 `mdcnUsage` null), 2마리 청구서·다른 병원으로 더(샘플 10건, 사진은 git 제외). `docs/api/internal.md` OCR mock은 고정 응답 1개. 결제 줄 금액(`app/ocr/rules.py` `paid_amount`)은 "364, 000"처럼 쉼표 뒤가 띄어지면 못 읽는다(그 줄을 건너뛰고 LLM 값이나 다른 결제 줄을 씀) — 실제 영수증에서 보이면 고친다
 - 개발 DB 정리 (LJS 백엔드): 회원 1·반려동물 2의 RECPT 501·502·505·508·514·570·571(2026-11-11 결제 금액 확인)와 원본 파일. 로컬 시험 데이터: 관리자 mbrSn 2(601 주양육자)의 petSn 1001 "시험복실"·pixelCharSn 601. READ 확인용은 mbrSn 1(`dev-tokens`): petSn 2에 검진 `ckupRcdSn` 418, 2026-10 지출 45건 중 petSn 1이 8건. 2026-11-09 검증: mbrSn 1의 petSn 14 "코코", 반려동물 8마리
-- 캐릭터 (LJS): `bake-hints` 그림 형식·10MB 오류는 `FILE_TYPE_NOT_ALLOWED`·`FILE_SIZE_EXCEEDED`(기획은 `INVALID_REQUEST`). 옛 흐름 캐릭터는 맨몸 시트가 없어 `/preview` 404 — 다시 만들어야 하고 무료 재생성(FN-MYP-010-23)은 SCR-ADM-042 전에 계약(LJS 백엔드). 신발 공통코드 `MYPC0006`·시드 신발 4개 정리(DB에서만)
+- 캐릭터 (LJS): `bake-hints` 그림 형식·10MB 오류는 `FILE_TYPE_NOT_ALLOWED`·`FILE_SIZE_EXCEEDED`(기획은 `INVALID_REQUEST`). 옛 흐름 캐릭터는 맨몸 시트가 없어 `/preview` 404 — 다시 만들어야 함. 신발 공통코드 `MYPC0006`·시드 신발 4개 정리(DB에서만)
 - 굽기 (LJS): 26개 실측 104.2초(동시 10), 동시 13 미측정, 합성 1.4초는 시험 그림 값. 후보는 전용 스레드 풀·429 재시도·OpenAI 한도·품질 `low`. 켜기는 팀 비용 결정(캐릭터당 약 $1.64)·Java 시트 저장 뒤, access_token(30분) 만료 대책 먼저(회원 캐릭터 생성 뒤 굽기)
 - 캐릭터 위험 (LJS): 고양이 꼬리 경계선·다리 사이 분홍 점 원인 미확인, 정렬 2단계 탐색은 촘촘한 무늬에서 빗나갈 수 있음, `dog_fluffy` 512 재검출이 눈 아닌 쌍을 잡음(배치 샘플 10건은 맞음, 검은 털 눈 높이 미측정). 약한 테스트: EXIF 테스트 입력에 EXIF 없음, 고양이 분기는 가짜가 짝수 `petSn`일 때만 `PETC0002`
 - 서비스 안내 후속 (LJS): 놓침 R13·R15·R24·R36, 로그인·비밀번호 찾기는 안내서 밖(R18), 2회차 답변 정확도 사람 채점 안 함, 실제 대화 로그 평가 아직
