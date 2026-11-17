@@ -117,7 +117,7 @@ def test_기록_하나가_바뀌면_다시_생성하고_새_해시로_저장(cli
     assert body["petSn"] == 3
     assert body["baseYmd"] == "2026-11-04"
     assert body["rptTtl"] == "물을 조금 더 마시면 좋아요"
-    assert body["tips"] == ["음수량이 평소보다 적어요", "ALT 수치는 수의사와 상담해 보세요"]
+    assert body["tips"] == ["수의사 상담 권해요", "음수량이 줄었어요"]
     assert body["notice"] == rules.NOTICE
     assert body["staleYn"] is False
     assert "crtDt" in body
