@@ -140,6 +140,17 @@ def is_small_talk(text: str) -> bool:
     return rest == "" or _SMALL_TALK.fullmatch(rest) is not None
 
 
+# 이동 먼저 고른 섞인 메시지(2026-11-17) : 이어 주는 이동 말 뒤에 다른 일이 이어지는지
+_CHAIN_AFTER_MOVE = re.compile(r"(열어서|열고|가서|가고|들어가서|이동해서|이동하고|띄워서)(.*)")
+_CHAIN_REST = re.compile(r"[\w가-힣]")
+
+
+def chains_after_move(text: str) -> bool:
+    # "가계부 열어서 지출 알려 줘"는 참, "가계부 열어 줘"·"가계부 열어서"는 거짓
+    match = _CHAIN_AFTER_MOVE.search(text)
+    return match is not None and _CHAIN_REST.search(match.group(2)) is not None
+
+
 # 추가 요청(2026-11-09) : "<질문>" 같은 자리 표시·기호뿐인 글은 도구 고르기 없이 unclear 안내
 _PLACEHOLDER = re.compile(r"<[^<>]*>|[\W_]*")
 

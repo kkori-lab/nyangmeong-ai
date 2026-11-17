@@ -132,6 +132,8 @@ ROUTE_SHOWN = (
     "화면을 옮기지 않음. 답 아래에 '{name}' 바로가기 버튼을 보여 줌. "
     "답 끝에 그 버튼으로 갈 수 있다고 한 문장으로 안내한다."
 )
+# 이동 먼저 고른 섞인 메시지에서 답변이 0자일 때 : 화면 바로가기 안내
+ROUTE_EMPTY_MESSAGE = "'{name}' 바로가기를 눌러 주세요."
 ACTION_SHOWN = (
     "확인 카드를 만듦(아직 저장 안 됨). 카드 내용: {summary}. "
     "회원이 대화로 '등록해 줘'라고 말해야 저장된다. 카드 내용을 그대로 보여 주고, "
@@ -309,7 +311,10 @@ def _tool_judged(
         logger.info("도구 인자 거부: %s", call.name)
         return Judged(Intent(kind=IntentKind.FALLBACK))
     if call.name == tools.NAVIGATE:
-        return Judged(tools.route_row(call).to_intent())
+        row = tools.route_row(call)
+        if row is not None and read is not None and rules.chains_after_move(text):
+            return _route_mixed(text, context, agent, decision, row, max_tokens, today, read)
+        return Judged(row.to_intent())
     if call.name == tools.DECLINE:
         return Judged(Intent(kind=IntentKind.FALLBACK), out_of_scope=not call.args.unclear)
     card = tools.card_entry(call.name)
@@ -390,6 +395,55 @@ def _tool_judged(
         notice_reads=notice_reads,
         follow_shortcuts=shortcuts,
     )
+
+
+def _route_mixed(
+    text: str,
+    context: list[dict],
+    agent: ToolAgent,
+    decision: ToolDecision,
+    row: rules.RouteRow,
+    max_tokens: int,
+    today: date,
+    read: "ReadDeps",
+) -> Judged:
+    # 이동 먼저 고른 섞인 메시지(2026-11-17) : 이동 뒤에 다른 일을 이어 말하면 화면을 옮기지 않고
+    # 바로가기를 붙인 답변으로, 함께 물은 기록·사용법은 결과 뒤 도구로 (사용법 경로와 같은 규칙)
+    # 고지는 결과 뒤 고지 READ가 성공했을 때만. 바로가기는 고른 화면이 앞(결과 뒤 이동이면 그 화면)
+    logger.info("이동 뒤 이어 말함: 바로가기 답변 %s", row.scr_id)
+    intent = row.to_intent()
+    cards: list[ActionCard] = []
+    notice_reads: set[str] = set()
+    shortcuts: list[Intent] = [intent]
+    follow = _Follow(text, read, cards, notice_reads, shortcuts)
+    answer = agent.answer(
+        context, decision, ROUTE_SHOWN.format(name=row.name), max_tokens, today, follow
+    )
+    return Judged(
+        Intent(kind=IntentKind.SEARCH),
+        intent,
+        stream=_or_fixed(answer, ROUTE_EMPTY_MESSAGE.format(name=row.name), cards),
+        cards=cards,
+        notice_reads=notice_reads,
+        follow_shortcuts=shortcuts,
+    )
+
+
+async def _or_fixed(
+    answer: AsyncIterator[str], empty: str, cards: list[ActionCard]
+) -> AsyncIterator[str]:
+    # 답변이 0자면 고정 글(카드가 있으면 카드 확인 안내)
+    produced = False
+    try:
+        async for chunk in answer:
+            if chunk:
+                produced = True
+            yield chunk
+    finally:
+        await answer.aclose()
+    if not produced:
+        logger.info("이동 섞인 답변 0자: 바로가기 안내로")
+        yield READ_EMPTY_CARD_MESSAGE if cards else empty
 
 
 @dataclass(frozen=True)
