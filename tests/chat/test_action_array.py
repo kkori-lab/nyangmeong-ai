@@ -248,7 +248,7 @@ def test_지출_등록_요청은_줄_하나와_입력_방법을_카드에_실어
     assert lines["minItems"] == 1
     assert lines["items"]["idmptDmndId"]["generated"] == "uuid"
     assert action["petChoices"] == []
-    assert java.ai_messages(room) == []
+    assert len(java.ai_messages(room)) == 1  # 카드 요약 글 (2026-11-13)
 
 
 def test_지출_등록은_문장_속_반려동물_이름이_하나면_줄의_petSn으로_넣어야_한다(client, java):
@@ -325,7 +325,7 @@ def test_관찰_항목을_읽은_뒤_고른_관찰_기록은_목록의_번호와
 
     evs = events(send(client, room, "초코 등에 난 혹 오늘 1.2cm야 기록해 줘"))
 
-    assert agent.results[1] == ACTION_SHOWN
+    assert agent.results[1].startswith(ACTION_SHOWN.split("{summary}")[0])
     action = evs[-1][1]["action"]
     assert action["tool"] == "draft_observation_cycle"
     assert action["call"] == {

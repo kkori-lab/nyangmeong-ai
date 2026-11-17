@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import time
 from collections import deque
@@ -16,7 +17,7 @@ from app.character.repository import (
 )
 from app.character.rules import matches_spec
 from app.character.schemas import PetSeCd
-from app.core.backend import external_error
+from app.core.backend import BackendError, external_error
 from app.core.image import validate_upload
 from app.core.response import AppError
 
@@ -137,15 +138,39 @@ async def create_job(
     return await repo.create_job(pet_sn)
 
 
+async def regenerate_and_report(
+    client: CharacterClient,
+    repo: CharacterJobRepository,
+    queue: BakeQueue,
+    char_crt_job_sn: int,
+) -> None:
+    """FN-MYP-010-23 : 관리자 무료 재생성. 응답 뒤 입력을 받아 생성·보고·굽기"""
+    try:
+        job = await repo.regen_start(char_crt_job_sn)
+    except Exception:
+        # 이미 처리 중(409)·REGEN 작업 아님(404) 등 : 보고할 곳이 없어 Java 시간 초과 배치가 정리
+        logger.exception("재생성 시작 실패: charCrtJobSn=%d", char_crt_job_sn)
+        return
+    try:
+        photo = await repo.fetch_original_photo(char_crt_job_sn)
+    except Exception:
+        logger.exception("재생성 원본 사진 조회 실패: charCrtJobSn=%d", char_crt_job_sn)
+        await _report_failure(repo, job, CharacterFailure.INPUT_ERROR)
+        return
+    # 업로드 때 검증된 원본이라 validate_upload는 다시 돌리지 않음(깨졌으면 생성 오류로 실패 보고)
+    await generate_and_report(client, repo, queue, job, photo)
+
+
 async def generate_and_report(
     client: CharacterClient,
     repo: CharacterJobRepository,
     queue: BakeQueue,
     job: CharacterJob,
     photo: bytes,
-    bake_enabled: bool,
+    file_name: str | None = None,
 ) -> None:
-    """FN-MYP-010-09 : 응답 뒤 백그라운드 생성, 결과·상태 Java 보고, 켜져 있으면 이어서 굽기"""
+    """FN-MYP-010-09 : 응답 뒤 백그라운드 생성, 결과·상태 Java 보고, 이어서 굽기
+    file_name이 있으면(첫 생성) 원본 사진도 success에 실어 무료 재생성 입력으로 남긴다"""
     request = CharacterRequest(photo, job.pet_se_cd, job.vrty_nm, job.colr_nm, job.chrc_cn)
     try:
         character = await client.generate(request)
@@ -157,14 +182,13 @@ async def generate_and_report(
         await _report_failure(repo, job, CharacterFailure.SPEC_MISMATCH)
         return
     try:
+        original = (file_name, photo) if file_name else None
         pixel_char_sn = await repo.report_success(
-            job.char_crt_job_sn, character.image, character.sheet, character.layout
+            job.char_crt_job_sn, character.image, character.sheet, character.layout, original
         )
     except Exception:
         # 보고 실패로 멈춘 작업은 Java가 타임아웃으로 정리
         logger.exception("캐릭터 성공 보고 실패: charCrtJobSn=%d", job.char_crt_job_sn)
-        return
-    if not bake_enabled:
         return
     # FN-MYP-011-01 : 사자마자 입도록 전 아이템 미리 굽기
     try:
@@ -198,7 +222,15 @@ async def _bake_one(task: BakeTask) -> BakeOutcome:
     if task.sheet is None or task.pet_se_cd is None:
         try:
             found = await task.repo.find_sheets(task.pixel_char_sn, [])
-        except Exception:
+        except Exception as exc:
+            if _sheet_file_missing(exc):
+                # 파일이 사라진 캐릭터 : 실패 표시로 Java 목록에서 빼야 다음 묶음으로 넘어감
+                logger.warning(
+                    "맨몸 시트 파일 없음, 굽기 실패 표시: %d, itemSn=%d",
+                    task.pixel_char_sn,
+                    task.item_sn,
+                )
+                return await _mark_bake_failed(task)
             logger.exception("굽기용 맨몸 시트 조회 실패: %d", task.pixel_char_sn)
             return None
         task = replace(task, sheet=found.sheet, pet_se_cd=found.pet_se_cd)
@@ -224,13 +256,33 @@ async def _bake_one(task: BakeTask) -> BakeOutcome:
         return None
 
 
+def _sheet_file_missing(exc: Exception) -> bool:
+    # 403·그 밖의 4xx·502는 일시 오류일 수 있어 남겨 둔다
+    if not isinstance(exc, BackendError) or exc.status_code != 404:
+        return False
+    try:
+        return json.loads(exc.body).get("code") == "FILE_NOT_FOUND"
+    except (ValueError, AttributeError):
+        return False
+
+
+async def _mark_bake_failed(task: BakeTask) -> BakeOutcome:
+    try:
+        await task.repo.report_bake_failure(task.pixel_char_sn, task.item_sn)
+    except Exception:
+        logger.exception("굽기 실패 표시 실패: %d, itemSn=%d", task.pixel_char_sn, task.item_sn)
+        return None
+    return "failed"
+
+
 async def _draw(task: BakeTask) -> tuple[bytes | None, int]:
     sheet, pet_se_cd = task.sheet, task.pet_se_cd
     if sheet is None or pet_se_cd is None:
         return None, 0
     for attempt in range(1, BAKE_ATTEMPTS + 1):
         try:
-            return await _bake_once(task.client, sheet, pet_se_cd, task.item), attempt
+            worn = await _bake_once(task.client, task.repo, sheet, pet_se_cd, task.item)
+            return worn, attempt
         except Exception as exc:
             # 큐 일꾼 유지 : 한 아이템 실패가 나머지 굽기를 막지 않게
             logger.warning("굽기 시도 실패: itemSn=%d, %s", task.item_sn, type(exc).__name__)
@@ -238,10 +290,19 @@ async def _draw(task: BakeTask) -> tuple[bytes | None, int]:
 
 
 async def _bake_once(
-    client: CharacterClient, sheet: bytes, pet_se_cd: PetSeCd, item: engine.BakeItem
+    client: CharacterClient,
+    repo: CharacterJobRepository,
+    sheet: bytes,
+    pet_se_cd: PetSeCd,
+    item: engine.BakeItem,
 ) -> bytes:
     source = await asyncio.to_thread(bake.bake_source, sheet, item.regn_cd)
-    worn = await client.bake(source, pet_se_cd, item)
+    if not item.by_image:
+        worn = await client.bake(source, pet_se_cd, item)
+    else:
+        # 그림 참고 굽기 : 받기 실패도 굽기 실패와 같이 다시 시도
+        item_image = await repo.fetch_item_image(item.item_sn)
+        worn = await client.bake(source, pet_se_cd, item, item_image)
     await asyncio.to_thread(bake.validate, sheet, worn, item.regn_cd)
     return worn
 
@@ -252,7 +313,6 @@ async def preview(
     queue: BakeQueue,
     pixel_char_sn: int,
     item_sns: Sequence[int],
-    bake_enabled: bool,
 ) -> bytes | None:
     """FN-MYP-011-01·FN-MYP-010-13 : 합성 PNG, 아직 안 구운 아이템이 있으면 None"""
     targets = await repo.list_bake_items()
@@ -263,16 +323,13 @@ async def preview(
         raise _preview_error()
     missing = [sn for sn in item_sns if sn not in found.sheets]
     if missing:
-        if bake_enabled:
-            if client is None:
-                logger.error("미리보기 불가: 생성기가 아직 연결되지 않았습니다")
-                raise external_error()
-            for sn in reversed(missing):
-                queue.put_first(
-                    BakeTask(
-                        client, repo, pixel_char_sn, sn, chosen[sn], found.sheet, found.pet_se_cd
-                    )
-                )
+        if client is None:
+            logger.error("미리보기 불가: 생성기가 아직 연결되지 않았습니다")
+            raise external_error()
+        for sn in reversed(missing):
+            queue.put_first(
+                BakeTask(client, repo, pixel_char_sn, sn, chosen[sn], found.sheet, found.pet_se_cd)
+            )
         return None
     return await _render(found, chosen)
 
@@ -283,10 +340,9 @@ async def save_equipped_image(
     queue: BakeQueue,
     pixel_char_sn: int,
     item_sns: Sequence[int],
-    bake_enabled: bool,
 ) -> bool:
     """FN-MYP-010-16·13 : [장착] 확정 뒤 착용 모습을 Java에 저장, 안 구운 아이템이 있으면 False"""
-    image = await preview(client, repo, queue, pixel_char_sn, item_sns, bake_enabled)
+    image = await preview(client, repo, queue, pixel_char_sn, item_sns)
     if image is None:
         return False
     await repo.save_equipped_image(pixel_char_sn, item_sns, image)
@@ -375,7 +431,7 @@ async def trial_preview(
     found = await repo.find_sheets(pixel_char_sn, [])
     item = engine.BakeItem(0, regn_cd, bake_hint)
     try:
-        worn = await _bake_once(client, found.sheet, found.pet_se_cd, item)
+        worn = await _bake_once(client, repo, found.sheet, found.pet_se_cd, item)
     except Exception as exc:
         logger.error("시험 굽기 실패: %s", type(exc).__name__)
         raise _preview_error() from exc
@@ -394,15 +450,12 @@ async def bake_item_batch(
     repo: CharacterJobRepository,
     queue: BakeQueue,
     item_sn: int,
-    bake_enabled: bool,
 ) -> ItemBakeResult:
     """FN-ADM-070-02 : 안 구운 캐릭터 한 묶음을 관리자 쿠키로 굽고 기다림 -> 결과 수
 
     - 구웠거나 실패 표시한 캐릭터는 Java 목록에서 빠짐 : 매번 첫 페이지만 읽음
     - 관리자 프론트가 last가 될 때까지 다시 부름 : 요청마다 새 쿠키
     """
-    if not bake_enabled:
-        raise AppError("BAKE_DISABLED", 409, "아이템 굽기가 꺼져 있습니다.")
     if client is None:
         logger.error("전체 굽기 불가: 생성기가 아직 연결되지 않았습니다")
         raise external_error()

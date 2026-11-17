@@ -88,9 +88,8 @@ def repo() -> FakeCharacterJobRepository:
     return fake
 
 
-def make_client(monkeypatch, repo, generator, enabled: bool = True) -> TestClient:
+def make_client(monkeypatch, repo, generator) -> TestClient:
     monkeypatch.setenv("BACKEND_BASE_URL", "http://backend.test")
-    monkeypatch.setenv("CHARACTER_BAKE_ENABLED", "true" if enabled else "false")
     get_settings.cache_clear()
     app = create_app()
     backend = httpx2.AsyncClient(transport=httpx2.MockTransport(fake_auth_check))
@@ -190,7 +189,7 @@ def post_trial(client: TestClient, headers=ADMIN, **body):
 
 def test_trial_preview_지시대로_한_번_구워_입힌_512_PNG_저장하지_않는다(monkeypatch, repo) -> None:
     generator = BakeClient()
-    res = post_trial(make_client(monkeypatch, repo, generator, enabled=False))
+    res = post_trial(make_client(monkeypatch, repo, generator))
     assert res.status_code == 200
     assert res.headers["content-type"] == "image/png"
     assert matches_spec(res.content)
@@ -277,14 +276,6 @@ def test_bake_대상이_없으면_0과_lastYn(monkeypatch, repo) -> None:
     assert len(generator.calls) == 3
 
 
-def test_bake_굽기가_꺼져_있으면_409이고_이미지_API를_부르지_않는다(monkeypatch, repo) -> None:
-    generator = BakeClient()
-    res = post_bake(make_client(monkeypatch, repo, generator, enabled=False))
-    assert res.status_code == 409
-    assert res.json()["code"] == "BAKE_DISABLED"
-    assert generator.calls == []
-
-
 def test_bake_굽기_대상_아이템이_아니면_400(monkeypatch, repo) -> None:
     generator = BakeClient()
     res = post_bake(make_client(monkeypatch, repo, generator), item_sn=999)
@@ -336,6 +327,39 @@ def test_bake_묶음을_하나도_처리하지_못하면_502(monkeypatch, repo) 
     assert generator.calls == []
 
 
+def _sheet_files_missing_for(repo, broken: set[int]) -> None:
+    """Java sheet-files 404 FILE_NOT_FOUND : DB 행은 있고 디스크에 파일 없음"""
+    original = repo.find_sheets
+
+    async def find_sheets(pixel_char_sn, item_sns):
+        if pixel_char_sn in broken:
+            raise BackendError(404, b'{"code":"FILE_NOT_FOUND"}', "application/json", [])
+        return await original(pixel_char_sn, item_sns)
+
+    repo.find_sheets = find_sheets
+
+
+def test_bake_맨몸_시트_파일이_없으면_굽기_실패로_표시하고_넘어가야_한다(monkeypatch, repo) -> None:
+    _sheet_files_missing_for(repo, {2})
+    generator = BakeClient()
+    res = post_bake(make_client(monkeypatch, repo, generator))
+    assert res.status_code == 200
+    assert res.json()["data"] == {"itemSn": SWEATER, "bakedCnt": 2, "failedCnt": 1, "lastYn": True}
+    assert len(generator.calls) == 2
+    assert SWEATER in repo.jobs[2].failed_items
+    assert SWEATER not in repo.jobs[2].item_sheets
+
+
+def test_bake_묶음_전부_시트_파일이_없으면_502_대신_실패로_세야_한다(monkeypatch, repo) -> None:
+    _sheet_files_missing_for(repo, {1, 2, 3})
+    generator = BakeClient()
+    res = post_bake(make_client(monkeypatch, repo, generator))
+    assert res.status_code == 200
+    assert res.json()["data"] == {"itemSn": SWEATER, "bakedCnt": 0, "failedCnt": 3, "lastYn": True}
+    assert generator.calls == []
+    assert all(SWEATER in saved.failed_items for saved in repo.jobs.values())
+
+
 def test_bake_대상_목록의_Java_4xx는_그대로(monkeypatch, repo) -> None:
     async def list_bake_targets(item_sn):
         raise BackendError(404, b'{"code":"ITEM_NOT_FOUND"}', "application/json", [])
@@ -361,7 +385,7 @@ def test_bake_회원_미리보기가_먼저_굽고_같은_키는_다시_굽지_�
     preview = BakeTask(generator, repo, 3, SWEATER, fake_item("green-sweater"), sheet(), "PETC0001")
 
     async def scenario():
-        batch = asyncio.create_task(service.bake_item_batch(generator, repo, queue, SWEATER, True))
+        batch = asyncio.create_task(service.bake_item_batch(generator, repo, queue, SWEATER))
         await asyncio.sleep(0)
         queue.put_first(preview)
         return await batch
@@ -472,7 +496,15 @@ def test_bake_Java_호출에_요청의_관리자_쿠키가_실린다(monkeypatch
             return fake_auth_check(request)
         seen.append(request)
         if path.endswith("/bake-items"):
-            items = [{"itemSn": SWEATER, "regnCd": "MYPC0004", "bakeHint": HINT}]
+            items = [
+                {
+                    "itemSn": SWEATER,
+                    "regnCd": "MYPC0004",
+                    "bakeHint": HINT,
+                    "bakeImgRefYn": False,
+                    "atchFileSn": 31,
+                }
+            ]
             return httpx2.Response(200, json={"data": items})
         if path.endswith("/bake-targets"):
             return httpx2.Response(200, json={"data": {"pixelCharSns": [5], "last": True}})
@@ -491,7 +523,6 @@ def test_bake_Java_호출에_요청의_관리자_쿠키가_실린다(monkeypatch
         return httpx2.Response(200, json={"data": None})
 
     monkeypatch.setenv("BACKEND_BASE_URL", "http://backend.test")
-    monkeypatch.setenv("CHARACTER_BAKE_ENABLED", "true")
     get_settings.cache_clear()
     app = create_app()
     backend = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))

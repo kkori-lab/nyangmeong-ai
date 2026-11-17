@@ -237,6 +237,8 @@ class AnswerDone(_Camel):
     card: RegisterCard | None = None
     # ACTION : 확인 카드. READ 결과를 본 뒤 고른 쓰기 도구면 SEARCH 답변에도 붙음
     action: ActionCard | None = None
+    # 돌려받은 카드 + 확인 말("등록해 줘") : React가 action의 call을 바로 실행 (2026-11-13)
+    execute: bool = False
 
 
 class StreamError(_Camel):
@@ -300,3 +302,12 @@ class ImageIntentKind(StrEnum):
     MEDICAL_RECEIPT = "MEDICAL_RECEIPT"  # 동물병원 영수증 -> 영수증 분석
     EXPENSE_RECEIPT = "EXPENSE_RECEIPT"  # 그 밖의 영수증 -> 가계부
     ASK = "ASK"  # 모름 -> React가 칩으로 되물음
+
+
+class ImageIntentResult(_Camel):
+    """POST /ai/image-intent 응답 : 판단 + 사진 턴을 저장한 방·메시지 (2026-11-13)
+    - 방 번호를 안 주면 Python이 방을 만듦(메인 첫 사진). messages는 저장 순서"""
+
+    kind: ImageIntentKind
+    ai_cnvrs_room_sn: int
+    messages: list[ConversationMessage]

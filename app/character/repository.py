@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -20,6 +21,8 @@ from app.core.backend import (
 )
 from app.core.config import Settings, get_settings
 
+logger = logging.getLogger(__name__)
+
 # Java 캐릭터 내부 API (docs/api/internal.md "Python → Java")
 CHARACTERS_PATH = "/internal/ai/characters"
 JOBS_PATH = f"{CHARACTERS_PATH}/jobs"
@@ -33,6 +36,7 @@ class CharacterFailure(StrEnum):
     # 실패 사유 : Java CHAR_CRT_JOB 실패 사유로 저장
     API_ERROR = "CHARACTER_API_ERROR"  # 생성기 오류
     SPEC_MISMATCH = "CHARACTER_SPEC_MISMATCH"  # 512×512 규격 밖
+    INPUT_ERROR = "CHARACTER_INPUT_ERROR"  # 재생성 원본 사진을 받지 못함
 
 
 @dataclass(frozen=True)
@@ -60,13 +64,24 @@ class CharacterSheets:
 class CharacterJobRepository(Protocol):
     async def create_job(self, pet_sn: int) -> CharacterJob: ...
 
+    async def regen_start(self, char_crt_job_sn: int) -> CharacterJob: ...
+
+    async def fetch_original_photo(self, char_crt_job_sn: int) -> bytes: ...
+
     async def report_success(
-        self, char_crt_job_sn: int, image: bytes, sheet: bytes, layout: Layout | None
+        self,
+        char_crt_job_sn: int,
+        image: bytes,
+        sheet: bytes,
+        layout: Layout | None,
+        original: tuple[str, bytes] | None = None,
     ) -> int: ...
 
     async def report_failure(self, char_crt_job_sn: int, reason: CharacterFailure) -> None: ...
 
     async def list_bake_items(self) -> dict[int, engine.BakeItem]: ...
+
+    async def fetch_item_image(self, item_sn: int) -> bytes: ...
 
     async def list_bake_targets(self, item_sn: int) -> "BakeTargetPage": ...
 
@@ -96,7 +111,8 @@ class _SuccessResponse(BaseModel):
 class _BakeItem(BaseModel):
     item_sn: int = Field(alias="itemSn")
     regn_cd: str = Field(alias="regnCd")
-    bake_hint: str = Field(alias="bakeHint", min_length=1)
+    bake_hint: str | None = Field(default=None, alias="bakeHint", min_length=1)
+    by_image: bool = Field(alias="bakeImgRefYn")
 
 
 class BakeTargetPage(BaseModel):
@@ -125,6 +141,12 @@ def _png(name: str, content: bytes) -> tuple[str, bytes, str]:
     return name, content, "image/png"
 
 
+def _photo_type(file_name: str) -> str:
+    # Java가 확장자와 내용을 맞춰 보므로 Content-Type은 확장자를 따름
+    extension = file_name.rpartition(".")[2].lower()
+    return {"png": "image/png", "webp": "image/webp"}.get(extension, "image/jpeg")
+
+
 class JavaCharacterJobRepository:
     # 회원 판정은 Java(브라우저 Cookie) : 4xx 그대로 전달, 연결 실패·5xx·응답 모양 불일치는 502
     # 응답 뒤 호출도 요청에서 복사해 둔 쿠키를 쓴다 : 쿠키가 만료되면 Java가 401 (보고 실패로 남음)
@@ -151,10 +173,37 @@ class JavaCharacterJobRepository:
             job.char_crt_job_sn, job.pet_se_cd, job.vrty_nm, job.colr_nm, job.chrc_cn
         )
 
+    async def regen_start(self, char_crt_job_sn: int) -> CharacterJob:
+        # FN-MYP-010-23 : 관리자 무료 재생성. 작업을 CREATING으로 바꾸고 등록 정보를 받음
+        # (REGEN 작업·REQUESTED 판정은 Java, 이미 처리 중이면 409 ALREADY_PROCESSED)
+        data = await self._call("POST", f"{JOBS_PATH}/{char_crt_job_sn}/regen-start")
+        try:
+            job = _JobResponse.model_validate(data)
+        except ValidationError:
+            raise external_error() from None
+        return CharacterJob(
+            job.char_crt_job_sn, job.pet_se_cd, job.vrty_nm, job.colr_nm, job.chrc_cn
+        )
+
+    async def fetch_original_photo(self, char_crt_job_sn: int) -> bytes:
+        return await fetch_backend_bytes(
+            self._client,
+            self._settings,
+            f"{JOBS_PATH}/{char_crt_job_sn}/original-photo",
+            headers=self._headers,
+            timeout=SHEET_TIMEOUT_SEC,
+        )
+
     async def report_success(
-        self, char_crt_job_sn: int, image: bytes, sheet: bytes, layout: Layout | None
+        self,
+        char_crt_job_sn: int,
+        image: bytes,
+        sheet: bytes,
+        layout: Layout | None,
+        original: tuple[str, bytes] | None = None,
     ) -> int:
         # FN-MYP-010-09·17 : 결과와 합성에 쓸 맨몸 시트·배치값을 함께 저장 요청
+        # FN-MYP-010-23 : 첫 생성은 원본(파일 이름·바이트)도 보내 무료 재생성 입력으로 남김
         placement = {}
         if layout is not None:
             placement = {
@@ -162,10 +211,14 @@ class JavaCharacterJobRepository:
                 "originX": str(layout.origin_x),
                 "originY": str(layout.origin_y),
             }
+        files = {"image": _png("image.png", image), "sheet": _png("sheet.png", sheet)}
+        if original is not None:
+            file_name, photo = original
+            files["photo"] = (file_name, photo, _photo_type(file_name))
         data = await self._call(
             "POST",
             f"{JOBS_PATH}/{char_crt_job_sn}/success",
-            files={"image": _png("image.png", image), "sheet": _png("sheet.png", sheet)},
+            files=files,
             data=placement,
             timeout=SHEET_TIMEOUT_SEC,
         )
@@ -185,10 +238,25 @@ class JavaCharacterJobRepository:
             items = [_BakeItem.model_validate(item) for item in data]
         except (TypeError, ValidationError):
             raise external_error() from None
-        return {
-            item.item_sn: engine.BakeItem(item.item_sn, item.regn_cd, item.bake_hint)
-            for item in items
-        }
+        found: dict[int, engine.BakeItem] = {}
+        for item in items:
+            if item.bake_hint is None and not item.by_image:
+                # 굽기 지시도 그림도 없는 행 : 구울 방법이 없어 제외
+                logger.warning("굽기 지시·그림이 모두 없는 아이템 제외: itemSn=%d", item.item_sn)
+                continue
+            found[item.item_sn] = engine.BakeItem(
+                item.item_sn, item.regn_cd, item.bake_hint, item.by_image
+            )
+        return found
+
+    async def fetch_item_image(self, item_sn: int) -> bytes:
+        return await fetch_backend_bytes(
+            self._client,
+            self._settings,
+            f"{ITEMS_PATH}/{item_sn}/bake-image",
+            headers=self._headers,
+            timeout=SHEET_TIMEOUT_SEC,
+        )
 
     async def list_bake_targets(self, item_sn: int) -> BakeTargetPage:
         # FN-ADM-070-02 : 아직 안 구운 캐릭터 첫 페이지 (관리자 판정은 Java)

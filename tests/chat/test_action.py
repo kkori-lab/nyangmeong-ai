@@ -79,8 +79,9 @@ def test_건강_일지_요청은_ACTION_카드에_Java_칸과_검증한_값을_�
     assert {"cd": WEIGHT, "nm": "체중"} in kind["codes"]
     assert action["params"]["petSn"]["in"] == "path"
     assert {"field": "rcdNvl", "when": "dailyRcdIdctCd", "equals": WEIGHT} in action["rules"]
-    assert evs[1][1]["card"] is None and evs[1][1]["message"] is None
-    assert java.ai_messages(room) == []
+    assert evs[1][1]["card"] is None
+    assert evs[1][1]["message"]["cnvrsCn"].startswith("이렇게 할까요?")  # 2026-11-13 채팅으로 확인
+    assert len(java.ai_messages(room)) == 1
     assert agent.decides[0][2] == rules.match_route("초코 오늘 아침 8시 반 체중 4.2kg 기록해줘")
 
 
@@ -229,7 +230,7 @@ def test_케어_목록을_읽은_뒤_고른_완료_체크는_목록에_나온_�
 
     assert evs[0][1]["kind"] == "SEARCH"
     assert len(reader.calls) == 1
-    assert agent.results[1] == ACTION_SHOWN
+    assert agent.results[1].startswith(ACTION_SHOWN.split("{summary}")[0])
     action = evs[-1][1]["action"]
     assert action["tool"] == "draft_care_completion"
     assert action["input"] == {"petSn": CHOCO} | expected

@@ -498,7 +498,7 @@ def test_케어_항목_도구에_반복_유형이_없으면_카드_빈_칸에_�
     assert intent["kind"] == "ACTION"
     assert done["action"]["input"]["careArtclNm"] == "발톱 깎기"
     assert done["action"]["missing"] == ["careZoneCd"]
-    assert done["message"] is None
+    assert "반복 유형" in done["message"]["cnvrsCn"]  # 빈 칸 안내 (2026-11-13)
 
 
 def test_병원_일정의_빈_칸은_Java_requiredIf로_정해야_한다(client, java):

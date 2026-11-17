@@ -488,6 +488,25 @@ def to_java(entry: CatalogEntry, values: dict, now: datetime | None = None) -> d
     return {name: value for name, value in java.items() if value is not None}
 
 
+def fill_now(entry: CatalogEntry, values: dict, now: datetime) -> dict:
+    """'방금·지금·아까' 문장 : date hook의 날짜가 비면 오늘, 날짜가 오늘이고 시각이 비면 지금
+    - 말한 시각("아까 3시에")·다른 날짜는 LLM 값 그대로"""
+    if "date" not in entry.hooks:
+        return values
+    roles = entry.hook_roles
+    ymd = next((n for n, r in roles.items() if r == "date:ymd"), None)
+    tm = next((n for n, r in roles.items() if r == "date:tm"), None)
+    if ymd is None:
+        return values
+    filled = dict(values)
+    today = now.date().isoformat()
+    if filled.get(ymd) is None:
+        filled[ymd] = today
+    if tm is not None and filled.get(tm) is None and str(filled[ymd]) == today:
+        filled[tm] = now.time().replace(second=0, microsecond=0).strftime("%H:%M")
+    return filled
+
+
 def _compose_datetime(entry: CatalogEntry, ymd, tm, now: datetime | None) -> dict:
     target = next((name for name, p in entry.params.items() if p.type == "datetime"), None)
     if ymd is None or target is None:

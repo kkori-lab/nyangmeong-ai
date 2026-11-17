@@ -52,9 +52,8 @@ def generator() -> BakeClient:
     return BakeClient()
 
 
-def make_client(monkeypatch, repo, generator, enabled: bool) -> TestClient:
+def make_client(monkeypatch, repo, generator) -> TestClient:
     monkeypatch.setenv("BACKEND_BASE_URL", "http://backend.test")
-    monkeypatch.setenv("CHARACTER_BAKE_ENABLED", "true" if enabled else "false")
     get_settings.cache_clear()
     app = create_app()
     backend = httpx2.AsyncClient(transport=httpx2.MockTransport(fake_auth_check))
@@ -68,12 +67,7 @@ def make_client(monkeypatch, repo, generator, enabled: bool) -> TestClient:
 
 @pytest.fixture
 def client(monkeypatch, repo, generator) -> TestClient:
-    return make_client(monkeypatch, repo, generator, enabled=False)
-
-
-@pytest.fixture
-def baking(monkeypatch, repo, generator) -> TestClient:
-    return make_client(monkeypatch, repo, generator, enabled=True)
+    return make_client(monkeypatch, repo, generator)
 
 
 def post(client: TestClient, item_sns: list[int], url: str = URL):
@@ -98,25 +92,18 @@ def test_preview_구운_아이템을_입힌_PNG(client: TestClient, repo) -> Non
 
 
 # 오류
-def test_preview_굽기가_꺼져_있으면_큐에_넣지_않고_409(client, generator) -> None:
+def test_preview_안_구운_아이템은_409_뒤_구워_둔다(client, generator, repo) -> None:
     res = post(client, [SWEATER])
     assert res.status_code == 409
     assert res.json()["code"] == "ITEM_BAKING"
-    assert generator.calls == []
-
-
-def test_preview_굽기가_켜져_있으면_409_뒤_구워_둔다(baking, generator, repo) -> None:
-    res = post(baking, [SWEATER])
-    assert res.status_code == 409
-    assert res.json()["code"] == "ITEM_BAKING"
     assert generator.calls == [SWEATER]
-    assert post(baking, [SWEATER]).status_code == 200
+    assert post(client, [SWEATER]).status_code == 200
 
 
-def test_preview_굽기_실패는_502(baking, generator) -> None:
+def test_preview_굽기_실패는_502(client, generator) -> None:
     generator.error = True
-    assert post(baking, [SWEATER]).status_code == 409
-    res = post(baking, [SWEATER])
+    assert post(client, [SWEATER]).status_code == 409
+    res = post(client, [SWEATER])
     assert res.status_code == 502
     assert res.json()["code"] == "CHARACTER_API_ERROR"
 
@@ -129,7 +116,7 @@ def test_preview_시트가_깨져_합성하지_못하면_502(client, repo) -> No
 
 
 def test_preview_생성기가_없으면_502(monkeypatch, repo) -> None:
-    client = make_client(monkeypatch, repo, None, enabled=True)
+    client = make_client(monkeypatch, repo, None)
     res = post(client, [SWEATER])
     assert res.status_code == 502
     assert res.json()["code"] == "EXTERNAL_API_ERROR"

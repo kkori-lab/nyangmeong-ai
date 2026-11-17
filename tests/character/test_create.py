@@ -92,7 +92,9 @@ class ConflictRepository(FakeCharacterJobRepository):
 class BrokenReportRepository(InfoRepository):
     """결과 보고에서 Java 오류"""
 
-    async def report_success(self, char_crt_job_sn: int, image: bytes, sheet, layout) -> int:
+    async def report_success(
+        self, char_crt_job_sn: int, image: bytes, sheet, layout, original=None
+    ) -> int:
         raise BackendError(500, b"", None, [])
 
 
@@ -143,6 +145,14 @@ def test_요청하면_202와_작업_번호를_주고_응답_뒤_성공과_PNG를
     assert saved.pet_sn == 3
     assert matches_spec(saved.image)
     assert saved.failure is None
+
+
+def test_첫_생성은_업로드_원본을_파일_이름과_함께_success에_싣는다(
+    client: TestClient, repo: FakeCharacterJobRepository
+) -> None:
+    post(client, name="dog.png")
+
+    assert repo.jobs[1].original == ("dog.png", PHOTO)
 
 
 def test_생성기는_Java가_준_등록_정보로_생성한다(

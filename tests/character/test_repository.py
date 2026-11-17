@@ -94,6 +94,27 @@ def test_report_success는_쿠키와_함께_이미지_시트_배치값을_보낸
         assert part in request.content
 
 
+def test_report_success는_원본이_있으면_photo_파트에_파일_이름과_바이트를_싣는다() -> None:
+    requests: list[httpx2.Request] = []
+    repo = make_repo(lambda _: ok({"pixelCharSn": 77}), requests)
+
+    asyncio.run(repo.report_success(9, b"IMAGE", b"SHEET", None, ("dog.PNG", b"ORIGINAL")))
+
+    content = requests[0].content
+    assert b'name="photo"; filename="dog.PNG"' in content
+    assert b"Content-Type: image/png" in content
+    assert b"ORIGINAL" in content
+
+
+def test_report_success는_원본이_없으면_photo_파트를_보내지_않는다() -> None:
+    requests: list[httpx2.Request] = []
+    repo = make_repo(lambda _: ok({"pixelCharSn": 77}), requests)
+
+    asyncio.run(repo.report_success(9, b"IMAGE", b"SHEET", None))
+
+    assert b'name="photo"' not in requests[0].content
+
+
 def test_report_failure는_쿠키와_함께_사유를_보낸다() -> None:
     requests: list[httpx2.Request] = []
     repo = make_repo(lambda _: httpx2.Response(200), requests)
@@ -108,7 +129,15 @@ def test_report_failure는_쿠키와_함께_사유를_보낸다() -> None:
 
 def test_list_bake_items는_번호와_부위_굽기_지시를_돌려준다() -> None:
     requests: list[httpx2.Request] = []
-    data = [{"itemSn": 5, "regnCd": "MYPC0002", "bakeHint": "round thin black glasses"}]
+    data = [
+        {
+            "itemSn": 5,
+            "regnCd": "MYPC0002",
+            "bakeHint": "round thin black glasses",
+            "bakeImgRefYn": False,
+            "atchFileSn": 31,
+        }
+    ]
 
     targets = asyncio.run(make_repo(lambda _: ok(data), requests).list_bake_items())
 
