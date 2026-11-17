@@ -12,9 +12,9 @@
 {"id": "T12", "type": "사용법", "q": "강아지 잃어버렸을때 글 올리는 데가 어디야ㅠ", "intent": "실종 신고 글 작성 위치", "tool": "search_guide", "scr_id": "SCR-CMU-002"}
 {"id": "T13", "type": "이동", "q": "가계부 열어줘", "intent": "가계부 화면 열기", "tool": "navigate", "scr_id": "SCR-MYP-030"}
 {"id": "T14", "type": "이동", "q": "뭉치 케어캘린더 보여줘", "intent": "케어 캘린더 보기", "tool": "navigate", "scr_id": "SCR-HLT-003"}
-{"id": "T15", "type": "이동", "q": "이번달 초코 사료값 얼마 썼더라", "intent": "이번 달 지출 확인", "tool": "navigate", "scr_id": "SCR-MYP-030"}
-{"id": "T16", "type": "이동", "q": "저번에 병원에서 한 피검사 결과 다시 보고싶어", "intent": "지난 검진 결과 상세 보기", "tool": "navigate", "scr_id": "SCR-HLT-005"}
-{"id": "T17", "type": "이동", "q": "내 포인트 얼마 남음?", "intent": "포인트 잔액 확인", "tool": "navigate", "scr_id": "SCR-MYP-020"}
+{"id": "T15", "type": "지식", "q": "이번달 초코 사료값 얼마 썼더라", "intent": "이번 달 사료 지출 합계 읽기 (목록 정답, 2026-11-17)", "tool": ["get_expense_total", "get_expense_statistics"]}
+{"id": "T16", "type": "지식", "q": "저번에 병원에서 한 피검사 결과 다시 보고싶어", "intent": "지난 혈액검사 수치 읽기 (READ 먼저, 2026-11-17)", "tool": "list_inspection_values"}
+{"id": "T17", "type": "지식", "q": "내 포인트 얼마 남음?", "intent": "포인트 잔액 읽기 (READ 먼저, 2026-11-17)", "tool": "get_points"}
 {"id": "T18", "type": "이동", "q": "공지사항 띄워줘", "intent": "공지사항 보기", "tool": "navigate", "scr_id": "SCR-CSC-001"}
 {"id": "T19", "type": "이동", "q": "요즘 두부 체중 변화 그래프 좀 보자", "intent": "체중 변화 그래프 확인", "tool": "navigate", "scr_id": "SCR-HLT-002"}
 {"id": "T20", "type": "이동", "q": "우리애 캐릭터 보러 가자", "intent": "픽셀 캐릭터 화면 열기", "tool": "navigate", "scr_id": "SCR-MYP-010"}
