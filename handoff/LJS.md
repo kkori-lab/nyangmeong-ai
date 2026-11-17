@@ -1,11 +1,12 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-004 대화창 · 이동 먼저 고른 섞인 메시지 — 끝 (2026-11-17, 검증 통과 1회차, 사람 확인. 실제 LLM은 READ를 먼저 골라 새 경로는 테스트·강제 navigate로 확인)
+SCR-AIM-004 대화창 · tool_eval 정답 다시 보기 (목록 정답 기준, 추가 요청) — 끝 (2026-11-17, 검증 통과 1회차, 사람 확인(재측정 생략). T15·T16·T17 정답 READ로, T66·T16 도구 설명 다듬음, 7회차 84문항 83/84)
 
 ## 다음에 할 것
+- AI 건강분석 리포트 팁 요약·제목 "지금" 겹침 (LJS, SCR-MAN-001 대기, 2026-11-17 요청, 둘 다 필수): `app/healthreport/clients.py` 프롬프트의 `tips`를 40자 문장 → 15자 이내 요약("산책 꾸준해요", "음수량 기록 필요"), `rptTtl`이 "지금"으로 시작하지 않게 프롬프트나 검증(화면에 "{이름}는 지금 지금처럼…"으로 겹침). 응답 구조·백엔드 저장 그대로. 이상 신호일 때 "첫 팁은 수의사 상담 안내" 규칙도 15자 안에 맞는지 같이 본다
 - 연결 남음: FN-MYP-010-23 무료 재생성 실제 흐름 확인 (LJS, 러스트 서버 `nyangmeong-character`에서 확인하기로 2026-11-17 결정): 관리자 쿠키로 regenerate → 202, 로그 regen-start→원본 사진→생성→success→굽기, 작업 완료·이미지 바뀜, 같은 번호 재호출은 409 로그만, 회원 쿠키 403. 원본 사진 보존(PR #84) 이후 만든 캐릭터로. 이미지 생성 크레딧 듦. 로컬 시험 데이터 정리(백엔드): 문의 235·작업 810·캐릭터 621
-- tool_eval 정답 목록화·겹치는 READ (LJS, 추가-4): 같은 사실을 답하는 READ 둘은 `tool` 목록으로 둘 다 정답(T79·T81부터). T15·T16·T17·T66도 이 기준으로 다시 본다. `get_expense_total`↔`get_expense_statistics`, `list_daily_health_records`↔`get_health_indicators`처럼 겹치는 도구를 합치거나 `skip`할지는 비용·지연(통계는 출력이 큼)으로 백엔드와 정한다 / 4회차 메모: T15·T16·T17 정답이 READ 열기 전 `navigate`라 `get_expense_total`·`list_inspection_values`·`get_points`로, T66 정답(`list_pixel_characters` vs 고른 `list_shop_items`) 확인, T67 "자유게시판 최근 글"이 `navigate`로 감(설명), T03·T05·T08·T09 `search_guide` 화면, T36·T42 범위 밖 거절
+- tool_eval 남은 것 (LJS): 겹치는 READ(`get_expense_total`↔`get_expense_statistics`, `list_daily_health_records`↔`get_health_indicators`) 합치기·`skip`은 비용·지연(통계는 출력이 큼)으로 백엔드와 정한다. 7회차 메모: T42 "생활비 가계부"가 거절 대신 답변, T03·T05·T08·T09 `search_guide` 화면, T36 범위 밖 거절, `navigate` 예문 "이번 달 병원비 얼마 나왔어?"가 READ 먼저 원칙과 어긋남(LLM은 이미 READ)
 - 한 메시지 여러 명령 ② (LJS·프론트, 계약 변경): 쓰기 확인 카드 여러 개("몸무게 기록하고 일정도 잡아줘"). `done.action` 하나 → 목록, "확인" 한 번에 모두 저장할지 하나씩 물을지·부분 실패 처리 먼저 정함. `docs/api/chat.md` 계약이라 프론트와 함께(AGENTS.md 4번)
 - 대화창 판정 지연 (LJS): tool search를 빼도 T01~T44 판정 지연 중앙값 2,054ms로 기준 1,640ms 초과(5회차 끔). 자주 쓰는 READ만 싣기·search_guide·글 답변 출력 줄이기로 본다
 - 연결 남음: FN-AIM-012-05·10 채팅으로 등록 확인·FN-AIM-013-02 사진 턴 저장 프론트 연결 (LJS 프론트, frontend 세션): `docs/api/chat.md` 확정(2026-11-13) 알림 보냄. 프론트는 모달 대신 `done.message` 글, `done.execute`면 `call` 실행 뒤 `action-result`, 사진은 `image-intent` 응답 `messages`로 그리고 `aiCnvrsRoomSn`으로 이어 감, MEDICAL_RECEIPT 경로의 `receipt-result`에 `cnvrsCn` 안 보냄. 프론트 몫 1~5(스크롤·유효성 메시지·다른 화면 진입 이력·플로팅 버튼 반려동물·햄버거)도 frontend 세션
