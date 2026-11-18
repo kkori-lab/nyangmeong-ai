@@ -575,7 +575,7 @@ async def _read_once(
                     pets.owner.update({(key, value): pet.pet_sn for value in ids})
             if rows is not None:
                 catalog.seen_rows(data, rows)
-            text = rules.read_result_text(data, limit)
+            text = rules.read_result_text(catalog.drop_result_fields(entry, data), limit)
         if "pet" in entry.hooks and pet is not None:
             text = READ_PET_LABEL.format(name=pet.pet_nm) + "\n" + text
         elif label is not None:

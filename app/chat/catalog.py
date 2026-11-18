@@ -168,6 +168,8 @@ class ToolPrompt(BaseModel):
     notice: bool = False
     # 일부러 싣지 않는 Java 도구 : 이유만 둔다. 경고 대신 info 로그(2026-11-11)
     skip: str | None = None
+    # READ : 결과(data 객체의 맨 위 칸)에서 LLM에 넘기지 않을 Java 칸(2026-11-18, 통계 days)
+    result_drop: list[str] = []
 
     @model_validator(mode="after")
     def _needs_description(self) -> "ToolPrompt":
@@ -238,6 +240,7 @@ class CatalogEntry:
     fixed: dict[str, object] = field(default_factory=dict)
     screen: str | None = None
     notice: bool = False
+    result_drop: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -402,7 +405,15 @@ def _entry(tool: CatalogTool, prompt: ToolPrompt) -> CatalogEntry:
         fixed=dict(prompt.fixed),
         screen=prompt.screen,
         notice=prompt.notice,
+        result_drop=tuple(prompt.result_drop),
     )
+
+
+def drop_result_fields(entry: CatalogEntry, data: object) -> object:
+    # READ 결과에서 답에 안 쓰는 큰 칸을 빼고 LLM에 넘김. 없는 칸은 무시
+    if not entry.result_drop or not isinstance(data, dict):
+        return data
+    return {key: value for key, value in data.items() if key not in entry.result_drop}
 
 
 def _model_name(name: str) -> str:
