@@ -394,7 +394,7 @@ draft_pet_update:
       description: 바꿀 생일 YYYY-MM-DD
     chip_no:
       java: chipNo
-      description: 바꿀 동물등록 칩 번호(숫자만)
+      description: 바꿀 동물등록 인식칩 번호(숫자 12자리 또는 15자리)
     chrc_cn:
       java: chrcCn
       description: 바꿀 특징

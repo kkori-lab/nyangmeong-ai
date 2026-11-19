@@ -1,7 +1,26 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-012 대화창 · 한 메시지 여러 명령 ② (쓰기 확인 카드 여러 개, 계약 변경, 추가 요청) — 끝 (2026-11-19, 검증 1회차 통과, 사람 확인. 이어 주는 말이 있으면 쓰기 도구를 이어 골라 `done.actions` 최대 3장, 확인 말 한 번에 모두 실행 지시, 빈 칸은 카드 번호로 되물음, 한 카드만 고치기. 요청 `actions`(최대 3). 추가-1 tool_eval 첫 고르기 기록. tool_eval 90/90)
+SCR-AIM-012 대화창 · 반려동물 수정 카드 인식칩 번호 12·15자리 (백엔드 검증 변경에 맞춤, 추가 요청) — 구현 중 (승인 2026-11-19 17:01, 시작 2026-11-19 16:59)
+
+기획:
+- 스냅샷 `data/tools.snapshot.json`: 로컬 Java(인식칩 변경 반영본) `GET /internal/ai/tools` 응답에서 `codes`만 빼고 통째로 갱신(`version`·`structureVersion`도 Java 값으로, 기동 때 "structureVersion 다름" 경고가 안 나게). 바뀐 곳이 `draft_pet_update`의 `chipNo.pattern`(`^[0-9]{0,20}$` → `^([0-9]{12}|[0-9]{15})?$`)과 두 버전 값뿐인지 diff로 본다. 다른 차이가 있으면 멈추고 사람에게 알린다. 로컬 Java가 없으면 `chipNo.pattern`만 손으로 고치고 버전 값은 그대로(Java로 뜰 때 경고 1줄, 다음 갱신 때 맞춤)
+- 설명 `data/tool_prompts.yaml` `draft_pet_update.params.chip_no.description`: "바꿀 동물등록 칩 번호(숫자만)" → "바꿀 동물등록 인식칩 번호(숫자 12자리 또는 15자리)"
+- 테스트 `tests/chat/test_action_update.py`: 카드에서 비우는 경우·결과 400 경우의 parametrize에 13자리(`1234567890123`)와 20자리를 더하고, 12자리·15자리는 카드 `input`에 남고 결과 200인 테스트를 하나 더한다. 앱 코드(`catalog.py` 패턴 검사)는 그대로
+- 완료 조건: `명령:` `sh scripts/check.sh` 종료 0. `화면:` 로컬 Java로 띄워 "초코 칩 번호 123456789012로 바꿔 줘"는 카드 `input.chipNo`에 들어가고, "칩 번호 1234567890123으로 바꿔 줘"는 `chipNo`가 비고 되물음. 기동 로그에 `structureVersion 다름` 없음
+새 의존성: 없음
+
+### 추가 요청
+| 번호 | 바꿀 파일 | 완료 조건 | 요청 |
+| --- | --- | --- | --- |
+| 추가-1 | `data/tools.snapshot.json`(로컬 Java `GET /internal/ai/tools` 응답에서 `codes`만 빼고 통째로, version·structureVersion 포함), 깨지는 테스트가 있으면 `tests/chat/` 해당 테스트 | `명령:` `sh scripts/check.sh` 종료 0, 스냅샷과 Java 응답(codes 뺌)이 같음. `화면:` 기동 로그에 `structureVersion 다름` 없음 | 요청 2026-11-19 17:15 "인식칩 외 차이 12곳(케어 주기 max 365, 체중 precision·scale 5·2, bdwgRngDrctInptYn, whole)까지 스냅샷 통째로 갱신(1안)" |
+
+### 검증 상태 (2026-11-19 17:30, 루프 보관 중 · 회차 1)
+- 바꾼 파일: `data/tool_prompts.yaml`(chip_no 설명), `data/tools.snapshot.json`(로컬 Java 응답으로 통째로: chipNo 패턴·version·structureVersion·케어 주기 max 365·체중 precision·scale 5·2·`bdwgRngDrctInptYn`·`list_places` `whole`), `tests/chat/test_action_update.py`(13·20자리 비움·400, 12·15자리 카드·201), `tests/chat/test_catalog.py`(주기 max 9999 → 365)
+- `sh scripts/check.sh` 0. 추가-1 명령·화면 통과(기동 로그 `structureVersion 다름` 없음). 12자리는 화면에서 카드 `chipNo`에 들어감
+- 1회차 실패: 13자리 칩 번호는 `chipNo`가 비지만 되묻지 않고 바꿀 값 없는 확인 카드("이렇게 할까요?", `missing: []`)가 나감. 규칙 밖 값을 조용히 지우는 기존 동작(`abc123`도 같음)인데 기획이 "앱 코드 그대로"와 "되물음"을 함께 적어 어긋남
+- 사람 결정 대기: ① 규칙 밖이라 지운 칸을 카드 `missing`에 넣어 되묻게(`app/chat/service.py`·테스트, 추천, 패턴·범위 칸 전체에 적용) ② 지금 동작을 받아들이고 기획 문구를 "chipNo가 빔"으로. 어느 쪽이든 `! sh scripts/verify-loop.sh clear` 뒤 추가 요청(또는 기획 고침)으로 적고 `/impl`
+- 기획 표기 오류: 12·15자리 결과는 200이 아니라 201(action-result 응답 코드)
 
 ## 다음에 할 것
 - 연결 남음: 한 메시지 여러 명령 ② 프론트 `done.actions` (LJS 프론트, frontend 세션에 알림): `done.actions`(최대 3장, 첫 카드가 `action`)를 다음 메시지의 `actions`로 돌려보내고, `execute`면 순서대로 각 `call` 실행·하나가 실패해도 나머지 실행·카드마다 `action-result`(묶음 저장 없음). 요청 `actions` 4개 이상은 400. 옮긴 뒤 AI도 `action`(요청·응답) 지움 (`docs/api/chat.md` 2026-11-19)
