@@ -278,6 +278,9 @@ TOOL_RULES = (
     # 2026-11-13 검증 1회차 : 첫 고르기가 search_guide면 결과 뒤 도구가 없어 답변이 0자로 끝남
     "- search_guide 결과를 받은 뒤 더 부를 도구가 없으면 받은 안내로 바로 답한다. "
     "함께 물은 기록은 다시 물어 달라고 한 문장 덧붙인다.\n"
+    # 한 메시지 여러 명령 ② (2026-11-19) : 쓰기 도구는 하나씩, 카드 결과 뒤 남은 쓰기 도구
+    "- 한 메시지에 쓰기 요청(기록·등록·수정)이 여럿이면 앞의 것 하나를 부르고, "
+    "확인 카드 결과를 받은 뒤 남은 쓰기 요청의 도구를 부른다. 남은 것이 없으면 글을 쓰지 않는다.\n"
     "- 기록을 읽어 답한 뒤 회원이 다른 반려동물 이름만 말해도 같은 읽기 도구를 다시 부른다.\n"
     "- 읽기 결과의 '조회한 반려동물'을 답에 밝히고, "
     "결과에 없는 반려동물 기준이라고 말하지 않는다.\n"
@@ -447,7 +450,7 @@ class AnthropicToolAgent:
         # 서버 도구 결과를 돌려준 뒤 같은 대화로 답변
         # follow 있음 : 첫 블록이 글이면 그대로, 도구면 실행 후 도구 없이(LLM 3번).
         # follow가 ReadMore를 주면 FOLLOW_ROUNDS까지 도구를 더 고를 수 있음(LLM 최대 2 + 라운드 수)
-        current = _with_result(messages, decision.content, decision.call, result)
+        current = with_result(messages, decision.content, decision.call, result)
         if follow is None:
             request = self._request(current, max_tokens, tool_system_blocks(today))
             request["tool_choice"] = TOOL_CHOICE_NONE
@@ -493,7 +496,7 @@ class AnthropicToolAgent:
             )
             second = await follow(call)
             content = tuple(block.model_dump(exclude_none=True) for block in final.content)
-            current = _with_result(current, content, call, second or rules.READ_NOT_RUN)
+            current = with_result(current, content, call, second or rules.READ_NOT_RUN)
             if not isinstance(second, ReadMore):
                 break
         request = self._request(current, max_tokens, tool_system_blocks(today))
@@ -518,7 +521,7 @@ class AnthropicToolAgent:
         )
 
 
-def _with_result(
+def with_result(
     messages: list[dict], content: tuple[dict, ...], call: tools.ToolCall | None, result: str
 ) -> list[dict]:
     # tool_use마다 tool_result 필수(없으면 Anthropic 400) : 실행한 도구만 결과, 나머지는 실행 안 함

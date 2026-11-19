@@ -151,6 +151,15 @@ def chains_after_move(text: str) -> bool:
     return match is not None and _CHAIN_REST.search(match.group(2)) is not None
 
 
+# 한 메시지 여러 명령 ② : 쓰기 요청을 이어 말하는 말("기록하고 일정도 잡아줘")
+_CHAIN_MORE = re.compile(r"하고|그리고|이랑|[가-힣]랑\s|및|또\s|[가-힣]고\s|[가-힣]도\s|,")
+
+
+def chains_more(text: str) -> bool:
+    """쓰기 도구 뒤에 다른 쓰기 요청이 이어질 수 있는 문장인지 : 거짓이면 LLM을 더 부르지 않음"""
+    return _CHAIN_MORE.search(text) is not None
+
+
 # 추가 요청(2026-11-09) : "<질문>" 같은 자리 표시·기호뿐인 글은 도구 고르기 없이 unclear 안내
 _PLACEHOLDER = re.compile(r"<[^<>]*>|[\W_]*")
 

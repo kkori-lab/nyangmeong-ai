@@ -132,7 +132,9 @@ async def send_message(
     room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
 ) -> StreamingResponse:
     # 스트림 시작 전 오류(400·401·403·404·502)는 다른 API와 같은 JSON 응답
-    turn = await service.prepare_turn(repo, room_sn, body.cnvrs_cn, body.draft, body.action)
+    turn = await service.prepare_turn(
+        repo, room_sn, body.cnvrs_cn, body.draft, body.action, body.actions
+    )
     # FN-AIM-004-09 : 판정 전에 매핑표 갱신, 실패해도 대화는 이어 감
     await service.route_cache.refresh(routes)
     limits = service.AnswerLimits(settings.answer_first_token_sec, settings.answer_total_sec)
