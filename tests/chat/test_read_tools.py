@@ -724,6 +724,44 @@ def test_result_drop이_없는_도구는_days_칸도_그대로_넘겨야_한다(
     assert json.loads(agent.results[0]) == data
 
 
+# 일지 기본 기간(list_daily_health_records default_days 7)
+
+
+def test_일지를_기간_없이_부르면_오늘_포함_최근_7일로_불러야_한다(client, java, monkeypatch):
+    monkeypatch.setattr(rules, "today_kst", lambda: TODAY)
+    use_agent(client, FakeToolAgent("list_daily_health_records", {}))
+    reader = use_reader(client, FakeToolReader())
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    events(send(client, room, "코코 건강 일지 보여 줘"))
+
+    assert reader.calls == [
+        ("/api/pets/1/daily-health-records", {"fromYmd": "2026-09-23", "toYmd": "2026-09-29"})
+    ]
+
+
+def test_일지_기간이_하나라도_있으면_그대로_불러야_한다(client, java, monkeypatch):
+    monkeypatch.setattr(rules, "today_kst", lambda: TODAY)
+    use_agent(client, FakeToolAgent("list_daily_health_records", {"from_ymd": "2026-09-01"}))
+    reader = use_reader(client, FakeToolReader())
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    events(send(client, room, "9월부터 일지 보여 줘"))
+
+    assert reader.calls == [("/api/pets/1/daily-health-records", {"fromYmd": "2026-09-01"})]
+
+
+def test_기본_기간이_없는_도구는_기간_없이_불러야_한다(client, java, monkeypatch):
+    monkeypatch.setattr(rules, "today_kst", lambda: TODAY)
+    use_agent(client, FakeToolAgent("list_my_care_schedules", {}))
+    reader = use_reader(client, FakeToolReader())
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    events(send(client, room, "일정 보여 줘"))
+
+    assert reader.calls == [("/api/care-schedules", {"petSns": "1"})]
+
+
 def test_지출_상세는_결과에_남겨야_한다(client, java):
     data = [{"expndSn": 1, "dtlMttr": "사료 2kg", "expndAmt": 30000, "recptSn": None}]
     agent = use_agent(client, FakeToolAgent("list_expenses", {}))

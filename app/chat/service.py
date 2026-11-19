@@ -505,6 +505,8 @@ async def _read_once(
 ) -> _ReadOutcome:
     args = call.args if call is not None else None
     values = args.model_dump(exclude_none=True) if args is not None else {}
+    today = pets.read.now.date() if pets.read.now is not None else rules.today_kst()
+    values = catalog.fill_default_period(entry, values, today)
     targets: list[PetInfo | None] = [None]
     if "pet" in entry.hooks:
         # 읽을 반려동물 : 이름 > 펫 태그 > 모두. 상한을 넘으면 Java 미호출·이름 되물음
