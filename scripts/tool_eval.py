@@ -78,8 +78,11 @@ class _DecisionRecorder(AnthropicToolAgent):
     text_then_tool: int = 0
 
     async def decide(self, *args, **kwargs) -> ToolDecision:
-        self.decision = await super().decide(*args, **kwargs)
-        return self.decision
+        # 첫 고르기만 남김 : 쓰기 카드 뒤 이어 고르기(한 메시지 여러 명령 ②)는 정답 셈에서 뺌
+        decision = await super().decide(*args, **kwargs)
+        if self.decision is None:
+            self.decision = decision
+        return decision
 
     def _log(self, final, task: str, started: float, length: int | None = None) -> None:
         if length is not None and any(block.type == "tool_use" for block in final.content):
