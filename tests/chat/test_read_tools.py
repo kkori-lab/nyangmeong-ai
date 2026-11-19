@@ -693,6 +693,37 @@ def test_연월_형식이_틀리면_필수_칸이_비어_Java를_부르지_않�
     assert agent.results == [rules.READ_FAILED]
 
 
+def test_지출_통계는_날짜별_days를_빼고_LLM에_넘겨야_한다(client, java):
+    data = {
+        "totalExpndAmt": 120000,
+        "mmExpndLimAmt": 100000,
+        "days": [{"expndYmd": "2026-11-01", "expndAmt": 30000}],
+        "categories": [{"expndClsfCd": "MYPC0501", "expndAmt": 120000}],
+    }
+    agent = use_agent(client, FakeToolAgent("get_expense_statistics", {"year_month": "2026-11"}))
+    use_reader(client, FakeToolReader(data))
+    room = room_of(client, java)
+
+    events(send(client, room, "이번 달 한도 넘었어?"))
+
+    assert json.loads(agent.results[0]) == {
+        "totalExpndAmt": 120000,
+        "mmExpndLimAmt": 100000,
+        "categories": [{"expndClsfCd": "MYPC0501", "expndAmt": 120000}],
+    }
+
+
+def test_result_drop이_없는_도구는_days_칸도_그대로_넘겨야_한다(client, java):
+    data = {"expndCnt": 2, "totalExpndAmt": 50000, "days": [1]}
+    agent = use_agent(client, FakeToolAgent("get_expense_total", {}))
+    use_reader(client, FakeToolReader(data))
+    room = room_of(client, java)
+
+    events(send(client, room, "이번 달 얼마 썼어?"))
+
+    assert json.loads(agent.results[0]) == data
+
+
 def test_지출_상세는_결과에_남겨야_한다(client, java):
     data = [{"expndSn": 1, "dtlMttr": "사료 2kg", "expndAmt": 30000, "recptSn": None}]
     agent = use_agent(client, FakeToolAgent("list_expenses", {}))

@@ -49,6 +49,9 @@ CLAUDE.local.md
 # /start가 내려받는 DMS 문서 캐시(화면설계서 등). 각자 PC에만 둔다
 .cache/
 
+# 로컬에서만 관리하는 문서(문제 상황 정리 등)
+docs/local/
+
 # 실험 산출물(OCR 샘플 결과, 캐릭터 생성 샘플 등). 원본 영수증·사진은 개인정보라 올리지 않는다
 samples/
 outputs/
