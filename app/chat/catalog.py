@@ -12,7 +12,7 @@ import logging
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from functools import lru_cache
 from pathlib import Path
@@ -170,6 +170,8 @@ class ToolPrompt(BaseModel):
     skip: str | None = None
     # READ : 결과(data 객체의 맨 위 칸)에서 LLM에 넘기지 않을 Java 칸(2026-11-18, 통계 days)
     result_drop: list[str] = []
+    # READ : fromYmd·toYmd가 둘 다 비면 오늘 포함 최근 N일(2026-11-19, 일지가 6000자에서 잘림)
+    default_days: int | None = None
 
     @model_validator(mode="after")
     def _needs_description(self) -> "ToolPrompt":
@@ -241,6 +243,7 @@ class CatalogEntry:
     screen: str | None = None
     notice: bool = False
     result_drop: tuple[str, ...] = ()
+    default_days: int | None = None
 
 
 @dataclass(frozen=True)
@@ -406,6 +409,7 @@ def _entry(tool: CatalogTool, prompt: ToolPrompt) -> CatalogEntry:
         screen=prompt.screen,
         notice=prompt.notice,
         result_drop=tuple(prompt.result_drop),
+        default_days=prompt.default_days,
     )
 
 
@@ -414,6 +418,18 @@ def drop_result_fields(entry: CatalogEntry, data: object) -> object:
     if not entry.result_drop or not isinstance(data, dict):
         return data
     return {key: value for key, value in data.items() if key not in entry.result_drop}
+
+
+def fill_default_period(entry: CatalogEntry, values: dict, today: date) -> dict:
+    """READ 기간 기본값 : 오늘 포함 최근 default_days일"""
+    if not entry.default_days:
+        return values
+    by_java = {java_name: name for name, java_name in entry.to_java_name.items()}
+    start, end = by_java.get("fromYmd"), by_java.get("toYmd")
+    if start is None or end is None or values.get(start) or values.get(end):
+        return values
+    first = today - timedelta(days=entry.default_days - 1)
+    return values | {start: first.isoformat(), end: today.isoformat()}
 
 
 def _model_name(name: str) -> str:
