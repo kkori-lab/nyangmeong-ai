@@ -87,6 +87,8 @@ class MessageSendRequest(_Camel):
     draft: RegisterDraft | None = None
     # 가장 최근 확인 카드(ACTION). 같은 도구를 다시 고르면 이 input을 바탕으로 칸 채움·수정
     action: ActionDraft | None = None
+    # 한 메시지 여러 명령 ② : 가장 최근 확인 카드 목록(최대 3). 있으면 action 대신 씀
+    actions: list[ActionDraft] | None = Field(default=None, max_length=3)
 
     @field_validator("cnvrs_cn")
     @classmethod
@@ -237,6 +239,8 @@ class AnswerDone(_Camel):
     card: RegisterCard | None = None
     # ACTION : 확인 카드. READ 결과를 본 뒤 고른 쓰기 도구면 SEARCH 답변에도 붙음
     action: ActionCard | None = None
+    # 한 메시지 여러 명령 ② : 확인 카드 목록(최대 3). action은 첫 카드(프론트 전환 뒤 삭제)
+    actions: list[ActionCard] | None = None
     # 돌려받은 카드 + 확인 말("등록해 줘") : React가 action의 call을 바로 실행 (2026-11-13)
     execute: bool = False
 
