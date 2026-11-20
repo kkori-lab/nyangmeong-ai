@@ -58,7 +58,7 @@ React가 부르는 `/ai/**` API다. 공통 규칙은 `docs/api/README.md`에 있
 | --- | --- | --- | --- | --- |
 | aiCnvrsMsgSn | Long | Y | 메시지 번호 | AI_CNVRS_MSG.AI_CNVRS_MSG_SN |
 | roleCd | String | Y | `AIMC0024` 사용자, `AIMC0025` AI(공통코드 AIMG06) | AI_CNVRS_MSG.ROLE_CD |
-| cnvrsCn | String | Y | 복호화한 내용 | AI_CNVRS_MSG.CNVRS_CN_ENC |
+| cnvrsCn | String | Y | 복호화한 내용. AI 메시지(`AIMC0025`)는 Markdown(GFM)이다. 프론트는 `react-markdown`+`remark-gfm`으로 그리고 HTML·이미지는 그리지 않는다. 의료 고지는 맨 끝 빈 줄 뒤 `※` 문단으로 떼어 표시한다(마지막 문단 유지, 프론트 PR #288) | AI_CNVRS_MSG.CNVRS_CN_ENC |
 | msgSeq | Integer | Y | 대화 안 순서(1부터) | AI_CNVRS_MSG.MSG_SEQ |
 | regDt | LocalDateTime | Y | 메시지 일시 | AI_CNVRS_MSG.REG_DT |
 | cmptnYn | Boolean | Y | false면 미완료 답변("답변이 완료되지 않았어요" 표시, AI 컨텍스트에서 제외). Java가 주지 않으면 true | AI_CNVRS_MSG.AI_CNVRS_MSG_CMPTN_YN, AIM-002-07 |
@@ -79,7 +79,7 @@ React가 부르는 `/ai/**` API다. 공통 규칙은 `docs/api/README.md`에 있
 | 이벤트 | data | 설명 | 근거 |
 | --- | --- | --- | --- |
 | intent | Intent `{kind, scrId, scrNm, param, moveType}` | 판정. `kind`: SEARCH·ROUTE·FALLBACK·REGISTER·RECEIPT·ACTION(2단계 쓰기 확인 카드). 화면 필드는 ROUTE일 때만 값이 있다(화면 ID → 프론트 경로 변환은 React) | AIM-001-05, AIM-004 |
-| delta | `{text: String}` | SEARCH 답변 조각. 이어 붙여 표시한다. 마지막 조각은 의료 고지(`\n\n※ 참고 정보이며 의료 진단이 아닙니다. …`), 미완료 답변에는 없다 | AIM-002-02·03 |
+| delta | `{text: String}` | SEARCH 답변 조각. 이어 붙여 표시한다. 조각을 이어 붙인 글은 Markdown(GFM)이다(ConversationMessage `cnvrsCn`과 같음). 마지막 조각은 의료 고지(`\n\n※ 참고 정보이며 의료 진단이 아닙니다. …`), 미완료 답변에는 없다 | AIM-002-02·03 |
 | done | `{message: ConversationMessage?, shortcut: Intent?, card: RegisterCard?, action: ActionCard?, actions: ActionCard[]?, execute: Boolean}` | 끝. `message`는 저장된 AI 메시지(SEARCH 답변·FALLBACK 안내·ROUTE 이동 안내·ACTION 카드 요약·확인 말 응답). 저장하지 않았거나 저장에 실패하면 null. `message.cmptnYn=false`면 미완료(60초 초과·도중 오류): "답변이 완료되지 않았어요" + [다시 생성]. `shortcut`은 연관 바로가기(Intent ROUTE 모양, 저장 안 함), 없으면 null | AIM-002-04·07 | `card`는 REGISTER일 때만 값이 있다(미리보기 카드나 되물음, AIM-012-05~08, ④부터 옛 카드 `draft` 이어 쓰기에서만). `action`은 ACTION일 때(`message`는 카드 요약 글, 2026-11-13), 그리고 SEARCH에서 읽기 도구 결과를 본 LLM이 쓰기 도구를 고른 경우(예: 케어 목록 → 완료 체크, 답변 글은 카드 요약과 확인 말 안내) 값이 있다. React는 카드를 모달로 띄우지 않고 글만 보이며, 카드는 다음 메시지의 `action`으로 돌려보낸다. `execute`(기본 false)가 true면 돌려받은 카드에 확인 말이 온 것이다: React가 `action`의 `call`을 바로 실행하고 `action-result`를 부른다(2026-11-13). `actions`(2026-11-19 한 메시지 여러 명령 ②)는 `action`이 있을 때 늘 함께 오는 카드 목록(최대 3장, 첫 카드가 `action`)이다. React는 `actions`를 다음 메시지의 `actions`로 돌려보내고, `execute`면 순서대로 각 `call`을 실행하며(하나가 실패해도 나머지 실행) 카드마다 `action-result`를 부른다. `action`은 프론트가 `actions`로 옮긴 뒤 지운다.
 | error | `{code: "EXTERNAL_API_ERROR", message: "일시적으로 답변할 수 없어요"}` | 첫 글자 전 실패(10초 초과·오류)와 키워드 행이 없는 문장의 도구 고르기 LLM 실패. AI 메시지는 저장하지 않는다. [다시 시도]는 `cnvrsCn` 없이 다시 보낸다 | AIM-002-07 |
 
@@ -134,9 +134,9 @@ RegisterDraft의 필드에 아래가 더해진다. 필수 칸이 모두 찬 경�
 | domain | String | Y | `health`·`expense` 등. 본창 새로고침 대상 | Java 도구 목록 `domain` |
 | label | String | N | 도구 표시 이름(카드 제목) | `data/tool_prompts.yaml` `label` |
 | call | `{method, path, contentType?}` | Y | 실행할 Java 공개 API. `path`의 `{칸}`은 `input`의 같은 칸 값으로 바꾼다. `contentType`은 파일 칸이 있을 때만(`multipart/form-data`, 없으면 키 없음) | Java 도구 목록 `call` |
-| params | Map<String, `{in, type, required, group, codes, maxLength, min, max, positive, pattern, items, minItems, generated}`> | Y | 칸별 규칙. `in`: path·query·body, `type`: string·long·int·decimal·boolean·date·time·datetime·code·array·file, `codes`: `[{cd, nm}]`(code 칸). `array`면 `items`(항목 칸 → 같은 모양 규칙, `in` 없음, 중첩 가능)와 `minItems`. `file`은 React가 첨부(Python은 채우지 않음). `generated: "uuid"`는 React가 [확인] 때 카드 하나에 한 번 만든다(필수로 세지 않음). 없는 키는 생략 | Java 도구 목록 `params` |
+| params | Map<String, `{in, type, required, group, codes, maxLength, min, max, positive, pattern, items, minItems, generated}`> | Y | 칸별 규칙. `in`: path·query·body, `type`: string·long·int·decimal·boolean·date·time·datetime·code·array·file, `codes`: `[{cd, nm}]`(code 칸). `array`면 `items`(항목 칸 → 같은 모양 규칙, `in` 없음, 중첩 가능)와 `minItems`. `file`은 React가 첨부(Python은 채우지 않음). `generated: "uuid"`는 React가 [확인] 때 카드 하나에 한 번 만든다(필수로 세지 않음). 값이 없는 규칙도 키가 빠지지 않고 null로 온다(`items` 안 칸도 같음) | Java 도구 목록 `params` |
 | rules | List<`{field, when, equals}`> | Y | 조건부 필수(`when` 칸이 `equals`면 `field` 필수). 폼에서 값이 바뀌면 React가 다시 판정 | Java 도구 목록 `rules[].requiredIf` |
-| input | Object | Y | Python이 검증한 값(Java 칸 이름). 틀린 값은 비운다. 번호 칸(`…Sn`, petSn 제외)은 같은 턴 읽기 결과에 나온 값만(돌려받은 `action.input`의 값은 그대로). 경로의 번호 칸(수정 도구의 `schdlSn`·`careArtclSn`·`expndSn`)을 정하지 못하면 카드를 주지 않는다: 바로 고른 경우 SEARCH로 "바꿀 <대상>을 찾지 못했어요. 이름이나 날짜를 넣어 다시 말해 주세요."(고지 없음, 저장), 읽기 결과를 본 뒤면 LLM이 글로 다시 물어본다. datetime 칸에 날짜만 오면 오늘은 지금 시각, 다른 날은 빈 칸 | |
+| input | Object | Y | Python이 검증한 값(Java 칸 이름). 틀린 값은 비운다. 번호 칸(`…Sn`, petSn 제외)은 같은 턴 읽기 결과에 나온 값만(돌려받은 `action.input`의 값은 그대로). 경로의 번호 칸(수정 도구의 `schdlSn`·`careArtclSn`·`expndSn`)을 정하지 못하면 카드를 주지 않는다: 바로 고른 경우 SEARCH로 "바꿀 <대상>을 찾지 못했어요. 이름이나 날짜를 넣어 다시 말해 주세요."(고지 없음, 저장), 읽기 결과를 본 뒤면 LLM이 글로 다시 물어본다. datetime 칸에 날짜만 오면 오늘은 지금 시각, 다른 날은 빈 칸. 단 수정 카드(경로 번호 칸·date hook·`hrInptYn`이 있는 도구)는 날짜만 오면 원래 시간을 쓴다(원래 시간이 미입력이면 그대로 미입력). 원래 값은 같은 턴 읽기 결과의 그 번호 행, 없으면 돌려받은 카드 `input` | |
 | missing | List<String> | Y | 빈 필수·조건부 필수 칸(Java 칸 이름, `petSn` 포함). 빈 필수 배열·`minItems` 미만은 `lines`, 항목 안 빈 필수 칸은 `lines[0].expndAmt`(중첩은 `pets[0].drugs[1].mdcnNm`). 필수 파일 칸은 늘 들어 있다(첨부하면 React가 다시 판정) | |
 | petChoices | List<`{petSn, petNm}`> | Y | 반려동물을 정하지 못했을 때 이름 칩(양육 반려동물 전부). 정했거나 반려동물 칸이 없는 도구면 빈 배열 | AIM-012-04 |
 | petNm | String | N | 정한 반려동물 이름 | AIM-012-04 |
