@@ -130,7 +130,8 @@ def test_카드를_띄운_뒤_고른_쓰기_도구는_실행하지_않아야_한
         ([("list_my_care_schedules", {})], READ_EMPTY_MESSAGE),
         (
             [("draft_schedule_update", {"schdl_sn": 31, "schdl_nm": "검진"})],
-            READ_EMPTY_CARD_MESSAGE,
+            # 수정 카드는 "'수정해 줘'" (2026-11-20)
+            READ_EMPTY_CARD_MESSAGE.replace("등록", "수정"),
         ),
     ],
 )

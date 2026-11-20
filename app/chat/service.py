@@ -171,6 +171,25 @@ ADD_TARGET_MISSING_MESSAGE = "기록할 {target}을 찾지 못했어요. 이름�
 # READ 답변이 오류 없이 0자로 끝남(실측 2026-11-09, READ 2번 뒤) : 오류 대신 안내 글
 READ_EMPTY_CARD_MESSAGE = "카드 내용이 맞으면 '등록해 줘'라고 말해 주세요."
 READ_EMPTY_MESSAGE = "요청을 처리하지 못했어요. 이름이나 날짜를 넣어 다시 말해 주세요."
+# 확인 카드 문구의 동사 (2026-11-20) : 위 문구는 등록 기준. 카드가 모두 수정(PATCH)이면 "수정",
+# 등록·수정이 섞이면 "진행" (수정 카드에 "'등록해 줘'"를 안내해 LLM이 앞 안내를 잘못이라고 함)
+ACTION_VERB_ADD = "등록"
+ACTION_VERB_UPDATE = "수정"
+ACTION_VERB_MIXED = "진행"
+
+
+def action_verb(methods: Sequence[str]) -> str:
+    """카드 call.method 목록 -> 확인 문구 동사(등록·수정·진행)"""
+    kinds = {method.upper() == "PATCH" for method in methods}
+    if kinds == {True}:
+        return ACTION_VERB_UPDATE
+    return ACTION_VERB_MIXED if len(kinds) > 1 else ACTION_VERB_ADD
+
+
+def _worded(message: str, cards: Sequence[ActionCard]) -> str:
+    # 등록 기준 문구를 카드 종류의 동사로
+    verb = action_verb([card.call.method for card in cards])
+    return message.replace(ACTION_VERB_ADD, verb)
 
 
 async def _fixed(text: str) -> AsyncIterator[str]:
@@ -556,7 +575,7 @@ async def _or_fixed(
         await answer.aclose()
     if not produced:
         logger.info("이동 섞인 답변 0자: 바로가기 안내로")
-        yield READ_EMPTY_CARD_MESSAGE if cards else empty
+        yield _worded(READ_EMPTY_CARD_MESSAGE, cards) if cards else empty
 
 
 @dataclass(frozen=True)
@@ -735,7 +754,7 @@ async def _read_answer(
         await answer.aclose()
     if not produced:
         logger.info("READ 답변 0자: 안내 글로")
-        yield READ_EMPTY_CARD_MESSAGE if cards else READ_EMPTY_MESSAGE
+        yield _worded(READ_EMPTY_CARD_MESSAGE, cards) if cards else READ_EMPTY_MESSAGE
 
 
 class _Follow:
@@ -780,7 +799,7 @@ class _Follow:
             rejected = _rejected(card, raw, values)
             shown = action_card(card, values, found, named, None, self.read.room_pet, rejected)
             self.cards.append(shown)
-            return ACTION_SHOWN.format(summary=action_summary(shown))
+            return _worded(ACTION_SHOWN, [shown]).format(summary=action_summary(shown))
         if call.name in (tools.NAVIGATE, tools.SEARCH_GUIDE) and call.args is not None:
             return _follow_screen(call, self.text, self.shortcuts)
         entry = tools.read_entry(call.name)
@@ -1462,6 +1481,10 @@ def action_card(
     # FN-AIM-012-08 : 같은 반려동물에 같은 이름의 케어 항목이 있으면 안내
     if warn and _same_name(name, pet.care_artcl_nms):
         notice = DUPLICATE_NOTICE.format(pet=pet.pet_nm, name=name)
+    same_name = pet is not None and values.get("petNm") == pet.pet_nm
+    if entry.call.method.upper() == "PATCH" and same_name:
+        # 수정 카드는 바꿀 칸만 : 지금 이름과 같은 새 이름은 뺀다(요약 "탄이 … 수정 — 탄이" 막기)
+        values.pop("petNm")
     missing = catalog.missing(entry, values)
     missing += [name for name in rejected if name not in missing]
     return ActionCard.model_validate(
@@ -1560,7 +1583,7 @@ def action_ask_message(card: ActionCard | list[ActionCard]) -> str:
         )
     lines = [ACTION_ASK_TEMPLATE.format(summary=summary)]
     missing = _missing_lines(cards)
-    lines.extend(missing or [ACTION_ASK_CONFIRM])
+    lines.extend(missing or [_worded(ACTION_ASK_CONFIRM, cards)])
     return "\n".join(lines)
 
 
@@ -1622,8 +1645,10 @@ async def _action_answer(
     # 여러 명령 ② : 카드가 여럿이면 모두 빈 칸이 없을 때만 실행 지시, 취소 말은 모두 버림
     entries = [e for draft in priors if (e := tools.card_entry(draft.tool)) is not None]
     emit(("intent", Intent(kind=IntentKind.ACTION)))
+    verb = action_verb([entry.call.method for entry in entries])
     if reply == rules.ACTION_CANCEL or not entries:
-        saved = await _save(repo, turn.room_sn, ACTION_DROP_MESSAGE, True)
+        drop = ACTION_DROP_MESSAGE.replace(ACTION_VERB_ADD, verb)
+        saved = await _save(repo, turn.room_sn, drop, True)
         emit(("done", AnswerDone(message=saved)))
         return
     pets = await register.contexts.get_pets() if any(_uses_pets(e) for e in entries) else []
@@ -1634,7 +1659,8 @@ async def _action_answer(
         emit(("done", AnswerDone(message=saved, action=cards[0], actions=cards)))
         return
     logger.info("확인 카드 실행 지시: %s", ", ".join(card.tool for card in cards))
-    saved = await _save(repo, turn.room_sn, ACTION_EXECUTE_MESSAGE, True)
+    execute = ACTION_EXECUTE_MESSAGE.replace(ACTION_VERB_ADD, verb)
+    saved = await _save(repo, turn.room_sn, execute, True)
     done = AnswerDone(message=saved, action=cards[0], actions=cards, execute=True)
     emit(("done", done))
 
