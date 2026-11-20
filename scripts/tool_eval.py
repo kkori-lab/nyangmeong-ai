@@ -58,6 +58,9 @@ class Result:
     error: str | None = None
     # 글 답변 뒤에 도구 호출이 붙은 응답 수
     text_then_tool: int = 0
+    # 지연 나누기(2026-11-20) : 첫 블록까지·도구 고르기 끝까지. LLM을 안 부른 문항은 None
+    first_ms: float | None = None
+    decide_ms: float | None = None
 
 
 def _register_kind(values: dict) -> str:
@@ -76,10 +79,23 @@ class _DecisionRecorder(AnthropicToolAgent):
 
     decision: ToolDecision | None = None
     text_then_tool: int = 0
+    # 첫 고르기 호출의 첫 블록 시각·고르기 끝 시각(time.monotonic)
+    first_at: float | None = None
+    decided_at: float | None = None
+
+    async def _events(self, request: dict):
+        async for event in super()._events(request):
+            if self.first_at is None and getattr(event, "type", None) == "content_block_start":
+                self.first_at = time.monotonic()
+            yield event
 
     async def decide(self, *args, **kwargs) -> ToolDecision:
-        self.decision = await super().decide(*args, **kwargs)
-        return self.decision
+        # 첫 고르기만 남김 : 쓰기 카드 뒤 이어 고르기(한 메시지 여러 명령 ②)는 정답 셈에서 뺌
+        decision = await super().decide(*args, **kwargs)
+        if self.decision is None:
+            self.decision = decision
+            self.decided_at = time.monotonic()
+        return decision
 
     def _log(self, final, task: str, started: float, length: int | None = None) -> None:
         if length is not None and any(block.type == "tool_use" for block in final.content):
@@ -125,6 +141,10 @@ async def run_tools(client, model: str, q: str, today, keep_answer: bool) -> Res
     ms = (time.monotonic() - started) * 1000
     result = _result(judged, agent, usage, ms, text if keep_answer else None)
     result.text_then_tool = agent.text_then_tool
+    if agent.first_at is not None:
+        result.first_ms = (agent.first_at - started) * 1000
+    if agent.decided_at is not None:
+        result.decide_ms = (agent.decided_at - started) * 1000
     return result
 
 
@@ -146,6 +166,26 @@ def _result(
     if picked is not None and tools.read_entry(picked[0]) is not None:
         return Result(picked[0], picked[1], usage, ms, answer)
     return Result(tools.DECLINE, {"unclear": not judged.out_of_scope}, usage, ms, answer)
+
+
+def tool_kind(tool: str) -> str:
+    # 지연을 고른 도구 종류별로 보려고(2026-11-20)
+    if tool in (tools.DECLINE, tools.NAVIGATE, tools.SEARCH_GUIDE):
+        return tool
+    if tool in tools.REGISTER_TOOLS or tools.card_entry(tool) is not None:
+        return "쓰기 카드"
+    if tools.read_entry(tool) is not None:
+        return "READ"
+    return "바로 답" if tool == "answer" else tool
+
+
+def _median(values: list[float | None]) -> float | None:
+    kept = [v for v in values if v is not None]
+    return statistics.median(kept) if kept else None
+
+
+def _ms(value: float | None) -> str:
+    return "-" if value is None else f"{value:,.0f}ms"
 
 
 def expected_tools(row: dict) -> list[str]:
@@ -198,6 +238,7 @@ def summary(name: str, rows: list[dict], results: list[Result], scores: list[dic
         "errors": len(results) - len(measured),
         "text_then_tool": sum(r.text_then_tool for r in results),
         "core": _core(rows, results, scores),
+        "by_kind": _by_kind(rows, results),
         "by_type": {
             t: sum(s["tool_ok"] for row, s in zip(rows, scores, strict=True) if row["type"] == t)
             for t in TYPES
@@ -212,13 +253,36 @@ def _core(rows: list[dict], results: list[Result], scores: list[dict]) -> dict:
         for row, result, mark in zip(rows, results, scores, strict=True)
         if int(row["id"][1:]) <= CORE
     ]
-    measured = [result.ms for result, _ in picked if result.error is None]
+    measured = [result for result, _ in picked if result.error is None]
     return {
         "total": len(picked),
         "tool_ok": sum(mark["tool_ok"] for _, mark in picked),
         "write_wrong": sum(mark["write_wrong"] for _, mark in picked),
-        "ms": statistics.median(measured) if measured else 0.0,
+        "ms": statistics.median([r.ms for r in measured]) if measured else 0.0,
+        "first_ms": _median([r.first_ms for r in measured]),
+        "decide_ms": _median([r.decide_ms for r in measured]),
     }
+
+
+def _by_kind(rows: list[dict], results: list[Result]) -> dict:
+    # 고른 도구 종류별 : 문항 수, 첫 블록·고르기 끝·전체 지연 중앙값(전체 문항·T01~T44)
+    out: dict[str, dict] = {}
+    for scope, core_only in (("all", False), ("core", True)):
+        groups: dict[str, list[Result]] = {}
+        for row, result in zip(rows, results, strict=True):
+            if result.error is not None or (core_only and int(row["id"][1:]) > CORE):
+                continue
+            groups.setdefault(tool_kind(result.tool), []).append(result)
+        out[scope] = {
+            kind: {
+                "count": len(group),
+                "first_ms": _median([r.first_ms for r in group]),
+                "decide_ms": _median([r.decide_ms for r in group]),
+                "ms": statistics.median([r.ms for r in group]),
+            }
+            for kind, group in sorted(groups.items())
+        }
+    return out
 
 
 def print_tables(rows: list[dict], sums: list[dict]) -> None:
@@ -237,14 +301,29 @@ def print_tables(rows: list[dict], sums: list[dict]) -> None:
             f"| {tokens} | {s['ms']:,.0f}ms |"
         )
     print()
-    print(f"| 흐름 | T01~T{CORE} 도구 정확 | 쓰기 도구 잘못 | 판정 지연 중앙값 | 글 뒤 도구 |")
-    print("| --- | --- | --- | --- | --- |")
+    print(
+        f"| 흐름 | T01~T{CORE} 도구 정확 | 쓰기 도구 잘못 | 판정 지연 중앙값 "
+        "| 첫 블록 중앙값 | 고르기 끝 중앙값 | 글 뒤 도구 |"
+    )
+    print("| --- | --- | --- | --- | --- | --- | --- |")
     for s in sums:
         core = s["core"]
         print(
             f"| {s['name']} | {core['tool_ok']}/{core['total']} | {core['write_wrong']} "
-            f"| {core['ms']:,.0f}ms | {s['text_then_tool']} |"
+            f"| {core['ms']:,.0f}ms | {_ms(core['first_ms'])} | {_ms(core['decide_ms'])} "
+            f"| {s['text_then_tool']} |"
         )
+    for s in sums:
+        for scope, label in (("all", "전체"), ("core", f"T01~T{CORE}")):
+            print()
+            print(f"{s['name']} 고른 도구 종류별 ({label})")
+            print("| 종류 | 문항 | 첫 블록 중앙값 | 고르기 끝 중앙값 | 판정 지연 중앙값 |")
+            print("| --- | --- | --- | --- | --- |")
+            for kind, k in s["by_kind"][scope].items():
+                print(
+                    f"| {kind} | {k['count']} | {_ms(k['first_ms'])} "
+                    f"| {_ms(k['decide_ms'])} | {k['ms']:,.0f}ms |"
+                )
     print()
     print("| 유형 | 문항 | " + " | ".join(s["name"] for s in sums) + " |")
     print("| --- | --- | " + " | ".join("---" for _ in sums) + " |")
@@ -258,6 +337,7 @@ async def main() -> None:
     parser.add_argument("--sonnet", action="store_true", help="도구 흐름을 Sonnet 5.5로도 잰다")
     parser.add_argument("--answer", action="store_true", help="글 답변 본문을 결과 파일에 남긴다")
     parser.add_argument("--only", help="이 문항만 잰다(쉼표로 구분, 예: T01,T05)")
+    parser.add_argument("--core", action="store_true", help=f"T01~T{CORE}만 잰다")
     options = parser.parse_args()
 
     settings = get_settings()
@@ -268,6 +348,8 @@ async def main() -> None:
     if options.only:
         only = set(options.only.split(","))
         rows = [row for row in rows if row["id"] in only]
+    if options.core:
+        rows = [row for row in rows if int(row["id"][1:]) <= CORE]
     today = rules.today_kst()
 
     flows = [
@@ -282,7 +364,8 @@ async def main() -> None:
         )
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    out = OUT_DIR / f"{datetime.now():%Y%m%d-%H%M%S}.jsonl"
+    # 같은 초에 여럿 돌려도 덮어쓰지 않게 마이크로초까지(2026-11-20)
+    out = OUT_DIR / f"{datetime.now():%Y%m%d-%H%M%S-%f}.jsonl"
     sums = []
     with out.open("w", encoding="utf-8") as file:
         for name, run in flows:
@@ -301,6 +384,8 @@ async def main() -> None:
                     "tool": result.tool,
                     "args": result.args,
                     "ms": round(result.ms),
+                    "first_ms": None if result.first_ms is None else round(result.first_ms),
+                    "decide_ms": None if result.decide_ms is None else round(result.decide_ms),
                     "error": result.error,
                     **mark,
                 }

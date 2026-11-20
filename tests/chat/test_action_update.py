@@ -182,18 +182,50 @@ def test_반려동물을_정하지_못하면_반려동물_정보_수정도_petCh
 
 @pytest.mark.parametrize(
     "raw",
-    [{"pet_bdwg": 0}, {"pet_bdwg": -1.5}, {"chip_no": "abc123"}],
+    [
+        {"pet_bdwg": 0},
+        {"pet_bdwg": -1.5},
+        {"chip_no": "abc123"},
+        # 인식칩 번호는 숫자 12자리 또는 15자리만
+        {"chip_no": "1234567890123"},
+        {"chip_no": "12345678901234567890"},
+    ],
 )
-def test_양수가_아닌_체중이나_숫자가_아닌_칩_번호는_카드에서_비워야_한다(client, java, raw):
+def test_양수가_아닌_체중이나_숫자가_아닌_칩_번호는_비우고_되물어야_한다(client, java, raw):
     use_agent(client, FakeToolAgent("draft_pet_update", raw))
     room = room_of(client, java, pet_sn=CHOCO)
 
     action = events(send(client, room, "초코 정보 바꿔 줘"))[-1][1]["action"]
 
     assert action["input"] == {"petSn": CHOCO}
+    assert action["missing"] == ["petBdwg" if "pet_bdwg" in raw else "chipNo"]
+    saved = java.ai_messages(room)[-1]["cnvrsCn"]
+    assert "비어 있어요" in saved
+    assert "등록해 줘" not in saved
 
 
-@pytest.mark.parametrize("values", [{"petBdwg": 0}, {"chipNo": "abc"}])
+def test_규칙_밖_칩_번호를_되물은_뒤_맞는_번호를_주면_빈_칸_없는_카드여야_한다(client, java):
+    use_agent(client, FakeToolAgent("draft_pet_update", {"chip_no": "1234567890123"}))
+    room = room_of(client, java, pet_sn=CHOCO)
+    first = events(send(client, room, "초코 칩 번호 1234567890123으로 바꿔 줘"))[-1][1]["action"]
+
+    use_agent(client, FakeToolAgent("draft_pet_update", {"chip_no": "123456789012"}))
+    prior = {"tool": first["tool"], "input": first["input"]}
+    action = events(send(client, room, "123456789012야", action=prior))[-1][1]["action"]
+
+    assert action["input"] == {"petSn": CHOCO, "chipNo": "123456789012"}
+    assert action["missing"] == []
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"petBdwg": 0},
+        {"chipNo": "abc"},
+        {"chipNo": "1234567890123"},
+        {"chipNo": "12345678901234567890"},
+    ],
+)
 def test_양수가_아닌_체중이나_숫자가_아닌_칩_번호의_결과는_400(client, java, values):
     room = room_of(client, java)
 
@@ -201,6 +233,18 @@ def test_양수가_아닌_체중이나_숫자가_아닌_칩_번호의_결과는_
 
     assert res.status_code == 400
     assert java.ai_messages(room) == []
+
+
+@pytest.mark.parametrize("chip_no", ["123456789012", "123456789012345"])
+def test_숫자_12자리나_15자리_인식칩_번호는_카드에_싣고_결과를_저장해야_한다(client, java, chip_no):
+    use_agent(client, FakeToolAgent("draft_pet_update", {"chip_no": chip_no}))
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    action = events(send(client, room, "초코 칩 번호 바꿔 줘"))[-1][1]["action"]
+    res = action_result(client, room, "draft_pet_update", "DONE", action["input"])
+
+    assert action["input"] == {"petSn": CHOCO, "chipNo": chip_no}
+    assert res.status_code == 201
 
 
 # 결과 요약
@@ -256,3 +300,47 @@ def test_찾지_못함_안내는_대상_이름으로_만든다(client, java):
     evs = events(send(client, room, "지출 3만 2천원으로 고쳐 줘"))
 
     assert deltas(evs) == "바꿀 지출 기록을 찾지 못했어요. 이름이나 날짜를 넣어 다시 말해 주세요."
+
+
+# 확인 카드 후속 (2026-11-20) : 수정 카드 문구, 지금 이름과 같은 petNm, 이전 카드 부정 막기
+
+PET_UPDATE = "draft_pet_update"
+
+
+def test_수정_카드_턴은_수정해_줘로_확인을_안내해야_한다(client, java):
+    use_agent(client, FakeToolAgent(PET_UPDATE, {"goal_bdwg": 4}))
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    events(send(client, room, "초코 목표 체중 4kg로 바꿔 줘"))
+
+    saved = java.ai_messages(room)[-1]["cnvrsCn"]
+    assert "'수정해 줘'" in saved
+    assert "'등록해 줘'" not in saved
+
+
+def test_지금_이름과_같은_새_이름은_수정_카드에서_빼야_한다(client, java):
+    use_agent(client, FakeToolAgent(PET_UPDATE, {"pet_nm": "초코", "goal_bdwg": 4}))
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    action = events(send(client, room, "초코 목표 체중 4kg로 바꿔 줘"))[-1][1]["action"]
+
+    assert "petNm" not in action["input"]
+    assert action["input"]["goalBdwg"] == 4
+    assert "— 초코" not in java.ai_messages(room)[-1]["cnvrsCn"]
+
+
+def test_지금_이름과_다른_새_이름은_수정_카드에_그대로_실어야_한다(client, java):
+    use_agent(client, FakeToolAgent(PET_UPDATE, {"pet_nm": "보리"}))
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    action = events(send(client, room, "초코 이름 보리로 바꿔 줘"))[-1][1]["action"]
+
+    assert action["input"]["petNm"] == "보리"
+
+
+def test_도구_규칙은_이전_확인_카드를_부정하지_말라고_해야_한다():
+    from app.chat.clients import tool_system
+
+    text = tool_system()
+    assert "서버가 실제로 띄운 확인 카드와 그 결과다" in text
+    assert "카드가 없었다거나 그 안내가 잘못이었다고 말하지 않는다" in text

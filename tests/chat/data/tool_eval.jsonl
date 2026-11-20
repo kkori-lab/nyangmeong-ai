@@ -1,11 +1,11 @@
 {"id": "T01", "type": "사용법", "q": "가계부 한도 설정 어디서 바꿔요", "intent": "가계부 월 한도 바꾸는 곳", "tool": "search_guide", "scr_id": "SCR-MYP-030"}
 {"id": "T02", "type": "사용법", "q": "울집 냥이 몸무게 기록은 어디다 남기는거야", "intent": "체중 기록 입력 위치", "tool": "search_guide", "scr_id": "SCR-HLT-002"}
-{"id": "T03", "type": "사용법", "q": "피검사 수치 직접 입력하는데가 어디예요", "intent": "혈액검사 수치 입력 화면 위치", "tool": "search_guide", "scr_id": "SCR-HLT-007"}
+{"id": "T03", "type": "사용법", "q": "피검사 수치 직접 입력하는데가 어디예요", "intent": "혈액검사 수치 입력 화면 위치", "tool": "search_guide", "scr_id": "SCR-HLT-011"}
 {"id": "T04", "type": "사용법", "q": "관리항목 추가 버튼 어딧어 안보임", "intent": "케어 관리 항목 추가 위치", "tool": "search_guide", "scr_id": "SCR-HLT-003"}
-{"id": "T05", "type": "사용법", "q": "남편도 같이 초코 관리하게 하고싶은데 초대 어케 보내요", "intent": "공동양육자 초대 방법", "tool": "search_guide", "scr_id": "SCR-MYP-005"}
+{"id": "T05", "type": "사용법", "q": "남편도 같이 초코 관리하게 하고싶은데 초대 어케 보내요", "intent": "공동양육자 초대 방법", "tool": "search_guide", "scr_id": "SCR-MYP-004"}
 {"id": "T06", "type": "사용법", "q": "포인트는 어떻게 모으는 거에요?", "intent": "포인트 적립 방법(케어미션)", "tool": "search_guide", "scr_id": "SCR-MYP-020"}
 {"id": "T07", "type": "사용법", "q": "강아지 한마리 더 데려왔는데 등록 어떻게해", "intent": "반려동물 추가 등록 방법", "tool": "search_guide", "scr_id": "SCR-MYP-002"}
-{"id": "T08", "type": "사용법", "q": "병원서 받은 검사결과지 pdf 올려서 분석하는거 어디서 해요", "intent": "검사결과지 PDF 분석 기능 위치", "tool": "search_guide", "scr_id": "SCR-HLT-005"}
+{"id": "T08", "type": "사용법", "q": "병원서 받은 검사결과지 pdf 올려서 분석하는거 어디서 해요", "intent": "검사결과지 PDF 분석 기능 위치", "tool": "search_guide", "scr_id": "SCR-HLT-011"}
 {"id": "T09", "type": "사용법", "q": "영수증 찍어서 진료기록 넣는법 알려줘", "intent": "영수증으로 검진기록 등록하는 방법", "tool": "search_guide", "scr_id": "SCR-HLT-002"}
 {"id": "T10", "type": "사용법", "q": "내 닉네임 수정 어디서함", "intent": "회원정보 수정 위치", "tool": "search_guide", "scr_id": "SCR-MYP-040"}
 {"id": "T11", "type": "사용법", "q": "근처 동물병원 찾아보는 기능도 있나요", "intent": "주변 병원 찾기 기능 위치", "tool": "search_guide", "scr_id": "SCR-HOS-001"}
@@ -78,7 +78,7 @@
 {"id": "T78", "type": "지식", "q": "즐겨찾기한 장소 다 보여 줘", "intent": "분류 없는 즐겨찾기는 전체 분류", "tool": "list_place_bookmarks"}
 {"id": "T79", "type": "섞임", "q": "가계부 열어서 이번 달 지출 얼마인지 알려 줘", "intent": "이동 + 지출 합계 읽기 : 읽기 먼저(합계는 get_expense_total 하나), 이동은 결과 뒤 바로가기", "tool": "get_expense_total"}
 {"id": "T80", "type": "섞임", "q": "일정 화면 가서 코코 이번 주 일정 보여 줘", "intent": "이동 + 일정 읽기 : 읽기 먼저", "tool": "list_my_care_schedules"}
-{"id": "T81", "type": "섞임", "q": "체중 기록은 어디서 해? 그리고 코코 최근 몸무게도 알려 줘", "intent": "사용법 + 최근 체중 읽기 : 읽기 먼저(기간 없는 최근 값은 get_health_indicators), 사용법은 결과 뒤", "tool": ["get_health_indicators", "search_guide"]}
+{"id": "T81", "type": "섞임", "q": "체중 기록은 어디서 해? 그리고 코코 최근 몸무게도 알려 줘", "intent": "사용법 + 최근 체중 읽기 : 읽기 먼저(기간 없는 최근 값은 get_health_indicators), 사용법은 결과 뒤", "tool": ["get_health_indicators", "search_guide"], "scr_id": "SCR-HLT-002"}
 {"id": "T82", "type": "섞임", "q": "가계부 열어서 한도 설정은 어떻게 하는지 알려 줘", "intent": "이동 + 사용법만(다른 일 없음) : 지금처럼 사용법", "tool": "search_guide", "scr_id": "SCR-MYP-030"}
 {"id": "T83", "type": "섞임", "q": "코코 마지막 검진 상세랑 이번 달 병원비 알려 줘", "intent": "READ 3번(검진 목록 → 상세 → 지출) : 첫 도구 검진 목록", "tool": "list_checkups"}
 {"id": "T84", "type": "섞임", "q": "코코 몸무게 4.2kg 기록하고 건강 화면 열어 줘", "intent": "쓰기 + 이동 : 쓰기 카드 먼저(이동 안 함)", "tool": "draft_daily_health_record", "args": {"daily_rcd_idct_cd": "HLTC0014"}}
@@ -86,3 +86,5 @@
 {"id": "T86", "type": "지식", "q": "올해 병원비 다 해서 얼마야?", "intent": "기간 합계 : get_expense_total (겹치는 READ 갈림, 2026-11-18)", "tool": "get_expense_total"}
 {"id": "T87", "type": "지식", "q": "코코 지난주 체중 기록 보여 줘", "intent": "기간 기록 목록 : list_daily_health_records (겹치는 READ 갈림, 2026-11-18)", "tool": "list_daily_health_records"}
 {"id": "T88", "type": "지식", "q": "코코 요즘 물 잘 마셔?", "intent": "최근 추이 : get_health_indicators (겹치는 READ 갈림, 2026-11-18)", "tool": "get_health_indicators"}
+{"id": "T89", "type": "섞임", "q": "코코 오늘 몸무게 4.2kg 기록하고 내일 오후 3시 병원 일정도 잡아줘", "intent": "쓰기 둘 : 앞의 체중 기록 카드 먼저, 일정은 이어 고르기 (여러 명령 ②, 2026-11-19)", "tool": "draft_daily_health_record", "args": {"daily_rcd_idct_cd": "HLTC0014"}}
+{"id": "T90", "type": "섞임", "q": "모레 뭉치 미용 일정 넣고 오늘 코코 몸무게 4.5kg도 기록해줘", "intent": "쓰기 둘 : 앞의 미용 일정 카드 먼저, 체중은 이어 고르기 (여러 명령 ②, 2026-11-19)", "tool": "draft_schedule", "args": {"schdl_knd_cd": "HLTC0058"}}

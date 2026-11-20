@@ -151,6 +151,15 @@ def chains_after_move(text: str) -> bool:
     return match is not None and _CHAIN_REST.search(match.group(2)) is not None
 
 
+# 한 메시지 여러 명령 ② : 쓰기 요청을 이어 말하는 말("기록하고 일정도 잡아줘")
+_CHAIN_MORE = re.compile(r"하고|그리고|이랑|[가-힣]랑\s|및|또\s|[가-힣]고\s|[가-힣]도\s|,")
+
+
+def chains_more(text: str) -> bool:
+    """쓰기 도구 뒤에 다른 쓰기 요청이 이어질 수 있는 문장인지 : 거짓이면 LLM을 더 부르지 않음"""
+    return _CHAIN_MORE.search(text) is not None
+
+
 # 추가 요청(2026-11-09) : "<질문>" 같은 자리 표시·기호뿐인 글은 도구 고르기 없이 unclear 안내
 _PLACEHOLDER = re.compile(r"<[^<>]*>|[\W_]*")
 
@@ -446,7 +455,10 @@ _HH_MM = re.compile(r"(?<![\d:])([01]?\d|2[0-3]):([0-5]\d)(?![\d:])")
 ACTION_CONFIRM = "confirm"
 ACTION_CANCEL = "cancel"
 _YES = r"(응|어|네|넵|예|ㅇㅇ|ㅇㅋ|오케이|좋아요?|그래요?|맞아요?|확인)"
-_DO = r"(등록|저장|추가|기록|체크|완료|진행|그대로)(해|해줘|해주세요|해줄래|해요|하자|해주라|ㄱ)?"
+_DO = (
+    r"(등록|수정|변경|저장|추가|기록|체크|완료|진행|그대로)"
+    r"(해|해줘|해주세요|해줄래|해요|하자|해주라|ㄱ)?"
+)
 _CONFIRM = re.compile(rf"^(?:{_YES}(?:{_DO})?|{_DO})$")
 _NO = r"(아니|아니요|아뇨|아니야)"
 _STOP = (

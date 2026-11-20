@@ -260,6 +260,12 @@ class ToolAgent(Protocol):
     ) -> AsyncIterator[str]: ...
 
 
+# 확인 카드는 채팅 확인 말로 실행 (2026-11-13) : 버튼을 누르라고 안내하지 않게 (2026-11-20)
+CHAT_CONFIRM_RULE = (
+    "- 확인 카드는 버튼이 아니라 대화로 확인한다. 카드를 묻거나 저장 방법을 물으면 "
+    "'등록해 줘'(수정 카드는 '수정해 줘', 섞이면 '진행해 줘')라고 말해 달라고 안내하고, "
+    "버튼을 누르라고 하지 않는다."
+)
 TOOL_RULES = (
     "도구\n"
     "- 회원의 말에 맞는 도구가 있으면 그 도구 하나만 부른다. "
@@ -278,6 +284,9 @@ TOOL_RULES = (
     # 2026-11-13 검증 1회차 : 첫 고르기가 search_guide면 결과 뒤 도구가 없어 답변이 0자로 끝남
     "- search_guide 결과를 받은 뒤 더 부를 도구가 없으면 받은 안내로 바로 답한다. "
     "함께 물은 기록은 다시 물어 달라고 한 문장 덧붙인다.\n"
+    # 한 메시지 여러 명령 ② (2026-11-19) : 쓰기 도구는 하나씩, 카드 결과 뒤 남은 쓰기 도구
+    "- 한 메시지에 쓰기 요청(기록·등록·수정)이 여럿이면 앞의 것 하나를 부르고, "
+    "확인 카드 결과를 받은 뒤 남은 쓰기 요청의 도구를 부른다. 남은 것이 없으면 글을 쓰지 않는다.\n"
     "- 기록을 읽어 답한 뒤 회원이 다른 반려동물 이름만 말해도 같은 읽기 도구를 다시 부른다.\n"
     "- 읽기 결과의 '조회한 반려동물'을 답에 밝히고, "
     "결과에 없는 반려동물 기준이라고 말하지 않는다.\n"
@@ -286,6 +295,12 @@ TOOL_RULES = (
     "화면은 이름으로 말한다.\n"
     "- 이전 AI 메시지 중 반려동물·대상을 묻는 되물음과 안내 문구('어느 아이의 …' 등)는 "
     "서버가 보낸 정해진 안내다. 회원이 이름으로 답하면 사과·해명 없이 바로 이어서 답한다.\n"
+    # 2026-11-20 검증 관찰 : 앞서 띄운 확인 카드를 "실제 카드는 뜨지 않았어요"라고 부정
+    "- 이전 AI 메시지 중 '이렇게 할까요?'로 시작하는 글과 '등록할게요·수정할게요·진행할게요'·"
+    "'✔ …' 결과 글은 서버가 실제로 띄운 확인 카드와 그 결과다. "
+    "카드가 없었다거나 그 안내가 잘못이었다고 말하지 않는다.\n"
+    # 2026-11-20 검증 관찰 : 카드를 묻는 말에 "[확인]을 눌러 주세요"라고 함(채팅 확인과 어긋남)
+    f"{CHAT_CONFIRM_RULE}\n"
 )
 
 
@@ -447,7 +462,7 @@ class AnthropicToolAgent:
         # 서버 도구 결과를 돌려준 뒤 같은 대화로 답변
         # follow 있음 : 첫 블록이 글이면 그대로, 도구면 실행 후 도구 없이(LLM 3번).
         # follow가 ReadMore를 주면 FOLLOW_ROUNDS까지 도구를 더 고를 수 있음(LLM 최대 2 + 라운드 수)
-        current = _with_result(messages, decision.content, decision.call, result)
+        current = with_result(messages, decision.content, decision.call, result)
         if follow is None:
             request = self._request(current, max_tokens, tool_system_blocks(today))
             request["tool_choice"] = TOOL_CHOICE_NONE
@@ -493,7 +508,7 @@ class AnthropicToolAgent:
             )
             second = await follow(call)
             content = tuple(block.model_dump(exclude_none=True) for block in final.content)
-            current = _with_result(current, content, call, second or rules.READ_NOT_RUN)
+            current = with_result(current, content, call, second or rules.READ_NOT_RUN)
             if not isinstance(second, ReadMore):
                 break
         request = self._request(current, max_tokens, tool_system_blocks(today))
@@ -518,7 +533,7 @@ class AnthropicToolAgent:
         )
 
 
-def _with_result(
+def with_result(
     messages: list[dict], content: tuple[dict, ...], call: tools.ToolCall | None, result: str
 ) -> list[dict]:
     # tool_use마다 tool_result 필수(없으면 Anthropic 400) : 실행한 도구만 결과, 나머지는 실행 안 함
