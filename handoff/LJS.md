@@ -1,28 +1,10 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-012 대화창 · 반려동물 수정 카드 인식칩 번호 12·15자리 (백엔드 검증 변경에 맞춤, 추가 요청) — 구현 중 (승인 2026-11-19 17:01, 시작 2026-11-19 16:59)
-
-기획:
-- 스냅샷 `data/tools.snapshot.json`: 로컬 Java(인식칩 변경 반영본) `GET /internal/ai/tools` 응답에서 `codes`만 빼고 통째로 갱신(`version`·`structureVersion`도 Java 값으로, 기동 때 "structureVersion 다름" 경고가 안 나게). 바뀐 곳이 `draft_pet_update`의 `chipNo.pattern`(`^[0-9]{0,20}$` → `^([0-9]{12}|[0-9]{15})?$`)과 두 버전 값뿐인지 diff로 본다. 다른 차이가 있으면 멈추고 사람에게 알린다. 로컬 Java가 없으면 `chipNo.pattern`만 손으로 고치고 버전 값은 그대로(Java로 뜰 때 경고 1줄, 다음 갱신 때 맞춤)
-- 설명 `data/tool_prompts.yaml` `draft_pet_update.params.chip_no.description`: "바꿀 동물등록 칩 번호(숫자만)" → "바꿀 동물등록 인식칩 번호(숫자 12자리 또는 15자리)"
-- 테스트 `tests/chat/test_action_update.py`: 카드에서 비우는 경우·결과 400 경우의 parametrize에 13자리(`1234567890123`)와 20자리를 더하고, 12자리·15자리는 카드 `input`에 남고 결과 200인 테스트를 하나 더한다. 앱 코드(`catalog.py` 패턴 검사)는 그대로
-- 완료 조건: `명령:` `sh scripts/check.sh` 종료 0. `화면:` 로컬 Java로 띄워 "초코 칩 번호 123456789012로 바꿔 줘"는 카드 `input.chipNo`에 들어가고, "칩 번호 1234567890123으로 바꿔 줘"는 `chipNo`가 비고 되물음. 기동 로그에 `structureVersion 다름` 없음
-새 의존성: 없음
-
-### 추가 요청
-| 번호 | 바꿀 파일 | 완료 조건 | 요청 |
-| --- | --- | --- | --- |
-| 추가-1 | `data/tools.snapshot.json`(로컬 Java `GET /internal/ai/tools` 응답에서 `codes`만 빼고 통째로, version·structureVersion 포함), 깨지는 테스트가 있으면 `tests/chat/` 해당 테스트 | `명령:` `sh scripts/check.sh` 종료 0, 스냅샷과 Java 응답(codes 뺌)이 같음. `화면:` 기동 로그에 `structureVersion 다름` 없음 | 요청 2026-11-19 17:15 "인식칩 외 차이 12곳(케어 주기 max 365, 체중 precision·scale 5·2, bdwgRngDrctInptYn, whole)까지 스냅샷 통째로 갱신(1안)" |
-
-### 검증 상태 (2026-11-19 17:30, 루프 보관 중 · 회차 1)
-- 바꾼 파일: `data/tool_prompts.yaml`(chip_no 설명), `data/tools.snapshot.json`(로컬 Java 응답으로 통째로: chipNo 패턴·version·structureVersion·케어 주기 max 365·체중 precision·scale 5·2·`bdwgRngDrctInptYn`·`list_places` `whole`), `tests/chat/test_action_update.py`(13·20자리 비움·400, 12·15자리 카드·201), `tests/chat/test_catalog.py`(주기 max 9999 → 365)
-- `sh scripts/check.sh` 0. 추가-1 명령·화면 통과(기동 로그 `structureVersion 다름` 없음). 12자리는 화면에서 카드 `chipNo`에 들어감
-- 1회차 실패: 13자리 칩 번호는 `chipNo`가 비지만 되묻지 않고 바꿀 값 없는 확인 카드("이렇게 할까요?", `missing: []`)가 나감. 규칙 밖 값을 조용히 지우는 기존 동작(`abc123`도 같음)인데 기획이 "앱 코드 그대로"와 "되물음"을 함께 적어 어긋남
-- 사람 결정 대기: ① 규칙 밖이라 지운 칸을 카드 `missing`에 넣어 되묻게(`app/chat/service.py`·테스트, 추천, 패턴·범위 칸 전체에 적용) ② 지금 동작을 받아들이고 기획 문구를 "chipNo가 빔"으로. 어느 쪽이든 `! sh scripts/verify-loop.sh clear` 뒤 추가 요청(또는 기획 고침)으로 적고 `/impl`
-- 기획 표기 오류: 12·15자리 결과는 200이 아니라 201(action-result 응답 코드)
+끝남: SCR-AIM-012 대화창 · 반려동물 수정 카드 인식칩 번호 12·15자리 (백엔드 검증 변경에 맞춤. 추가-1 스냅샷 통째로 갱신, 추가-2 규칙 밖이라 비운 칸을 `missing`에 넣어 되물음. 검증 2회차 통과, 사람 확인 2026-11-20)
 
 ## 다음에 할 것
+- 대화창 후속 (LJS, 2026-11-20 검증 관찰): 같은 방에서 LLM이 앞서 나간 확인 카드를 부정함("실제 수정 카드는 뜨지 않았어요"·"'등록해 줘'라고 안내한 것은 잘못"), 반려동물 수정 카드에 LLM이 지금 이름과 같은 `petNm`을 실어 요약이 "탄이 반려동물 정보 수정 — 탄이". 실제 LLM은 13자리 칩 번호에 쓰기 도구 대신 글로 되묻기도 함(카드 `missing` 경로는 테스트와 Postman 1회로 확인)
 - 연결 남음: 한 메시지 여러 명령 ② 프론트 `done.actions` (LJS 프론트, frontend 세션에 알림): `done.actions`(최대 3장, 첫 카드가 `action`)를 다음 메시지의 `actions`로 돌려보내고, `execute`면 순서대로 각 `call` 실행·하나가 실패해도 나머지 실행·카드마다 `action-result`(묶음 저장 없음). 요청 `actions` 4개 이상은 400. 옮긴 뒤 AI도 `action`(요청·응답) 지움 (`docs/api/chat.md` 2026-11-19)
 - 공용 하네스 PR (LJS): `scripts/tool_eval.py` `_DecisionRecorder`가 첫 고르기만 기록(추가-1). 이 커밋에서 빼고 따로 PR — 병합 전에는 T84·T89·T90이 이어 고르기의 마지막 고르기로 잡혀 틀림
 - 대화창 판정 지연 (LJS): tool search를 빼도 T01~T44 판정 지연 중앙값 2,054ms로 기준 1,640ms 초과(5회차 끔). 자주 쓰는 READ만 싣기·search_guide·글 답변 출력 줄이기로 본다
@@ -47,8 +29,7 @@ SCR-AIM-012 대화창 · 반려동물 수정 카드 인식칩 번호 12·15자�
 - 기능명세서·정책 문서 수정은 구현을 다 한 뒤 맨 마지막 (LJS, 2026-11-06 결정). 초안(설계 8절 0번): AI매니저 기능명세서 v0.13 → v0.14, 새 기능 ID는 SCR-AIM-004에 — 004-14 도구 선택 판정, 004-15 도구 목록 수신, 004-16 도구 인자 재검증, 004-17 내 기록 읽기 응답, 004-18 읽기 결과 전달 범위, 004-19 읽기 반려동물 결정, 004-20 읽기 실패 처리, 004-21 도구 흐름 등록 카드, 2단계 쓰기 확인 카드(ACTION). 기존 고침: 002-08·011-16 끝에 004-17·18 예외, 004-02 비고 "004-14로 대체". 막는 것: 정책결정관리서 v0.3 POL-006("AI 응답에 개인 데이터 미포함")과 Q-006(검색 응답 범위)부터 팀 회의 안건 → 명세 DMS 판 올리기
 - tool calling 후속 (LJS): 룰 라우팅 질문꼴 표지("어디서 바꿔요"·"어케")와 등록 정규식("한달에 한번"·"일정에 넣어줘") 놓침, 사용법 답변 품질(`tool_eval --answer` 사람 채점), 오류로 끝난 등록 턴이 남은 방에서 "주식 추천해 줘"에 `draft_schedule`(1회). 안건(2026-11-05): 회원정보 수정을 대화창에서 할지 — `tool-calling.md` 3-4절 결정, 본인 확인(`PasswordConfirm.jsx`), Java API·기능 ID
 - DMS 모음 (LJS): IA 구조도 메인을 같은 창 AI 모달로(2026-11-13), 확인 카드 모달 → 채팅 확인(FN-AIM-012, 2026-11-13), 대화창 PDF 첨부(지금은 SCR-AIM-013 ①·POL-006으로 안 받음, 검진상세 [PDF 분석]만. 넣으면 의도 판단에 `CHECKUP_PDF`·검진 기록 고르기 흐름 필요 — 다음 차수 안건, 2026-11-09), FN-AIM-002-03 비고에 고지 적용 범위(바로 답·건강 READ만, 사용법·가계부·되물음·READ 실패만·인사 잡담·자리 표시 입력 제외), SCR-AIM-013 ⑤(영수증 확인을 대화창 카드로)·②(첨부 이미지 용도 판단) 변경 제안, 반려동물·영수증 사진을 Anthropic에 보내는 것이 개인정보 처리방침에 들어가는지, 사용법 안내 기능 ID(지금은 FN-AIM-002-02·002-04·004-02), 사용법 답변 의료 고지, 부록 A에 1:1 문의(SCR-CSC-003) 행 없음, 기능명세서 표지 v0.11 → v0.12, 버전 11(v1.0 표기) 남아 있으면 DMS 화면에서 삭제, FN-MYP-010-13 겹침 순서·"고정 좌표" vs 서버 합성, FN-MYP-010-17 "기준 좌표 고정" vs 상단 보정, 얼굴 영역 값 변경
-- 프론트(LJS) 알리기: 대화창 → 본창 새로고침 장치 없음 / `screenPaths.js` num 27이 없는 `/mypage/caregivers`로 감, 바로가기가 SCR-MYP-004를 줄 수 있음, `docs/guide-review.md` "프론트 대조"(해시 `#c-care` → `#hlt003-care`, 760px 이하 회원정보 수정 메뉴 없음, `/mypage/withdraw` 없음, 플레이스 회원 전용 의도 확인) / 첫 SEARCH 답변은 제목 요약 뒤 스트림이 닫힘 — 입력창은 `done` 기준 / 범위 밖도 FALLBACK 그대로, `done.message` 문구를 씀 / ROUTE 뒤 `done.message`와 화면 안내 겹침, 분류 장애 `error`는 연속 실패로 세지 않음 / SSE 이벤트·화면 ID → 경로·칩·연속 실패·FAQ는 프론트 몫
-- 프론트(LJS) 대기: 대화창 영수증(이미지 첨부 시 `POST /ai/receipts` `ocrRqstSrcCd=AIMC0031` → `receipt-result`), 검진상세 [PDF 분석] → `POST /ai/checkups/lab-results`(파일 다시 올림, `excludedArtclNms` 안내, `registered`는 검진상세 목록으로 판정, 실패·422·504는 SCR-HLT-005에서 사유, 버튼 잠금)
+- 프론트(LJS) 알리기: 대화창 → 본창 새로고침 장치 없음 / `screenPaths.js` num 27이 없는 `/mypage/caregivers`로 감, 바로가기가 SCR-MYP-004를 줄 수 있음, `docs/guide-review.md` "프론트 대조"(해시 `#c-care` → `#hlt003-care`, 760px 이하 회원정보 수정 메뉴 없음, `/mypage/withdraw` 없음, 플레이스 회원 전용 의도 확인) / 첫 SEARCH 답변은 제목 요약 뒤 스트림이 닫힘 — 입력창은 `done` 기준 / 범위 밖도 FALLBACK 그대로, `done.message` 문구를 씀 / ROUTE 뒤 `done.message`와 화면 안내 겹침, 분류 장애 `error`는 연속 실패로 세지 않음 / SSE 이벤트·화면 ID → 경로·칩·연속 실패·FAQ는 프론트 몫 / 프론트(LJS) 대기: 대화창 영수증(이미지 첨부 시 `POST /ai/receipts` `ocrRqstSrcCd=AIMC0031` → `receipt-result`), 검진상세 [PDF 분석] → `POST /ai/checkups/lab-results`(파일 다시 올림, `excludedArtclNms` 안내, `registered`는 검진상세 목록으로 판정, 실패·422·504는 SCR-HLT-005에서 사유, 버튼 잠금)
 - 연결 남음: FN-AIM-010-06 프론트 [직접 입력] 영수증 (LJS 프론트, 맨 먼저): `ReceiptUploadModal.jsx` `onError`에서 `setFailedRecptSn(error.data?.recptSn ?? null)`, 넘기는 키 `rcptSn` 이름 맞춤, 다시 촬영·닫기 때 초기화. AI PR과 프론트 PR을 함께. 저장 뒤 영수증 상태 저장완료로 바꾸는지 확인(LJS 백엔드, `CheckupService.create`는 연결만). 결과 보고 실패·20초 가드로 끊긴 경우는 `recptSn`이 없어 연결 없는 기록(그대로 두기로 함)
 - 연결 남음: FN-MYP-010-16 프론트 꾸미기 [장착] (SJM): Java `PUT equipped-items` 성공 뒤 `POST /ai/characters/{pixelCharSn}/equipped-image` `{itemSns}`
 - 연결 남음: FN-MAN-006 메인 위젯 (프론트, Java 내부 API 연결은 2026-11-10 끝·로컬 확인): `AiReportCard.jsx`가 `GET /ai/pets/{petSn}/health-report`. `rptTtl`을 "{petNm}는 지금 ___"에, `tips`·`notice`, `staleYn`·`dataLackYn` 안내, `rfrshPsblYn`으로 새로고침(`POST .../refresh`, 409 `HEALTH_REPORT_REFRESH_LIMIT`), 은/는 받침, 3~6초 로딩
@@ -60,9 +41,7 @@ SCR-AIM-012 대화창 · 반려동물 수정 카드 인식칩 번호 12·15자�
 - 중복 분석 차단(`_in_progress`)은 프로세스 메모리라 워커 1개 전제. 배포 서버는 2026-11-19부터 `--workers 1`이라 전제가 맞다. 다시 여러 워커로 늘리면 Java 영수증 상태로 옮긴다
 - OCR (LJS): 출력 모양(`app/ocr/clients.py` `ReceiptOutput`)에 필드를 더하면 Anthropic이 400 "Schema is too complex"로 거절할 수 있다(2026-11-03 실측) — 더하면 실제 영수증으로 돌려 본다. 인식률은 실제 영수증 1건으로 맞춤(아조딜 `mdcnUsage` null), 2마리 청구서·다른 병원으로 더(샘플 10건, 사진은 git 제외). `docs/api/internal.md` OCR mock은 고정 응답 1개. 결제 줄 금액(`app/ocr/rules.py` `paid_amount`)은 "364, 000"처럼 쉼표 뒤가 띄어지면 못 읽는다(그 줄을 건너뛰고 LLM 값이나 다른 결제 줄을 씀) — 실제 영수증에서 보이면 고친다
 - 개발 DB 정리 (LJS 백엔드): 회원 1·반려동물 2의 RECPT 501·502·505·508·514·570·571(2026-11-11 결제 금액 확인)와 원본 파일. 로컬 시험 데이터: 관리자 mbrSn 2(601 주양육자)의 petSn 1001 "시험복실"·pixelCharSn 601. READ 확인용은 mbrSn 1(`dev-tokens`): petSn 2에 검진 `ckupRcdSn` 418, 2026-10 지출 45건 중 petSn 1이 8건. 2026-11-09 검증: mbrSn 1의 petSn 14 "코코", 반려동물 8마리
-- 캐릭터 (LJS): `bake-hints` 그림 형식·10MB 오류는 `FILE_TYPE_NOT_ALLOWED`·`FILE_SIZE_EXCEEDED`(기획은 `INVALID_REQUEST`). 옛 흐름 캐릭터는 맨몸 시트가 없어 `/preview` 404 — 다시 만들어야 함. 신발 공통코드 `MYPC0006`·시드 신발 4개 정리(DB에서만)
-- 굽기 (LJS): 26개 실측 104.2초(동시 10), 동시 13 미측정, 합성 1.4초는 시험 그림 값. 후보는 전용 스레드 풀·429 재시도·OpenAI 한도·품질 `low`. 켜기는 팀 비용 결정(캐릭터당 약 $1.64)·Java 시트 저장 뒤, access_token(30분) 만료 대책 먼저(회원 캐릭터 생성 뒤 굽기)
-- 캐릭터 위험 (LJS): 고양이 꼬리 경계선·다리 사이 분홍 점 원인 미확인, 정렬 2단계 탐색은 촘촘한 무늬에서 빗나갈 수 있음, `dog_fluffy` 512 재검출이 눈 아닌 쌍을 잡음(배치 샘플 10건은 맞음, 검은 털 눈 높이 미측정). 약한 테스트: EXIF 테스트 입력에 EXIF 없음, 고양이 분기는 가짜가 짝수 `petSn`일 때만 `PETC0002`
+- 캐릭터 (LJS): `bake-hints` 그림 형식·10MB 오류는 `FILE_TYPE_NOT_ALLOWED`·`FILE_SIZE_EXCEEDED`(기획은 `INVALID_REQUEST`). 옛 흐름 캐릭터는 맨몸 시트가 없어 `/preview` 404 — 다시 만들어야 함. 신발 공통코드 `MYPC0006`·시드 신발 4개 정리(DB에서만) / 굽기 (LJS): 26개 실측 104.2초(동시 10), 동시 13 미측정, 합성 1.4초는 시험 그림 값. 후보는 전용 스레드 풀·429 재시도·OpenAI 한도·품질 `low`. 켜기는 팀 비용 결정(캐릭터당 약 $1.64)·Java 시트 저장 뒤, access_token(30분) 만료 대책 먼저(회원 캐릭터 생성 뒤 굽기) / 캐릭터 위험 (LJS): 고양이 꼬리 경계선·다리 사이 분홍 점 원인 미확인, 정렬 2단계 탐색은 촘촘한 무늬에서 빗나갈 수 있음, `dog_fluffy` 512 재검출이 눈 아닌 쌍을 잡음(배치 샘플 10건은 맞음, 검은 털 눈 높이 미측정). 약한 테스트: EXIF 테스트 입력에 EXIF 없음, 고양이 분기는 가짜가 짝수 `petSn`일 때만 `PETC0002`
 - 서비스 안내 후속 (LJS): 놓침 R13·R15·R24·R36, 로그인·비밀번호 찾기는 안내서 밖(R18), 2회차 답변 정확도 사람 채점 안 함, 실제 대화 로그 평가 아직
 - 각자 `.env.local` (디스코드 갱신): `HEALTH_REPORT_TIMEOUT_SEC=20`(없어도 기본 20), `GOOGLE_VISION_API_KEY`, `OCR_TIMEOUT_SEC` 15, `BACKEND_BASE_URL` 필수. 지울 것: `CHAT_TOOL_AGENT`(2026-11-09 삭제, 남아도 무시), `GOOGLE_APPLICATION_CREDENTIALS`·`BACKEND_INTERNAL_KEY`·`INTERNAL_API_KEY`·`APP_PROFILE`·`*_DB_*`·`CONVERSATION_ENC_KEY`. 운영 Nginx가 `/internal`을 막는지 확인
 - 공용 하네스 PR 후보: 사람이 승인해 실측한 `화면:` 결과를 검증 에이전트에 넘길 칸이 없어 관리자 권한·DB 쓰기·비용이 드는 `화면:` 조건은 회차와 무관하게 `실패`(2026-11-12, 전체 굽기 시트 파일 없음 마일스톤이 이것으로 `진행`), `impl-check.sh:18`이 "질문" 글자가 든 줄(예: "질문꼴")을 모두 질문으로 읽음(2026-11-09 재현), `verify-loop.sh guard`가 읽기 전용 비교(`git diff --no-index`)까지 막음, macOS BSD `sed`(`milestone-status.sh`·`impl-check.sh`·`api-row.sh`, 실패해도 종료 0), `verify-collect.sh` 37행 `case` 문법(종료 2)·18행 `cut -c8-` 멀티바이트 잘림. 커밋 안 한 평가 스크립트: `scripts/guide_eval.py`·`scripts/tool_eval_old.py`(옛 로컬 초안, 원격 `scripts/tool_eval.py`와 다름), `scripts/llm_smoke.py` 분류 로그 INFO
@@ -71,7 +50,6 @@ SCR-AIM-012 대화창 · 반려동물 수정 카드 인식칩 번호 12·15자�
 - 백엔드 PR #232 병합됨(2026-11-12 확인). 각자 로컬 DB에 v0.14 (11) 실행 (LJS 백엔드)
 - 도구 확장 후속 (LJS): 커뮤니티 설명은 KSJ, 플레이스는 YAY 확인. `list_faqs`는 운영 FAQ 문항이 정해지면 다시(지금 시드는 같은 질문 8개 복사본)
 - 여러 아이 일정 READ 남은 메모 (LJS): 반려동물 몸무게(`petBdwg` 등) `scale 3`은 PR #221 범위 밖(담당자에게 전달됨). 옛 등록 카드(`draft`·REGISTER·등록 칸 추출 LLM)는 프론트 범용 카드 전환 뒤 삭제. Python은 도구 목록을 기동 때 1회만 받으므로 Java를 다시 띄우면 Python도 다시 띄운다
-- 로그 파일 배포 전 사람 할 일 (LJS, 다음 main 배포 전): 배포마다 서버 `.env.local`이 secret `ENV_FILE`로 통째로 덮어써지므로, 서버의 지금 `.env.local`·`.env`에 있는 키(`BACKEND_BASE_URL`, AI 키 3개, `CHAT_TOOL_*`, 타임아웃 등)를 빠짐없이 `ENV_FILE`에 옮기고 `LOG_DIR`(Java `app.log.dir`과 같은 폴더)를 추가. 서버에 `deploy` 그룹·SELinux 확인, 배포 사용자와 서비스 사용자가 다르면 600인 `.env.local`을 서비스가 못 읽으니 확인, 워크플로우 변경을 backend-90에 알림. 배포 뒤 폴더 `drwxrws---`·파일 `-rw-rw----`(그룹 deploy)와 요청 줄 확인. 필요하면 배포 전 `.env.local.bak` 백업 단계 추가 검토
 - 로컬 `LOG_DIR` 팀 기본값 (LJS, 사람 결정 대기): 로컬도 서버와 같은 경로로 쓸지. 정하면 `.env.local.example` 설명("개발 PC는 비움")과 디스코드 `.env.local` 값을 바꿈. Windows에서는 지금 드라이브 루트 아래로 풀림. Pylance가 Windows에서 `logs._chmod`의 `os.name` 분기 뒤를 회색 표시(동작 무관), 원하면 분기 삭제
-- 실제 LLM에서 "코코 오늘 체중 4.2kg 기록해줘"에 `rcd_ymd`를 비워 `missing ["rcdDt"]`가 된 적 있음(2026-11-09 검증, 1/2). 날짜를 말하지 않았으면 서버가 오늘로 채울지 정한다(지금 결정은 "날짜만 오면"만) (LJS). 돌려받은 카드가 있으면 LLM의 "오늘"은 버림(추가-1)
+- 로컬 `LOG_DIR` 팀 기본값 (LJS, 사람 결정 대기): 로컬도 서버와 같은 경로로 쓸지. 정하면 `.env.local.example` 설명("개발 PC는 비움")과 디스코드 `.env.local` 값을 바꿈. Windows에서는 지금 드라이브 루트 아래로 풀림. Pylance가 Windows에서 `logs._chmod`의 `os.name` 분기 뒤를 회색 표시(동작 무관), 원하면 분기 삭제 / 로그 파일 배포 전 사람 할 일 (LJS, 다음 main 배포 전): 배포마다 서버 `.env.local`이 secret `ENV_FILE`로 통째로 덮어써지므로, 서버의 지금 `.env.local`·`.env`에 있는 키(`BACKEND_BASE_URL`, AI 키 3개, `CHAT_TOOL_*`, 타임아웃 등)를 빠짐없이 `ENV_FILE`에 옮기고 `LOG_DIR`(Java `app.log.dir`과 같은 폴더)를 추가. 서버에 `deploy` 그룹·SELinux 확인, 배포 사용자와 서비스 사용자가 다르면 600인 `.env.local`을 서비스가 못 읽으니 확인, 워크플로우 변경을 backend-90에 알림. 배포 뒤 폴더 `drwxrws---`·파일 `-rw-rw----`(그룹 deploy)와 요청 줄 확인. 필요하면 배포 전 `.env.local.bak` 백업 단계 추가 검토
 - 답 없는 질문이 이력에 둘이면 `disable_parallel_tool_use`로도 첫 도구가 이전 질문용(`get_expense_total`, 실측 3/3). 지금 질문만 보게 할지는 tool_eval 문항으로 정한다 (LJS)
