@@ -1,10 +1,9 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-끝남: SCR-AIM-004 대화창 · 판정 지연 줄이기 (`tool_eval` 지연 나누기·9회차 기록, 앱 코드 그대로. 기준 1,640ms 못 넘어 사람 결정 대기로 넘김. 검증 1회차 통과, 사람 확인 2026-11-20)
+끝남: SCR-AIM-002 대화창 · `docs/api/chat.md`를 지금 동작에 맞추기 (`cnvrsCn`·`delta` Markdown(GFM), ActionCard `params` 빈 값 null, 수정 카드는 날짜만 오면 원래 시간. 문서만, 검증 1회차 통과, 사람 확인 2026-11-20)
 
 ## 다음에 할 것
-- 공용 하네스 PR (LJS): `scripts/tool_eval.py` 지연 나누기(`first_ms`·`decide_ms`·종류별 표·`--core`·결과 파일 이름 마이크로초, 2026-11-20 판정 지연 마일스톤). 이 커밋에서 빼고 따로 PR. 콘솔 한글 깨짐은 `PYTHONIOENCODING=utf-8`
 - 연결 남음: 한 메시지 여러 명령 ② 프론트 `done.actions` (LJS 프론트, frontend 세션에 알림): `done.actions`(최대 3장, 첫 카드가 `action`)를 다음 메시지의 `actions`로 돌려보내고, `execute`면 순서대로 각 `call` 실행·하나가 실패해도 나머지 실행·카드마다 `action-result`(묶음 저장 없음). 요청 `actions` 4개 이상은 400. 옮긴 뒤 AI도 `action`(요청·응답) 지움 (`docs/api/chat.md` 2026-11-19)
 - 대화창 판정 지연 (LJS, 사람 결정 대기): 9회차(2026-11-20, `tool-calling.md` 7-1절)로 T01~T44 중앙값 1,849~2,020ms는 글 답변 19문항을 뺀 쓰기 카드 고르기 시간(1.6~1.7초, 앞에 thinking)이 정한다. 고르기 끝 중앙값은 1.2~1.5초. thinking 끄기는 정확 13·14/44로 못 씀, 도구 10개만 싣기는 0.1~0.3초 빠르나 2단계 고르기 설계 필요. 정할 것: 기준을 고르기 끝으로 바꿀지, 쓰기 도구 설명 줄이기, ③ 설계
 - 연결 남음: FN-AIM-012-05·10 채팅으로 등록 확인·FN-AIM-013-02 사진 턴 저장 프론트 연결 (LJS 프론트, frontend 세션): `docs/api/chat.md` 확정(2026-11-13) 알림 보냄. 프론트는 모달 대신 `done.message` 글, `done.execute`면 `call` 실행 뒤 `action-result`, 사진은 `image-intent` 응답 `messages`로 그리고 `aiCnvrsRoomSn`으로 이어 감, MEDICAL_RECEIPT 경로의 `receipt-result`에 `cnvrsCn` 안 보냄. 프론트 몫 1~5(스크롤·유효성 메시지·다른 화면 진입 이력·플로팅 버튼 반려동물·햄버거)도 frontend 세션
@@ -22,7 +21,6 @@
 - 건강 READ 여러 마리 후속 (LJS): "이름만 다시 말하기" 문항은 `scripts/tool_eval.py`에 앞 턴 이력 칸이 없어 공용 하네스 PR 후보. 펫 태그가 목록에 없을 때 모든 아이로 가는 경우는 테스트 없음. 체중 기록이 없는 아이(엘리자베스 등)는 등록 몸무게 `petBdwg`를 못 말함 — 반려동물 READ를 열 때. 읽기 반려동물 결정 규칙(FN-AIM-004-19 후보)은 DMS 모음에도
 - 지출 등록 후속 (LJS·SJM): `lines[0].petSn`을 비우면 공용 지출로 저장되는지 SJM에 확인. 중복 확인(`/api/expenses/duplicate-check`, 설계 4-4 `duplicate_expense`)은 도구 목록에 없어 안 함 — React가 [확인] 전에 부를지·Python hook으로 할지 정한다
 - `draft_receipt_save` 대기 (LJS): 저장 전 OCR 영수증 번호를 주는 READ가 없어 싣지 않음(카탈로그는 중첩 배열을 읽음). SCR-AIM-013 ⑤ 팀 결정 뒤 마일스톤 대기 절로
-- `docs/api/chat.md` 맞추기 (LJS): AI 메시지 `cnvrsCn`·SSE `delta`는 Markdown(GFM)이라고 적기(프론트 끝 PR #288: `react-markdown`+`remark-gfm`, HTML·이미지 안 그림, 고지는 맨 끝 빈 줄 뒤 `※` 문단만 떼어 표시 — 마지막 문단 유지), ActionCard `params`는 값 없는 키가 null로 나옴(문서는 "없는 키는 생략", ①부터, `ActionParam`), `input`의 "datetime 칸에 날짜만 오면…"에 수정 카드는 원래 시간을 쓴다는 것(추가-3) 미반영
 - 배포 서버 tool calling 미동작 원인(2026-11-08): 배포 워크플로우(`.github/workflows/main.yml` 4번)는 서버에 `.env`를 만들고 이미 있으면 건너뛰는데 앱은 `.env.local`만 읽는다(`app/core/config.py:10`). 서비스 파일이 `.env`를 `EnvironmentFile`로 읽는지 미확인. 워크플로우 수정은 backend-90과. Python을 Java보다 먼저 띄우면 도구 목록이 snapshot으로 떨어진다(기동 때 1회). 설정은 2026-11-09 지워 이제 `.env`와 무관하게 켜짐. 서버 접속: Mac 공개키를 `authorized_keys`에 덧붙인다(학원 PC MobaXterm, `>>`)
 - 건강 READ 후속 (LJS): 결과 자르기 6000자 미측정, FN-AIM-011-16 "개인 데이터 비전달"과 READ를 기능 ID 추가 때 맞춘다. 백엔드(2026-11-06): 다른 도메인 READ·스냅샷 자동 PR은 그 단계를 열 때 알려 `/start`, 새 도메인 CARD 때 그 서비스 `INVALID_INPUT_VALUE`도 칸 이름을 담게(#175는 일정·케어 항목만)
 - 기능명세서·정책 문서 수정은 구현을 다 한 뒤 맨 마지막 (LJS, 2026-11-06 결정). 초안(설계 8절 0번): AI매니저 기능명세서 v0.13 → v0.14, 새 기능 ID는 SCR-AIM-004에 — 004-14 도구 선택 판정, 004-15 도구 목록 수신, 004-16 도구 인자 재검증, 004-17 내 기록 읽기 응답, 004-18 읽기 결과 전달 범위, 004-19 읽기 반려동물 결정, 004-20 읽기 실패 처리, 004-21 도구 흐름 등록 카드, 2단계 쓰기 확인 카드(ACTION). 기존 고침: 002-08·011-16 끝에 004-17·18 예외, 004-02 비고 "004-14로 대체". 막는 것: 정책결정관리서 v0.3 POL-006("AI 응답에 개인 데이터 미포함")과 Q-006(검색 응답 범위)부터 팀 회의 안건 → 명세 DMS 판 올리기
