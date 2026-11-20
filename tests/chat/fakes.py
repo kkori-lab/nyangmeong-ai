@@ -1,3 +1,4 @@
+import functools
 import json
 import re
 from collections.abc import AsyncIterator
@@ -325,5 +326,7 @@ class FakeToolCatalogClient:
         return catalog.ToolCatalogResponse.model_validate(self.response)
 
 
+# Built once: neither tests nor app mutate the catalog, and building 50 tool schemas is slow
+@functools.cache
 def fake_catalog() -> catalog.Catalog:
     return catalog.build(catalog.ToolCatalogResponse.model_validate(fake_catalog_json()))
