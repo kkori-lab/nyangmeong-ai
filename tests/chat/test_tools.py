@@ -565,3 +565,19 @@ def test_사용량은_평가용_콜백에_넘긴다():
     agent = AnthropicToolAgent(fake.client(), MODEL, on_usage=lambda task, u: usages.append(task))
     asyncio.run(agent.decide(CONTEXT, 4500, date(2026, 9, 29)))
     assert usages == ["도구 고르기"]
+
+
+# 채팅 확인 안내 문구 (2026-11-20) : 확인 카드는 대화로 확인, [확인] 버튼을 누르라고 하지 않는다
+def test_도구_설명에는_확인_버튼을_누르라는_말이_없어야_한다():
+    defs = {d["name"]: d["description"] for d in tools.tool_definitions()}
+    for name, description in defs.items():
+        assert "[확인]을 누르" not in description, name
+    assert "회원이 대화로 확인 말을 하기 전에는" in defs["draft_pet_update"]
+    assert "사진을 붙이고 대화로 확인 말을 하기 전에는" in defs["draft_observation_cycle"]
+
+
+def test_도구_system에는_채팅_확인_규칙이_들어가고_확인_버튼_안내는_없어야_한다():
+    system = tool_system()
+    assert clients.CHAT_CONFIRM_RULE in system
+    assert "'수정해 줘'" in clients.CHAT_CONFIRM_RULE
+    assert "[확인]을 누르" not in system
