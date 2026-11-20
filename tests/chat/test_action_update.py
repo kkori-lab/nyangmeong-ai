@@ -182,18 +182,50 @@ def test_반려동물을_정하지_못하면_반려동물_정보_수정도_petCh
 
 @pytest.mark.parametrize(
     "raw",
-    [{"pet_bdwg": 0}, {"pet_bdwg": -1.5}, {"chip_no": "abc123"}],
+    [
+        {"pet_bdwg": 0},
+        {"pet_bdwg": -1.5},
+        {"chip_no": "abc123"},
+        # 인식칩 번호는 숫자 12자리 또는 15자리만
+        {"chip_no": "1234567890123"},
+        {"chip_no": "12345678901234567890"},
+    ],
 )
-def test_양수가_아닌_체중이나_숫자가_아닌_칩_번호는_카드에서_비워야_한다(client, java, raw):
+def test_양수가_아닌_체중이나_숫자가_아닌_칩_번호는_비우고_되물어야_한다(client, java, raw):
     use_agent(client, FakeToolAgent("draft_pet_update", raw))
     room = room_of(client, java, pet_sn=CHOCO)
 
     action = events(send(client, room, "초코 정보 바꿔 줘"))[-1][1]["action"]
 
     assert action["input"] == {"petSn": CHOCO}
+    assert action["missing"] == ["petBdwg" if "pet_bdwg" in raw else "chipNo"]
+    saved = java.ai_messages(room)[-1]["cnvrsCn"]
+    assert "비어 있어요" in saved
+    assert "등록해 줘" not in saved
 
 
-@pytest.mark.parametrize("values", [{"petBdwg": 0}, {"chipNo": "abc"}])
+def test_규칙_밖_칩_번호를_되물은_뒤_맞는_번호를_주면_빈_칸_없는_카드여야_한다(client, java):
+    use_agent(client, FakeToolAgent("draft_pet_update", {"chip_no": "1234567890123"}))
+    room = room_of(client, java, pet_sn=CHOCO)
+    first = events(send(client, room, "초코 칩 번호 1234567890123으로 바꿔 줘"))[-1][1]["action"]
+
+    use_agent(client, FakeToolAgent("draft_pet_update", {"chip_no": "123456789012"}))
+    prior = {"tool": first["tool"], "input": first["input"]}
+    action = events(send(client, room, "123456789012야", action=prior))[-1][1]["action"]
+
+    assert action["input"] == {"petSn": CHOCO, "chipNo": "123456789012"}
+    assert action["missing"] == []
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"petBdwg": 0},
+        {"chipNo": "abc"},
+        {"chipNo": "1234567890123"},
+        {"chipNo": "12345678901234567890"},
+    ],
+)
 def test_양수가_아닌_체중이나_숫자가_아닌_칩_번호의_결과는_400(client, java, values):
     room = room_of(client, java)
 
@@ -201,6 +233,18 @@ def test_양수가_아닌_체중이나_숫자가_아닌_칩_번호의_결과는_
 
     assert res.status_code == 400
     assert java.ai_messages(room) == []
+
+
+@pytest.mark.parametrize("chip_no", ["123456789012", "123456789012345"])
+def test_숫자_12자리나_15자리_인식칩_번호는_카드에_싣고_결과를_저장해야_한다(client, java, chip_no):
+    use_agent(client, FakeToolAgent("draft_pet_update", {"chip_no": chip_no}))
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    action = events(send(client, room, "초코 칩 번호 바꿔 줘"))[-1][1]["action"]
+    res = action_result(client, room, "draft_pet_update", "DONE", action["input"])
+
+    assert action["input"] == {"petSn": CHOCO, "chipNo": chip_no}
+    assert res.status_code == 201
 
 
 # 결과 요약

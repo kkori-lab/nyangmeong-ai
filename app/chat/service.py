@@ -240,6 +240,8 @@ class Judged:
     tool: str | None = None
     # ACTION : 검증한 확인 카드 input(Java 칸, petSn 제외)
     action: dict | None = None
+    # ACTION : LLM 값이 규칙 밖이라 비운 칸(되물음)
+    rejected: tuple[str, ...] = ()
     # SEARCH(READ) : 결과를 본 뒤 고른 쓰기 도구의 확인 카드, 답변 스트림이 채움
     cards: list[ActionCard] | None = None
     # FN-AIM-002-03 : 의료 고지 여부. 사용법 답변은 False
@@ -249,7 +251,7 @@ class Judged:
     # SEARCH(READ) : 결과 뒤 고른 이동·사용법 도구의 바로가기, 답변 스트림이 채움. 앞이 우선
     follow_shortcuts: list[Intent] | None = None
     # ACTION : 이어 고른 쓰기 도구의 (도구, 검증한 input). 첫 카드는 tool·action (여러 명령 ②)
-    more: tuple[tuple[str, dict], ...] = ()
+    more: tuple[tuple[str, dict, tuple[str, ...]], ...] = ()
 
 
 def _guide_shortcut(chunk_id: str) -> Intent | None:
@@ -322,7 +324,7 @@ async def _chain_cards(
     # 같은 도구·쓰기 아닌 도구·글·장애면 거기서 멈추고 모은 카드만
     # 이어 고르기 전체가 첫 글자 제한 안
     picked = [judged.tool]
-    more: list[tuple[str, dict]] = []
+    more: list[tuple[str, dict, tuple[str, ...]]] = []
     messages = context
     current = decision
     try:
@@ -347,7 +349,7 @@ async def _chain_cards(
                     logger.info("이어 고른 쓰기 도구 대상 번호 없음: %s", call.name)
                     break
                 picked.append(call.name)
-                more.append((call.name, nxt.action or {}))
+                more.append((call.name, nxt.action or {}, nxt.rejected))
     except (ClassifyError, TimeoutError) as error:
         logger.warning(
             "쓰기 이어 고르기 실패(%s): 카드 %d장으로", type(error).__name__, len(picked)
@@ -499,12 +501,13 @@ def _card_judged(
         date_said = rules.mentions_date(text)
         args = catalog.keep_prior_dates(card, args, base, date_said, today)
     values = catalog.card_input(card, args, now, {}, base)
+    rejected = tuple(_rejected(card, args, values))
     if catalog.missing_target_ids(card, values):
         # 경로·본문 필수 번호 칸은 카드에서 고를 수 없음 : 안내 글(SEARCH), 고지 없음
         logger.info("쓰기 도구 대상 번호 없음: %s", call.name)
         stream = _fixed(_target_missing(card))
         return Judged(Intent(kind=IntentKind.SEARCH), stream=stream, notice=False)
-    return Judged(Intent(kind=IntentKind.ACTION), tool=call.name, action=values)
+    return Judged(Intent(kind=IntentKind.ACTION), tool=call.name, action=values, rejected=rejected)
 
 
 def _route_mixed(
@@ -768,13 +771,14 @@ class _Follow:
                 logger.info("쓰기 도구 두 번째 실행 안 함: %s", call.name)
                 return None
             found = await self.pets.pets() if _uses_pets(card) else []
-            values = call.args.model_dump(exclude_none=True)
-            values = catalog.card_input(card, values, self.read.now, self.seen, rows=self.rows)
+            raw = call.args.model_dump(exclude_none=True)
+            values = catalog.card_input(card, raw, self.read.now, self.seen, rows=self.rows)
             if catalog.missing_target_ids(card, values):
                 logger.info("쓰기 도구 대상 번호 없음: %s", call.name)
                 return _target_missing_note(card)
             named = self.pets.named(found)
-            shown = action_card(card, values, found, named, None, self.read.room_pet)
+            rejected = _rejected(card, raw, values)
+            shown = action_card(card, values, found, named, None, self.read.room_pet, rejected)
             self.cards.append(shown)
             return ACTION_SHOWN.format(summary=action_summary(shown))
         if call.name in (tools.NAVIGATE, tools.SEARCH_GUIDE) and call.args is not None:
@@ -1413,6 +1417,20 @@ async def save_receipt_result(
     return saved
 
 
+def _rejected(entry: "catalog.CatalogEntry", values: dict, card: dict) -> list[str]:
+    # LLM 값이 Java 칸 규칙 밖이라 카드에서 비운 칸 : 되물음(배열·번호·날짜 hook 칸 제외)
+    plain = {name: value for name, value in values.items() if name not in entry.hook_roles}
+    found: list[str] = []
+    for name, value in catalog.to_java(entry, plain).items():
+        param = entry.params.get(name)
+        skip = param is None or param.type == catalog.ARRAY or catalog.is_id(name)
+        if skip or name == catalog.PET_SN:
+            continue
+        if value != "" and card.get(name) is None:
+            found.append(name)
+    return found
+
+
 def action_card(
     entry: "catalog.CatalogEntry",
     values: dict,
@@ -1420,6 +1438,7 @@ def action_card(
     named: list[PetInfo],
     draft_pet: int | None,
     room_pet: int | None,
+    rejected: Sequence[str] = (),
 ) -> ActionCard:
     """확인 카드(2단계 쓰기) : Java 칸 그대로 + 검증한 input + 빈 필수 칸"""
     values = dict(values)
@@ -1443,6 +1462,8 @@ def action_card(
     # FN-AIM-012-08 : 같은 반려동물에 같은 이름의 케어 항목이 있으면 안내
     if warn and _same_name(name, pet.care_artcl_nms):
         notice = DUPLICATE_NOTICE.format(pet=pet.pet_nm, name=name)
+    missing = catalog.missing(entry, values)
+    missing += [name for name in rejected if name not in missing]
     return ActionCard.model_validate(
         {
             "tool": entry.name,
@@ -1452,7 +1473,7 @@ def action_card(
             "params": catalog.card_params(entry),
             "rules": catalog.card_rules(entry),
             "input": values,
-            "missing": catalog.missing(entry, values),
+            "missing": missing,
             "petChoices": choices,
             "petNm": pet.pet_nm if pet else None,
             "notice": notice,
@@ -1467,26 +1488,26 @@ async def _action_reply(
     entry = tools.card_entry(judged.tool)
     if entry is None:
         raise AppError("INVALID_REQUEST", 400, "모르는 도구입니다.")
-    picked = [(entry, judged.action or {})]
-    for tool, values in judged.more:
+    picked = [(entry, judged.action or {}, judged.rejected)]
+    for tool, values, rejected in judged.more:
         more = tools.card_entry(tool)
         if more is not None:
-            picked.append((more, values))
+            picked.append((more, values, rejected))
     priors = turn.priors()
     # 고치기(여러 명령 ②) : 고른 도구가 모두 돌려받은 목록 안이면 나머지 카드는 그대로
     prior_tools = [draft.tool for draft in priors]
-    keep = len(priors) > 1 and all(item.name in prior_tools for item, _ in picked)
-    used = [item for item, _ in picked]
+    keep = len(priors) > 1 and all(item.name in prior_tools for item, *_ in picked)
+    used = [item for item, *_ in picked]
     if keep:
         used += [e for draft in priors if (e := tools.card_entry(draft.tool)) is not None]
     pets = await register.contexts.get_pets() if any(_uses_pets(e) for e in used) else []
     compact = re.sub(r"\s+", "", text)
     named = [pet for pet in pets if pet.pet_nm in compact]
     cards: list[ActionCard] = []
-    for item, values in picked:
+    for item, values, rejected in picked:
         prior = next((draft for draft in priors if draft.tool == item.name), None)
         draft_pet = prior.values.get(catalog.PET_SN) if prior is not None else None
-        cards.append(action_card(item, values, pets, named, draft_pet, turn.pet_sn))
+        cards.append(action_card(item, values, pets, named, draft_pet, turn.pet_sn, rejected))
     if not keep:
         return cards
     merged: list[ActionCard] = []

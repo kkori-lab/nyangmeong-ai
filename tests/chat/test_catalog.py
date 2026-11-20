@@ -277,10 +277,10 @@ def test_숫자_칸은_Java_min_max를_input_schema_범위로_실어야_한다()
     prop = entry("draft_care_item").definition["input_schema"]["properties"]["cycle_days"]
 
     value = next(item for item in prop["anyOf"] if item.get("type") != "null")
-    assert (value["minimum"], value["maximum"]) == (1, 9999)
+    assert (value["minimum"], value["maximum"]) == (1, 365)
 
 
-@pytest.mark.parametrize("days", [0, 10000])
+@pytest.mark.parametrize("days", [0, 366])
 def test_주기가_Java_min_max_밖이면_도구_인자에서_비워야_한다(days):
     tools.use_catalog(build(fake_catalog_json()))
 
@@ -301,11 +301,11 @@ def test_주기가_Java_min_max_안이면_도구_인자에_남아야_한다():
 
     call = tools.parse(
         "draft_care_item",
-        {"care_artcl_nm": "발톱 깎기", "care_cycle_cd": "HLTC0042", "cycle_days": 9999},
+        {"care_artcl_nm": "발톱 깎기", "care_cycle_cd": "HLTC0042", "cycle_days": 365},
     )
 
     assert call.args is not None
-    assert call.args.cycle_days == 9999
+    assert call.args.cycle_days == 365
 
 
 def test_가짜_공통코드는_룰_흐름의_코드와_같아야_한다():

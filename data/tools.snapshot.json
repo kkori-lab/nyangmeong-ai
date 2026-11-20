@@ -1,6 +1,6 @@
 {
-  "version": "a508c7db3d2e6a4b60e875a49482031a13f541a9cbf499558c1b1a2a02865f54",
-  "structureVersion": "2e36eaa440d464698c6318ae4ab2f7a72405b4712348463bbf440a3309cd5aba",
+  "version": "7f486480b8237b89ebed124c33a39f120c68f5c4746e70777605d1b11cc522c4",
+  "structureVersion": "09ec2c1d0edd8d9bca4370c1d34a7c8834e25512b5ddf1eec44fa72e221f2c71",
   "tools": [
     {
       "name": "draft_care_completion",
@@ -24,7 +24,7 @@
         "rprsIconId": {"in": "body", "type": "string", "maxLength": 20},
         "careZoneCd": {"in": "body", "type": "code", "group": "HLTG13", "required": true},
         "careCycleCd": {"in": "body", "type": "code", "group": "HLTG15"},
-        "cycleDrctInptDayCnt": {"in": "body", "type": "int", "min": 1, "max": 9999},
+        "cycleDrctInptDayCnt": {"in": "body", "type": "int", "min": 1, "max": 365},
         "lastCmptnYmd": {"in": "body", "type": "date"}
       },
       "rules": [
@@ -44,7 +44,7 @@
         "rprsIconId": {"in": "body", "type": "string", "maxLength": 20},
         "careZoneCd": {"in": "body", "type": "code", "group": "HLTG13"},
         "careCycleCd": {"in": "body", "type": "code", "group": "HLTG15"},
-        "cycleDrctInptDayCnt": {"in": "body", "type": "int", "min": 1, "max": 9999}
+        "cycleDrctInptDayCnt": {"in": "body", "type": "int", "min": 1, "max": 365}
       },
       "rules": [
         {"requiredIf": {"field": "cycleDrctInptDayCnt", "when": "careCycleCd", "equals": "HLTC0042"}}
@@ -141,13 +141,14 @@
         "vrtySn": {"in": "body", "type": "long"},
         "vrtyDrctInptNm": {"in": "body", "type": "string", "maxLength": 40},
         "petBrdt": {"in": "body", "type": "date"},
-        "chipNo": {"in": "body", "type": "string", "pattern": "^[0-9]{0,20}$"},
+        "chipNo": {"in": "body", "type": "string", "pattern": "^([0-9]{12}|[0-9]{15})?$"},
         "petGndrCd": {"in": "body", "type": "code", "group": "PETG02", "minLength": 1},
         "nutrYn": {"in": "body", "type": "boolean"},
-        "petBdwg": {"in": "body", "type": "decimal", "positive": true, "precision": 8, "scale": 3},
-        "goalBdwg": {"in": "body", "type": "decimal", "positive": true, "precision": 8, "scale": 3},
-        "minBdwg": {"in": "body", "type": "decimal", "positive": true, "precision": 8, "scale": 3},
-        "maxBdwg": {"in": "body", "type": "decimal", "positive": true, "precision": 8, "scale": 3},
+        "petBdwg": {"in": "body", "type": "decimal", "positive": true, "precision": 5, "scale": 2},
+        "goalBdwg": {"in": "body", "type": "decimal", "positive": true, "precision": 5, "scale": 2},
+        "minBdwg": {"in": "body", "type": "decimal", "positive": true, "precision": 5, "scale": 2},
+        "maxBdwg": {"in": "body", "type": "decimal", "positive": true, "precision": 5, "scale": 2},
+        "bdwgRngDrctInptYn": {"in": "body", "type": "string", "pattern": "^[YN]$"},
         "colrCd": {"in": "body", "type": "code", "group": "PETG03", "minLength": 1},
         "colrDrctInptNm": {"in": "body", "type": "string", "maxLength": 20},
         "chrcCn": {"in": "body", "type": "string", "maxLength": 1000},
@@ -603,6 +604,7 @@
         "neLot": {"in": "query", "type": "decimal"},
         "cntrLat": {"in": "query", "type": "decimal"},
         "cntrLot": {"in": "query", "type": "decimal"},
+        "whole": {"in": "query", "type": "boolean"},
         "page": {"in": "query", "type": "int", "min": 1},
         "size": {"in": "query", "type": "int", "min": 1, "max": 50}
       },
