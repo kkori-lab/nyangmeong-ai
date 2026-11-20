@@ -1,7 +1,12 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-끝남: SCR-AIM-002 대화창 · `docs/api/chat.md`를 지금 동작에 맞추기 (`cnvrsCn`·`delta` Markdown(GFM), ActionCard `params` 빈 값 null, 수정 카드는 날짜만 오면 원래 시간. 문서만, 검증 1회차 통과, 사람 확인 2026-11-20)
+SCR-AIM-004 대화창 · 테스트 시간 줄이기 (가짜 도구 목록 한 번만 만들기) — 기획 (시작 2026-11-20 17:25)
+- 측정(2026-11-20, 이 PC): pytest 1,299개 132~188초, CI(Linux) Check 단계 97초. `tests/chat` 806개 84초 중 autouse `tool_catalog` → `fake_catalog()` → `catalog.build`가 테스트마다 돈다(프로파일에서 `test_messages.py` 57개 기준 테스트 시간의 절반 이상, 도구 50개 스키마 생성). 테스트도 앱도 만든 목록을 고치지 않는다(grep 확인). xdist 시험은 `-n auto`(16) 133초로 그대로, `-n 4`로 `tests/chat` 84→47초
+- ① 바꿀 파일: `tests/chat/fakes.py` — `fake_catalog()`를 `functools.cache`로 한 번만 만들어 같은 `Catalog`를 돌려준다(`fake_catalog_json()`은 그대로 새 dict). `conftest.py`·`test_now_words.py` 호출은 그대로
+  - 완료 조건: 명령: `sh scripts/check.sh` 종료 0, 통과 수 그대로(1298 passed, 1 skipped). 명령: 같은 PC에서 `uv run pytest -q tests/chat`을 바꾸기 전 커밋과 바꾼 뒤 연달아 재서 줄어든 것(기대 절반 안팎). 화면: 없음(테스트만)
+- 이번엔 안 함(다음에 할 것으로): 캐릭터 테스트 약 60~70초(실제 이미지 겹치기·굽기, `test_bake.py`·`test_items.py`) 작은 이미지로 줄이기 / pytest-xdist 병렬(새 의존성·`scripts/check.sh`·`scripts/doctor.py` 공용 하네스 변경, ① 뒤 다시 재고 정함)
+- 새 의존성: 없음
 
 ## 다음에 할 것
 - 연결 남음: 한 메시지 여러 명령 ② 프론트 `done.actions` (LJS 프론트, frontend 세션에 알림): `done.actions`(최대 3장, 첫 카드가 `action`)를 다음 메시지의 `actions`로 돌려보내고, `execute`면 순서대로 각 `call` 실행·하나가 실패해도 나머지 실행·카드마다 `action-result`(묶음 저장 없음). 요청 `actions` 4개 이상은 400. 옮긴 뒤 AI도 `action`(요청·응답) 지움 (`docs/api/chat.md` 2026-11-19)
