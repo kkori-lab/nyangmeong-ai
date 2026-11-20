@@ -1,12 +1,12 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-끝남: SCR-AIM-012 대화창 · 채팅 확인 안내 문구 (쓰기 카드 도구 설명의 "카드에서 [확인]을 누르기 전에는" → "대화로 확인 말을 하기 전에는", 도구 규칙에 채팅 확인 안내 한 줄. 검증 1회차 통과, 사람 확인 2026-11-20)
+끝남: SCR-AIM-004 대화창 · 판정 지연 줄이기 (`tool_eval` 지연 나누기·9회차 기록, 앱 코드 그대로. 기준 1,640ms 못 넘어 사람 결정 대기로 넘김. 검증 1회차 통과, 사람 확인 2026-11-20)
 
 ## 다음에 할 것
+- 공용 하네스 PR (LJS): `scripts/tool_eval.py` 지연 나누기(`first_ms`·`decide_ms`·종류별 표·`--core`·결과 파일 이름 마이크로초, 2026-11-20 판정 지연 마일스톤). 이 커밋에서 빼고 따로 PR. 콘솔 한글 깨짐은 `PYTHONIOENCODING=utf-8`
 - 연결 남음: 한 메시지 여러 명령 ② 프론트 `done.actions` (LJS 프론트, frontend 세션에 알림): `done.actions`(최대 3장, 첫 카드가 `action`)를 다음 메시지의 `actions`로 돌려보내고, `execute`면 순서대로 각 `call` 실행·하나가 실패해도 나머지 실행·카드마다 `action-result`(묶음 저장 없음). 요청 `actions` 4개 이상은 400. 옮긴 뒤 AI도 `action`(요청·응답) 지움 (`docs/api/chat.md` 2026-11-19)
-- 공용 하네스 PR (LJS): `scripts/tool_eval.py` `_DecisionRecorder`가 첫 고르기만 기록(추가-1). 이 커밋에서 빼고 따로 PR — 병합 전에는 T84·T89·T90이 이어 고르기의 마지막 고르기로 잡혀 틀림
-- 대화창 판정 지연 (LJS): tool search를 빼도 T01~T44 판정 지연 중앙값 2,054ms로 기준 1,640ms 초과(5회차 끔). 자주 쓰는 READ만 싣기·search_guide·글 답변 출력 줄이기로 본다
+- 대화창 판정 지연 (LJS, 사람 결정 대기): 9회차(2026-11-20, `tool-calling.md` 7-1절)로 T01~T44 중앙값 1,849~2,020ms는 글 답변 19문항을 뺀 쓰기 카드 고르기 시간(1.6~1.7초, 앞에 thinking)이 정한다. 고르기 끝 중앙값은 1.2~1.5초. thinking 끄기는 정확 13·14/44로 못 씀, 도구 10개만 싣기는 0.1~0.3초 빠르나 2단계 고르기 설계 필요. 정할 것: 기준을 고르기 끝으로 바꿀지, 쓰기 도구 설명 줄이기, ③ 설계
 - 연결 남음: FN-AIM-012-05·10 채팅으로 등록 확인·FN-AIM-013-02 사진 턴 저장 프론트 연결 (LJS 프론트, frontend 세션): `docs/api/chat.md` 확정(2026-11-13) 알림 보냄. 프론트는 모달 대신 `done.message` 글, `done.execute`면 `call` 실행 뒤 `action-result`, 사진은 `image-intent` 응답 `messages`로 그리고 `aiCnvrsRoomSn`으로 이어 감, MEDICAL_RECEIPT 경로의 `receipt-result`에 `cnvrsCn` 안 보냄. 프론트 몫 1~5(스크롤·유효성 메시지·다른 화면 진입 이력·플로팅 버튼 반려동물·햄버거)도 frontend 세션
 - 채팅 확인 다듬기 (LJS): 빈 칸 이름이 도구 설명 앞부분이라 "병원일 때 검진유형"처럼 어색함(`_missing_names`), "해 줘"만은 확인으로 안 봄 — 실사용 뒤 정한다.
 - 로컬 DB 정리 (LJS 백엔드): 2026-11-13 검증으로 mbrSn 1에 대화방 461~468 생김 / 화면 확인으로 캐릭터 601·603·604·608~612·614 × 아이템 51 굽기 실패 행 9개 생김 / 2026-11-13 tool search 검증 방 480·481 / 2026-11-17 리포트 화면 확인으로 mbrSn 6의 petSn 20에 산책 기록 `dailyHlthRcdSn` 55532 / 2026-11-19 tool_eval 검증 대화방 557~563·여러 명령 ② 검증 방 567·568(mbrSn 1) / FN-MYP-010-23 재생성 확인(2026-11-19): 문의 235·237·238, 작업 810·820·821·822, 캐릭터 621·600·625
@@ -49,6 +49,5 @@
 - 백엔드 PR #232 병합됨(2026-11-12 확인). 각자 로컬 DB에 v0.14 (11) 실행 (LJS 백엔드)
 - 도구 확장 후속 (LJS): 커뮤니티 설명은 KSJ, 플레이스는 YAY 확인. `list_faqs`는 운영 FAQ 문항이 정해지면 다시(지금 시드는 같은 질문 8개 복사본)
 - 여러 아이 일정 READ 남은 메모 (LJS): 반려동물 몸무게(`petBdwg` 등) `scale 3`은 PR #221 범위 밖(담당자에게 전달됨). 옛 등록 카드(`draft`·REGISTER·등록 칸 추출 LLM)는 프론트 범용 카드 전환 뒤 삭제. Python은 도구 목록을 기동 때 1회만 받으므로 Java를 다시 띄우면 Python도 다시 띄운다
-- 로컬 `LOG_DIR` 팀 기본값 (LJS, 사람 결정 대기): 로컬도 서버와 같은 경로로 쓸지. 정하면 `.env.local.example` 설명("개발 PC는 비움")과 디스코드 `.env.local` 값을 바꿈. Windows에서는 지금 드라이브 루트 아래로 풀림. Pylance가 Windows에서 `logs._chmod`의 `os.name` 분기 뒤를 회색 표시(동작 무관), 원하면 분기 삭제
 - 로컬 `LOG_DIR` 팀 기본값 (LJS, 사람 결정 대기): 로컬도 서버와 같은 경로로 쓸지. 정하면 `.env.local.example` 설명("개발 PC는 비움")과 디스코드 `.env.local` 값을 바꿈. Windows에서는 지금 드라이브 루트 아래로 풀림. Pylance가 Windows에서 `logs._chmod`의 `os.name` 분기 뒤를 회색 표시(동작 무관), 원하면 분기 삭제 / 로그 파일 배포 전 사람 할 일 (LJS, 다음 main 배포 전): 배포마다 서버 `.env.local`이 secret `ENV_FILE`로 통째로 덮어써지므로, 서버의 지금 `.env.local`·`.env`에 있는 키(`BACKEND_BASE_URL`, AI 키 3개, `CHAT_TOOL_*`, 타임아웃 등)를 빠짐없이 `ENV_FILE`에 옮기고 `LOG_DIR`(Java `app.log.dir`과 같은 폴더)를 추가. 서버에 `deploy` 그룹·SELinux 확인, 배포 사용자와 서비스 사용자가 다르면 600인 `.env.local`을 서비스가 못 읽으니 확인, 워크플로우 변경을 backend-90에 알림. 배포 뒤 폴더 `drwxrws---`·파일 `-rw-rw----`(그룹 deploy)와 요청 줄 확인. 필요하면 배포 전 `.env.local.bak` 백업 단계 추가 검토
 - 답 없는 질문이 이력에 둘이면 `disable_parallel_tool_use`로도 첫 도구가 이전 질문용(`get_expense_total`, 실측 3/3). 지금 질문만 보게 할지는 tool_eval 문항으로 정한다 (LJS)
