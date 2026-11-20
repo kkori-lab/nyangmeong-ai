@@ -56,7 +56,7 @@ def done_of(response) -> dict:
         ("아니 취소해", rules.ACTION_CANCEL),
         ("4.5로 바꿔줘", None),
         ("응 근데 4.5로 바꿔줘", None),
-        ("수정해 줘", None),
+        ("수정해 줘", rules.ACTION_CONFIRM),
         ("", None),
     ],
 )
@@ -157,3 +157,30 @@ def test_칸을_고치는_말은_지금처럼_도구_흐름으로_간다(client,
     assert done["action"]["input"]["rcdNvl"] == 4.5
     assert done["execute"] is False
     assert "4.5" in done["message"]["cnvrsCn"]
+
+
+# 수정 카드 확인 말 (2026-11-20) : 실행·취소 글도 "수정"
+
+PET_UPDATE = "draft_pet_update"
+PET_FULL = {"petSn": CHOCO, "goalBdwg": 4}
+
+
+def test_수정_카드에_수정해_줘면_실행을_지시하고_수정할게요를_저장한다(client, java):
+    agent = FakeToolAgent(fail=True)
+    use_agent(client, agent)
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    done = done_of(send(client, room, "수정해 줘", action={"tool": PET_UPDATE, "input": PET_FULL}))
+
+    assert agent.decides == []
+    assert done["execute"] is True
+    assert done["message"]["cnvrsCn"] == "수정할게요."
+
+
+def test_수정_카드에_취소_말이면_수정하지_않았어요를_저장한다(client, java):
+    use_agent(client, FakeToolAgent(fail=True))
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    done = done_of(send(client, room, "아니", action={"tool": PET_UPDATE, "input": PET_FULL}))
+
+    assert done["message"]["cnvrsCn"] == "수정하지 않았어요."

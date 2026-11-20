@@ -300,3 +300,47 @@ def test_찾지_못함_안내는_대상_이름으로_만든다(client, java):
     evs = events(send(client, room, "지출 3만 2천원으로 고쳐 줘"))
 
     assert deltas(evs) == "바꿀 지출 기록을 찾지 못했어요. 이름이나 날짜를 넣어 다시 말해 주세요."
+
+
+# 확인 카드 후속 (2026-11-20) : 수정 카드 문구, 지금 이름과 같은 petNm, 이전 카드 부정 막기
+
+PET_UPDATE = "draft_pet_update"
+
+
+def test_수정_카드_턴은_수정해_줘로_확인을_안내해야_한다(client, java):
+    use_agent(client, FakeToolAgent(PET_UPDATE, {"goal_bdwg": 4}))
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    events(send(client, room, "초코 목표 체중 4kg로 바꿔 줘"))
+
+    saved = java.ai_messages(room)[-1]["cnvrsCn"]
+    assert "'수정해 줘'" in saved
+    assert "'등록해 줘'" not in saved
+
+
+def test_지금_이름과_같은_새_이름은_수정_카드에서_빼야_한다(client, java):
+    use_agent(client, FakeToolAgent(PET_UPDATE, {"pet_nm": "초코", "goal_bdwg": 4}))
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    action = events(send(client, room, "초코 목표 체중 4kg로 바꿔 줘"))[-1][1]["action"]
+
+    assert "petNm" not in action["input"]
+    assert action["input"]["goalBdwg"] == 4
+    assert "— 초코" not in java.ai_messages(room)[-1]["cnvrsCn"]
+
+
+def test_지금_이름과_다른_새_이름은_수정_카드에_그대로_실어야_한다(client, java):
+    use_agent(client, FakeToolAgent(PET_UPDATE, {"pet_nm": "보리"}))
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    action = events(send(client, room, "초코 이름 보리로 바꿔 줘"))[-1][1]["action"]
+
+    assert action["input"]["petNm"] == "보리"
+
+
+def test_도구_규칙은_이전_확인_카드를_부정하지_말라고_해야_한다():
+    from app.chat.clients import tool_system
+
+    text = tool_system()
+    assert "서버가 실제로 띄운 확인 카드와 그 결과다" in text
+    assert "카드가 없었다거나 그 안내가 잘못이었다고 말하지 않는다" in text

@@ -268,3 +268,21 @@ def test_카드_목록이_네_개면_400이다(client, java):
 
     assert response.status_code == 400
     assert response.json()["code"] == "INVALID_REQUEST"
+
+
+# 등록·수정 카드가 섞이면 확인 문구 "진행" (2026-11-20)
+
+
+def test_등록과_수정_카드가_섞이면_진행해_줘로_확인을_안내한다(client, java):
+    agent = SequenceAgent((HEALTH, WEIGHT_RAW), ("draft_pet_update", {"goal_bdwg": 4}))
+    use_agent(client, agent)
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    done = done_of(
+        send(client, room, "초코 오늘 8시 반 체중 4.2kg 기록하고 목표 체중도 4kg로 바꿔줘")
+    )
+
+    assert [card["tool"] for card in done["actions"]] == [HEALTH, "draft_pet_update"]
+    text = done["message"]["cnvrsCn"]
+    assert "'진행해 줘'" in text
+    assert "'등록해 줘'" not in text
