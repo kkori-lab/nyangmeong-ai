@@ -1,9 +1,11 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-끝남: SCR-AIM-002 대화창 · `docs/api/chat.md`를 지금 동작에 맞추기 (`cnvrsCn`·`delta` Markdown(GFM), ActionCard `params` 빈 값 null, 수정 카드는 날짜만 오면 원래 시간. 문서만, 검증 1회차 통과, 사람 확인 2026-11-20)
+SCR-AIM-004 대화창 · 테스트 시간 줄이기 — 끝 (2026-11-20). `fake_catalog()`를 `functools.cache`로 한 번만 만들어 `tests/chat` 806개 25.6초 → 11.1초, 전체 1299 passed 41초(이 PC, 연달아 잼). 검증 1회차 통과
 
 ## 다음에 할 것
+- 공용 하네스 Mac 오류 (LJS, PR로 따로): `scripts/impl-check.sh:35`·`scripts/milestone-status.sh:23`의 `sed -i`가 BSD sed에서 실패해 상태 줄을 못 바꿈(2026-11-20 손으로 고침). `scripts/verify-collect.sh:37`이 macOS `/bin/sh`(bash 3.2)에서 `$( … )` 안 `case` 패턴의 짝 없는 `)`로 문법 오류(추정, 패턴 앞 `(`로 피함)
+- 테스트 시간 후속 (LJS): 캐릭터 테스트(`test_bake.py`·`test_items.py`, 실제 이미지 겹치기·굽기)를 작은 이미지로 줄이기 / pytest-xdist 병렬은 전체 41초가 된 지금 다시 재고 정함(새 의존성·`scripts/check.sh` 변경)
 - 연결 남음: 한 메시지 여러 명령 ② 프론트 `done.actions` (LJS 프론트, frontend 세션에 알림): `done.actions`(최대 3장, 첫 카드가 `action`)를 다음 메시지의 `actions`로 돌려보내고, `execute`면 순서대로 각 `call` 실행·하나가 실패해도 나머지 실행·카드마다 `action-result`(묶음 저장 없음). 요청 `actions` 4개 이상은 400. 옮긴 뒤 AI도 `action`(요청·응답) 지움 (`docs/api/chat.md` 2026-11-19)
 - 대화창 판정 지연 (LJS, 사람 결정 대기): 9회차(2026-11-20, `tool-calling.md` 7-1절)로 T01~T44 중앙값 1,849~2,020ms는 글 답변 19문항을 뺀 쓰기 카드 고르기 시간(1.6~1.7초, 앞에 thinking)이 정한다. 고르기 끝 중앙값은 1.2~1.5초. thinking 끄기는 정확 13·14/44로 못 씀, 도구 10개만 싣기는 0.1~0.3초 빠르나 2단계 고르기 설계 필요. 정할 것: 기준을 고르기 끝으로 바꿀지, 쓰기 도구 설명 줄이기, ③ 설계
 - 연결 남음: FN-AIM-012-05·10 채팅으로 등록 확인·FN-AIM-013-02 사진 턴 저장 프론트 연결 (LJS 프론트, frontend 세션): `docs/api/chat.md` 확정(2026-11-13) 알림 보냄. 프론트는 모달 대신 `done.message` 글, `done.execute`면 `call` 실행 뒤 `action-result`, 사진은 `image-intent` 응답 `messages`로 그리고 `aiCnvrsRoomSn`으로 이어 감, MEDICAL_RECEIPT 경로의 `receipt-result`에 `cnvrsCn` 안 보냄. 프론트 몫 1~5(스크롤·유효성 메시지·다른 화면 진입 이력·플로팅 버튼 반려동물·햄버거)도 frontend 세션
