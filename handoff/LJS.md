@@ -1,10 +1,11 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-캐릭터 테스트 시간 줄이기 — 끝 (2026-11-22). 굽기 1회가 1024 시트 실제 처리로 약 0.7초라, `test_bake_대상이_묶음보다_많으면_나눠_굽고_마지막에_lastYn`을 `BAKE_BATCH` 2·캐릭터 5개로 바꿔 18.1초 → 1.2~1.8초(앱 코드 변경 없음). 검증 1회차 통과, 사람 확인 끝
+캐릭터 테스트 시트를 512로 줄이기 — 끝 (2026-11-22). `test_bake.py`의 `sheet()`·`dark_sheet()`를 512·좌표 절반(`LAYOUT` scale 1.6)으로 바꿔 판정이 바뀐 테스트 없이 `tests/character` 24.2초 → 9.6초, 전체 37.9초 → 22.5초(앱 코드 변경 없음, 운영 시트는 1024 그대로). 검증 1회차 통과, 사람 확인 끝
 
 ## 다음에 할 것
-- 테스트 시간 후속 (LJS): 캐릭터 테스트 시트를 512로 줄이기(`CELLS`·좌표 기대값 대량 변경, `engine` 임계값 영향 미확인) / pytest-xdist 병렬은 부하 낮을 때 전체 시간을 다시 재고 정함(새 의존성·`scripts/check.sh` 변경)
+- 하네스 스크립트 macOS 오류 (공용, PR로 따로): `scripts/impl-check.sh` 상태 줄 `sed -i`가 BSD sed에서 실패(`milestone-status.sh`도 같은 방식, 추정) / `scripts/verify-collect.sh` 37줄 syntax error로 종료 코드 2 / 같은 파일 18줄 `cut -c8-`가 시작 시각 연도를 잘라 냄
+- 테스트 시간 후속 (LJS): pytest-xdist 병렬은 부하 낮을 때 전체 시간을 다시 재고 정함(새 의존성·`scripts/check.sh` 변경)
 - 연결 남음: 한 메시지 여러 명령 ② 프론트 `done.actions` (LJS 프론트, frontend 세션에 알림): `done.actions`(최대 3장, 첫 카드가 `action`)를 다음 메시지의 `actions`로 돌려보내고, `execute`면 순서대로 각 `call` 실행·하나가 실패해도 나머지 실행·카드마다 `action-result`(묶음 저장 없음). 요청 `actions` 4개 이상은 400. 옮긴 뒤 AI도 `action`(요청·응답) 지움 (`docs/api/chat.md` 2026-11-19)
 - 대화창 판정 지연 (LJS, 사람 결정 대기): 9회차(2026-11-20, `tool-calling.md` 7-1절)로 T01~T44 중앙값 1,849~2,020ms는 글 답변 19문항을 뺀 쓰기 카드 고르기 시간(1.6~1.7초, 앞에 thinking)이 정한다. 고르기 끝 중앙값은 1.2~1.5초. thinking 끄기는 정확 13·14/44로 못 씀, 도구 10개만 싣기는 0.1~0.3초 빠르나 2단계 고르기 설계 필요. 정할 것: 기준을 고르기 끝으로 바꿀지, 쓰기 도구 설명 줄이기, ③ 설계
 - 연결 남음: FN-AIM-012-05·10 채팅으로 등록 확인·FN-AIM-013-02 사진 턴 저장 프론트 연결 (LJS 프론트, frontend 세션): `docs/api/chat.md` 확정(2026-11-13) 알림 보냄. 프론트는 모달 대신 `done.message` 글, `done.execute`면 `call` 실행 뒤 `action-result`, 사진은 `image-intent` 응답 `messages`로 그리고 `aiCnvrsRoomSn`으로 이어 감, MEDICAL_RECEIPT 경로의 `receipt-result`에 `cnvrsCn` 안 보냄. 프론트 몫 1~5(스크롤·유효성 메시지·다른 화면 진입 이력·플로팅 버튼 반려동물·햄버거)도 frontend 세션
