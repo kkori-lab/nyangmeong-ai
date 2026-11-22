@@ -30,8 +30,9 @@ BLACK = (0, 0, 0, 255)
 RED = (220, 30, 30, 255)
 BLUE = (30, 30, 220, 255)
 GREEN = (30, 200, 30, 255)
-CELLS = [(100, 150), (620, 150), (100, 650), (620, 650)]
-LAYOUT = Layout(0.8, 136.0, 90.0)
+# 512 시트 : 1024로 굽으면 테스트 1개에 약 1초
+CELLS = [(50, 75), (310, 75), (50, 325), (310, 325)]
+LAYOUT = Layout(1.6, 136.0, 90.0)
 BODY = "MYPC0004"
 FACE = "MYPC0002"
 
@@ -40,19 +41,19 @@ def sheet(
     *, hat=False, body=False, face=False, shift=(0, 0), over_body: tuple | None = None
 ) -> bytes:
     """over_body : 의상 상자와 겹치는 자리에 칠할 색 (겹침 순서 확인용)"""
-    image = Image.new("RGBA", (1024, 1024), MAGENTA)
+    image = Image.new("RGBA", (512, 512), MAGENTA)
     draw = ImageDraw.Draw(image)
     for x, y in CELLS:
         x, y = x + shift[0], y + shift[1]
-        draw.rectangle((x, y, x + 300, y + 300), fill=FUR, outline=BLACK, width=4)
+        draw.rectangle((x, y, x + 150, y + 150), fill=FUR, outline=BLACK, width=2)
         if hat:
-            draw.rectangle((x + 60, y - 70, x + 240, y + 40), fill=RED)
+            draw.rectangle((x + 30, y - 35, x + 120, y + 20), fill=RED)
         if body:
-            draw.rectangle((x + 40, y + 200, x + 260, y + 280), fill=BLUE)
+            draw.rectangle((x + 20, y + 100, x + 130, y + 140), fill=BLUE)
         if face:
-            draw.rectangle((x + 80, y + 90, x + 220, y + 130), fill=GREEN)
+            draw.rectangle((x + 40, y + 45, x + 110, y + 65), fill=GREEN)
         if over_body:
-            draw.rectangle((x + 100, y + 170, x + 200, y + 240), fill=over_body)
+            draw.rectangle((x + 50, y + 85, x + 100, y + 120), fill=over_body)
     buffer = io.BytesIO()
     image.save(buffer, "PNG")
     return buffer.getvalue()
@@ -76,8 +77,8 @@ def layer_of(worn_sheet: bytes) -> bake.Sprite | None:
 def test_item_layer_맨몸_컷_좌표로_아이템만_뽑는다():
     layer = layer_of(sheet(body=True))
     assert layer is not None
-    assert (layer.x, layer.y) == (40, 200)
-    assert layer.image.size == (221, 81)
+    assert (layer.x, layer.y) == (20, 100)
+    assert layer.image.size == (111, 41)
     pixels = np.array(layer.image)
     assert count(pixels, BLUE) == pixels.shape[0] * pixels.shape[1]
 
@@ -87,15 +88,15 @@ def test_item_layer_맨몸과_같으면_빈_레이어():
 
 
 def test_worn_sprite_밀려_그려진_시트도_맞춘다():
-    layer = layer_of(sheet(body=True, shift=(5, -6)))
+    layer = layer_of(sheet(body=True, shift=(3, -3)))
     assert layer is not None
-    assert (layer.x, layer.y) == (40, 200)
+    assert (layer.x, layer.y) == (20, 100)
 
 
 def test_worn_sprite_맨몸_위로_나온_머리_아이템은_음수_좌표():
     bare = engine.stand_front_cut(sheet())
     sprite = bake.worn_sprite(bare, engine.stand_front_cut(sheet(hat=True)))
-    assert sprite.y == -70
+    assert sprite.y == -35
 
 
 def test_validate_레이어가_비면_거절():
@@ -262,15 +263,15 @@ WHITE = (250, 250, 250, 255)
 
 def dark_sheet(*, source: bool = False, item: bool = False, pearl: bool = False) -> bytes:
     """검은 털 캐릭터 (source면 털을 밝힌 굽기 입력에 그린 착용 시트)"""
-    image = Image.new("RGBA", (1024, 1024), MAGENTA)
+    image = Image.new("RGBA", (512, 512), MAGENTA)
     draw = ImageDraw.Draw(image)
     fur = (188, 188, 188, 255) if source else DARK
     for x, y in CELLS:
-        draw.rectangle((x, y, x + 300, y + 300), fill=fur, outline=BLACK, width=6)
-        draw.rectangle((x + 100, y + 100, x + 130, y + 130), fill=(150, 80, 30, 255))
+        draw.rectangle((x, y, x + 150, y + 150), fill=fur, outline=BLACK, width=3)
+        draw.rectangle((x + 50, y + 50, x + 65, y + 65), fill=(150, 80, 30, 255))
         if item:
             fill = WHITE if pearl else RED
-            draw.rectangle((x + 60, y + 180, x + 240, y + 250), fill=fill, outline=BLACK, width=8)
+            draw.rectangle((x + 30, y + 90, x + 120, y + 125), fill=fill, outline=BLACK, width=4)
     buffer = io.BytesIO()
     image.save(buffer, "PNG")
     return buffer.getvalue()
@@ -286,7 +287,7 @@ def dark_layer(worn_sheet: bytes) -> bake.Sprite | None:
 def test_bake_source_어두운_털은_밝히고_머리는_원본():
     source = bake.bake_source(dark_sheet(), BODY)
     assert source != dark_sheet()
-    assert rgba(source)[300, 300, 0] >= bake.LIT_BASE
+    assert rgba(source)[150, 150, 0] >= bake.LIT_BASE
     assert bake.bake_source(dark_sheet(), bake.REGN_HEAD) == dark_sheet()
 
 
@@ -298,9 +299,9 @@ def test_bake_source_밝은_털은_그대로():
 def test_item_layer_검은_털에서_검은_외곽선을_유지한다():
     layer = dark_layer(dark_sheet(source=True, item=True))
     assert layer is not None
-    assert layer.image.size == (181, 71)
+    assert layer.image.size == (91, 36)
     pixels = np.array(layer.image)
-    assert count(pixels, BLACK) == 2 * (181 + 71) * 8 - 4 * 64
+    assert count(pixels, BLACK) == 2 * (91 + 36) * 4 - 4 * 16
 
 
 def test_item_layer_검은_외곽선_안쪽_흰_아이템은_남는다():
@@ -313,7 +314,7 @@ def test_item_layer_밝힌_털은_레이어에_남지_않는다():
     source = Image.open(io.BytesIO(dark_sheet(source=True, item=True))).convert("RGBA")
     draw = ImageDraw.Draw(source)
     for x, y in CELLS:
-        draw.rectangle((x + 40, y + 200, x + 58, y + 230), fill=(235, 235, 235, 255))
+        draw.rectangle((x + 20, y + 100, x + 29, y + 115), fill=(235, 235, 235, 255))
     buffer = io.BytesIO()
     source.save(buffer, "PNG")
     layer = dark_layer(buffer.getvalue())
@@ -324,7 +325,7 @@ def test_item_layer_밝힌_털은_레이어에_남지_않는다():
 def test_item_layer_밝은_털의_외곽선_복구는_맨몸_외곽선을_넘지_않는다():
     layer = layer_of(sheet(body=True))
     assert layer is not None
-    assert layer.image.size == (221, 81)
+    assert layer.image.size == (111, 41)
 
 
 def test_render_검은_털_바탕은_원본_색():
