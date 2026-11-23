@@ -117,6 +117,8 @@ def test_도구는_builtin_등록_READ이고_설명과_인자_스키마를_모�
         "draft_pet_update",
         "draft_expense",
         "draft_observation_cycle",
+        # 검사 수치 저장(SCR-AIM-013 대화창 PDF, 2026-11-23)
+        "draft_inspection_values",
     }
     for d in defs.values():
         assert "쓸 때:" in d["description"] and "말하는 법:" in d["description"]

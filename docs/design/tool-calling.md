@@ -179,7 +179,7 @@ Python이 Java 내부 GET을 쿠키와 함께 불러 결과를 LLM에 돌려주�
 | 삭제(일정·기록·글·반려동물), 회원 탈퇴 | 되돌릴 수 없다 → `navigate` |
 | 아이템 구매·장착 | 포인트가 쓰인다 → `navigate`(입혀 보기는 `preview_items`) |
 | 공동양육 초대·수락·해제 | 다른 회원에게 영향 → `navigate` |
-| 검사결과지 PDF 분석 | 대화창은 PDF를 받지 않는다(SCR-AIM-013 ①·POL-006) |
+| 검사결과지 PDF 분석(분석 자체) | 도구 고르기 LLM이 아니라 첨부 흐름이다: 대화창 PDF 첨부 → `image-intent` `CHECKUP_PDF` → `POST /ai/checkups/lab-results` → `checkup-card`(2026-11-23 사람 결정, `docs/api/chat.md`). 저장은 확인 카드 도구 `draft_inspection_values`(Java `POST /api/pets/{petSn}/inspection-values`, 백엔드 `@AiTool` 병합 전) |
 | 좋아요·신고·댓글·즐겨찾기 | 대화로 할 이유가 적다. 대상 글·장소를 고르는 단계가 길다 || 회원정보(닉네임·휴대폰·비밀번호) 변경 | 본인 확인이 필요하다 → `navigate` |
 
 ## 4. 한 턴의 흐름

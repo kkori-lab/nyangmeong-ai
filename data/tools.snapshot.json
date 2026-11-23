@@ -114,6 +114,18 @@
       "rules": []
     },
     {
+      "name": "draft_inspection_values",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "POST", "path": "/api/pets/{petSn}/inspection-values"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "ckupRcdSn": {"in": "body", "type": "long", "required": true},
+        "values": {"in": "body", "type": "array", "required": true, "minItems": 1, "items": {"inspArtclCd": {"type": "code", "group": "HLTG12", "maxLength": 8}, "inspArtclDrctInptNm": {"type": "string", "maxLength": 40}, "rsltNvl": {"type": "decimal", "min": 0, "max": 9999999, "precision": 7, "scale": 2, "required": true}, "unitNm": {"type": "string", "required": true, "maxLength": 20}, "refLlmtNvl": {"type": "decimal", "min": 0, "max": 9999999, "precision": 7, "scale": 2}, "refUplmtNvl": {"type": "decimal", "min": 0, "max": 9999999, "precision": 7, "scale": 2}, "memoCn": {"type": "string", "maxLength": 200}}}
+      },
+      "rules": []
+    },
+    {
       "name": "draft_observation_cycle",
       "domain": "health",
       "kind": "CARD",

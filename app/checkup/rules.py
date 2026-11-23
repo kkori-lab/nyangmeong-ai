@@ -6,11 +6,10 @@ from pathlib import Path
 import yaml
 
 from app.checkup.schemas import LabResultItem
-from app.core.response import AppError
+from app.core.pdf import MAX_PDF_BYTES as MAX_PDF_BYTES
+from app.core.pdf import validate_pdf as validate_pdf
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
-MAX_PDF_BYTES = 10 * 1024 * 1024
-PDF_SIGNATURE = b"%PDF-"
 _NUMBER = re.compile(r"-?\d+(\.\d+)?")
 # INSP_NVL 컬럼 크기 : 수치 decimal(15,4), 직접입력명 40자, 단위 20자
 # 백엔드 검증은 소수 둘째 자리까지(2026-11-11) : 셋째 자리에서 사사오입
@@ -18,15 +17,6 @@ MAX_INT_DIGITS = 11
 FRACTION_DIGITS = 2
 MAX_DRCT_INPT_NM = 40
 MAX_UNIT_NM = 20
-
-
-def validate_pdf(data: bytes, file_name: str | None) -> None:
-    """FN-HLT-005-04 : 확장자 .pdf + 실제 형식(%PDF-) 검증, 10MB 이하 (REQ-NFR-003)"""
-    if len(data) > MAX_PDF_BYTES:
-        raise AppError("FILE_SIZE_EXCEEDED", 400, "파일 용량은 10MB 이하여야 합니다.")
-    _, dot, extension = (file_name or "").rpartition(".")
-    if not dot or extension.lower() != "pdf" or not data.startswith(PDF_SIGNATURE):
-        raise AppError("FILE_TYPE_NOT_ALLOWED", 400, "검사결과지 PDF만 분석할 수 있습니다.")
 
 
 def _key(name: str) -> str:
