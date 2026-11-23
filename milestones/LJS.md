@@ -514,6 +514,14 @@
 - 결과 (2026-11-23): 검증 1회차 통과, 사람 확인(테스트 18개·로컬 Java로 카드 확인). 추가-1 도구 설명·스냅샷 먼저 넣음
 - 연결 남음: SCR-AIM-013 (백엔드 `@AiTool` 병합 뒤 스냅샷 다시 뽑기, LJS 백엔드 → LJS) / SCR-AIM-013 (`ChatInput.jsx` PDF 허용·`checkup-card` 연결, LJS 프론트)
 
+## SCR-AIM-013 대화창 · 검사 수치 카드 백엔드 병합 확인 (`draft_inspection_values` 스냅샷 다시 뽑기, 추가 요청) — 끝
+- 기능: 백엔드 PR #293(`InspectionValueController.create` `@AiTool` CARD `draft_inspection_values`, 2026-11-23 병합) 뒤 실제 Java 도구 목록으로 `data/tools.snapshot.json`을 다시 뽑아, 먼저 넣은 도구 구조·설명과 맞는지 확인한다. 코드 변경은 어긋날 때만. 기능 ID 추가 없음(위 `끝` 절에서 센 기능)
+- 요청: 2026-11-23 LJS (핸드오프 다음에 할 것 맨 위)
+- 기다리는 것: 없음 (PR #293 병합됨)
+- 완료 조건: `/start` 기획의 완료 조건을 따른다.
+- 결과 (2026-11-23): 검증 1회차 통과, 사람 확인. 스냅샷을 Java 응답으로 갱신(`draft_inspection_values` 수치 칸 `precision` 9·`max` 없음, 나머지 같음). 코드 변경 없음
+- 연결 남음: 없음
+
 ## 제외
 - FN-AIM-001-01~04,06, FN-AIM-002-01,05~06, FN-AIM-004-03~07, FN-AIM-005-03~06, FN-AIM-011-01~02,04~06,17~18,20, FN-AIM-012-09,15 (27건): 프론트 몫 (LJS 프론트: 대화창 화면)
 - FN-AIM-012-12~14,17 (4건): Java 몫 (JAJ: 일정·케어 항목 저장, 알림 연계)
