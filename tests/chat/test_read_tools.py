@@ -1067,3 +1067,62 @@ def test_분류를_말하지_않은_즐겨찾기는_전체_분류로_Java를_불
     events(send(client, room, "즐겨찾기한 장소 다 보여 줘"))
 
     assert reader.calls == [("/api/place-bookmarks", {})]
+
+
+# 같은 이름 반려동물 READ 구별 (2026-11-23) : 이름이 겹치는 아이만 이름 줄에 종·품종
+
+
+def _yeontan(java, se2: str | None = "고양이", vrty2: str | None = "코리안숏헤어") -> None:
+    java.pets[0] |= {"petNm": "연탄", "petSeNm": "강아지", "vrtyNm": "말티즈"}
+    java.pets[1] |= {"petNm": "연탄", "petSeNm": se2, "vrtyNm": vrty2}
+
+
+def test_같은_이름_둘을_읽으면_이름_줄을_종_품종으로_갈라야_한다(client, java):
+    agent = use_agent(client, FakeToolAgent("get_health_indicators", {}))
+    use_reader(client, FakeToolReader({"weight": 4}))
+    _yeontan(java)
+    room = room_of(client, java)
+
+    events(send(client, room, "연탄 요즘 체중 어때?"))
+
+    first, second = (agent.results[0] or "").split("\n\n")
+    assert first.startswith("조회한 반려동물: 연탄(강아지·말티즈)\n")
+    assert second.startswith("조회한 반려동물: 연탄(고양이·코리안숏헤어)\n")
+
+
+def test_같은_이름이어도_종_품종이_없으면_이름만_붙여야_한다(client, java):
+    agent = use_agent(client, FakeToolAgent("get_health_indicators", {}))
+    use_reader(client, FakeToolReader({"weight": 4}))
+    _yeontan(java, None, None)
+    java.pets[0] |= {"petSeNm": None, "vrtyNm": None}
+    room = room_of(client, java)
+
+    events(send(client, room, "연탄 요즘 체중 어때?"))
+
+    first, second = (agent.results[0] or "").split("\n\n")
+    assert first.startswith("조회한 반려동물: 연탄\n")
+    assert second.startswith("조회한 반려동물: 연탄\n")
+
+
+def test_여러_아이_일정에서_같은_이름이면_번호와_종_품종을_붙여야_한다(client, java):
+    agent = use_agent(client, FakeToolAgent("list_my_care_schedules", {}))
+    use_reader(client, FakeToolReader([]))
+    _yeontan(java, "고양이", None)
+    room = room_of(client, java)
+
+    events(send(client, room, "연탄 다음 병원 언제야?"))
+
+    head = (agent.results[0] or "").split("\n", 1)[0]
+    assert head == "조회한 반려동물: 연탄(petSn 1, 강아지·말티즈), 연탄(petSn 2, 고양이)"
+
+
+def test_이름이_겹치지_않는_아이에는_괄호를_붙이지_않아야_한다(client, java):
+    agent = use_agent(client, FakeToolAgent("get_health_indicators", {}))
+    use_reader(client, FakeToolReader({"weight": 4}))
+    _yeontan(java)
+    java.pets.append({"petSn": 3, "petNm": "보리", "careArtclNms": [], "petSeNm": "강아지"})
+    room = room_of(client, java)
+
+    events(send(client, room, "보리 요즘 체중 어때?"))
+
+    assert (agent.results[0] or "").startswith("조회한 반려동물: 보리\n")
