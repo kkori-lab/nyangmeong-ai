@@ -43,6 +43,7 @@
 | 도메인 | 도구 후보 | Java API |
 | --- | --- | --- |
 | 건강 | 일정 등록·수정(지금 `draft_schedule`), 케어 항목 등록·수정(지금 `draft_care_item`), 오늘 케어 완료 체크, 건강 일지 기록, 관찰 기록 추가, 반려동물 정보 일부 수정(몸무게 등) | `POST /api/pets/{petSn}/care-schedules`, `/{schdlSn}`, `/care-items`, `/care-completions`, `POST /daily-health-records`, `/observation-cycles`, `PATCH /api/pets/{petSn}` |
+| 건강 (검사 수치, 2026-11-23) | 검사결과지 PDF 분석 결과의 혈액검사 수치 저장(`draft_inspection_values`). 대화창 PDF 첨부 뒤 `checkup-card`가 카드를 만들고, 검진기록(`ckupRcdSn`)은 1건이면 채우고 여럿이면 회원이 말해 `list_checkups` 뒤 채운다. 백엔드 `@AiTool` 병합 전이라 요청한 칸 규칙으로 스냅샷·`tool_prompts.yaml`에 먼저 넣었다(배열 항목 코드 칸이 있어 스냅샷만이면 안 실림). 병합되면 Java 응답으로 스냅샷을 다시 뽑아 맞춘다 | `POST /api/pets/{petSn}/inspection-values` |
 | 가계부 | 지출 등록(중복 확인 먼저)·수정, 월 지출 한도, 영수증 인식 결과 저장(SCR-AIM-013 [확인 후 저장]을 카드로) | `POST /api/expenses`(`/duplicate-check`), `/api/expenses/{expndSn}`, `PUT /api/members/me/expense-limit`, `/api/receipts/{recptSn}/save` |
 
 제외: 설정(알림 설정·읽음 처리), 커뮤니티(글·댓글·실종 신고 초안·즐겨찾기).

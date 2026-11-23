@@ -1,6 +1,6 @@
 # 검사결과지 PDF 분석 API (초안)
 
-React(SCR-HLT-005 검진상세 첨부 자료 탭 [PDF 분석])가 부른다. 담당 LJS. 결과는 저장하지 않는다. 보호자가 SCR-HLT-007에서 확인·수정한 뒤 React가 Java에 저장한다(FN-HLT-007-04).
+React(SCR-HLT-005 검진상세 첨부 자료 탭 [PDF 분석])가 부른다. AI 대화창 PDF 첨부(SCR-AIM-013, 2026-11-23)도 같은 API를 부르고, 결과를 `POST /ai/conversations/{aiCnvrsRoomSn}/checkup-card`(`docs/api/chat.md`)로 넘겨 검사 수치 저장 확인 카드를 받는다. 담당 LJS. 결과는 저장하지 않는다. 보호자가 SCR-HLT-007에서 확인·수정한 뒤 React가 Java에 저장한다(FN-HLT-007-04).
 
 | 메서드 | 경로 | 설명 | 기능 ID | 담당 | 요청 DTO | 응답 DTO |
 | --- | --- | --- | --- | --- | --- | --- |
