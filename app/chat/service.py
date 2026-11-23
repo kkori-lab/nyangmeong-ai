@@ -659,6 +659,20 @@ class _ReadPets:
         return tagged or pets
 
 
+def _same_name_kind(pet: PetInfo, pets: list[PetInfo]) -> str:
+    """같은 이름 반려동물 READ 구별 (2026-11-23) : 이름이 또 있는 아이만 "강아지·말티즈".
+    종·품종이 없으면 빈 글자(이름만)"""
+    if not any(p.pet_nm == pet.pet_nm and p.pet_sn != pet.pet_sn for p in pets):
+        return ""
+    return "·".join(part for part in (pet.pet_se_nm, pet.vrty_nm) if part)
+
+
+def _pet_list_name(pet: PetInfo, pets: list[PetInfo]) -> str:
+    # 여러 아이 일정 이름표 : "연탄(petSn 1006, 강아지·말티즈)", 이름이 안 겹치면 번호만
+    kind = _same_name_kind(pet, pets)
+    return f"{pet.pet_nm}(petSn {pet.pet_sn}{', ' + kind if kind else ''})"
+
+
 @dataclass
 class _ReadOutcome:
     # ask : Java 미호출 되물음 문구, result : tool_result 글
@@ -708,7 +722,7 @@ async def _read_once(
         if len(chosen) < len(found):
             pet_sns = ",".join(str(p.pet_sn) for p in chosen)
         # 결과 행에는 petSn만 있어 이름표를 붙인다
-        names = ", ".join(f"{p.pet_nm}(petSn {p.pet_sn})" for p in chosen)
+        names = ", ".join(_pet_list_name(p, found) for p in chosen)
         label = READ_PET_LABEL.format(name=names)
     requests = [
         catalog.read_request(entry, values, p.pet_sn if p else None, seen, pet_sns) for p in targets
@@ -750,7 +764,9 @@ async def _read_once(
                 catalog.seen_rows(data, rows)
             text = rules.read_result_text(catalog.drop_result_fields(entry, data), limit)
         if "pet" in entry.hooks and pet is not None:
-            text = READ_PET_LABEL.format(name=pet.pet_nm) + "\n" + text
+            kind = _same_name_kind(pet, await pets.pets())
+            name = f"{pet.pet_nm}({kind})" if kind else pet.pet_nm
+            text = READ_PET_LABEL.format(name=name) + "\n" + text
         elif label is not None:
             text = label + "\n" + text
         blocks.append(text)
