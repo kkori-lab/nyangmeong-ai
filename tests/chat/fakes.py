@@ -10,6 +10,8 @@ from app.chat.rules import RouteRow
 from app.core.backend import external_error
 
 TITLE_LENGTH = 30
+# 검사 수치 저장 확인 카드 (SCR-AIM-013 대화창 PDF, 2026-11-23)
+INSPECTION_TOOL = "draft_inspection_values"
 # 기본 가짜 도구 고르기가 질문으로 보는 표현
 QUESTION = re.compile(r"[?？]|뭐|왜|어떻게|알려|어때|될까|되나|나요|까요")
 
@@ -304,6 +306,10 @@ def fake_catalog_json(structure_version: str | None = None) -> dict:
         for param in tool["params"].values():
             if param["type"] == "code":
                 param["codes"] = FAKE_CODES[param["group"]]
+        if tool["name"] == INSPECTION_TOOL:
+            # 배열 항목 코드 칸(inspArtclCd)도 Java처럼 코드 값을 싣는다 (2026-11-23)
+            item = tool["params"]["values"]["items"]["inspArtclCd"]
+            item["codes"] = FAKE_CODES[item["group"]]
     if structure_version is not None:
         raw["structureVersion"] = structure_version
     return raw

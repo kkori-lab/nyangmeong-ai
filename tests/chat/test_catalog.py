@@ -34,6 +34,8 @@ ACTION = {
     # 배열·파일 칸(2단계 ③) : 코드 칸이 있어 스냅샷만이면 안 실림
     "draft_expense",
     "draft_observation_cycle",
+    # 검사 수치 저장(SCR-AIM-013 대화창 PDF, 2026-11-23) : 항목 코드 칸이 있어 스냅샷만이면 안 실림
+    "draft_inspection_values",
 }
 # 스냅샷(코드 값 없음)으로도 싣는 ACTION : 코드 칸 없음
 ACTION_WITHOUT_CODES = {"draft_care_completion", "draft_expense_limit"}

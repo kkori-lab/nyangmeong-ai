@@ -109,7 +109,13 @@ def test_image_intent_X_Requested_With_없음_403(client, judge):
 @pytest.mark.parametrize(
     ("file", "code"),
     [
-        (("r.pdf", b"%PDF-1.7 0000", "application/pdf"), "FILE_TYPE_NOT_ALLOWED"),
+        # PDF는 받지만(2026-11-23) 확장자와 실제 형식이 같아야 한다
+        (("r.jpg", b"%PDF-1.7 0000", "image/jpeg"), "FILE_TYPE_NOT_ALLOWED"),
+        (("r.pdf", image_bytes("PNG"), "application/pdf"), "FILE_TYPE_NOT_ALLOWED"),
+        (
+            ("r.pdf", b"%PDF-1.7" + b"0" * (10 * 1024 * 1024), "application/pdf"),
+            "FILE_SIZE_EXCEEDED",
+        ),
         (("r.jpg", image_bytes("PNG"), "image/jpeg"), "FILE_TYPE_NOT_ALLOWED"),
         (("r.png", b"\x89PNG\r\n\x1a\n" + b"0" * 16, "image/png"), "FILE_TYPE_NOT_ALLOWED"),
         (
@@ -122,6 +128,15 @@ def test_image_intent_파일_검증_400(client, judge, file, code):
     res = post(client, file=file)
     assert res.status_code == 400
     assert res.json()["code"] == code
+    assert judge.calls == []
+
+
+@pytest.mark.parametrize("name", ["result.pdf", "RESULT.PDF"])
+def test_image_intent_PDF는_판단_LLM_없이_CHECKUP_PDF(client, judge, name):
+    # 대화창 PDF 첨부 (2026-11-23) : 검사결과지 분석으로. 글과 무관
+    res = post(client, {"cnvrsCn": "캐릭터 만들어줘"}, (name, b"%PDF-1.7 0000", "application/pdf"))
+    assert res.status_code == 200
+    assert res.json()["data"]["kind"] == "CHECKUP_PDF"
     assert judge.calls == []
 
 

@@ -1,6 +1,6 @@
 {
-  "version": "7f486480b8237b89ebed124c33a39f120c68f5c4746e70777605d1b11cc522c4",
-  "structureVersion": "09ec2c1d0edd8d9bca4370c1d34a7c8834e25512b5ddf1eec44fa72e221f2c71",
+  "version": "5d234ff1865f09e2be5f337390c8dbabe8c83e77c1fa2556985ec2da67fea859",
+  "structureVersion": "b419994cfbc598dc0b33da19d04a1af38a79d149dfc9e08115769c457d85da7c",
   "tools": [
     {
       "name": "draft_care_completion",
@@ -110,6 +110,18 @@
         "expndAmt": {"in": "body", "type": "long", "min": 1, "max": 9999999999999},
         "dtlMttr": {"in": "body", "type": "string", "maxLength": 1000},
         "expndPlcusNm": {"in": "body", "type": "string", "maxLength": 80}
+      },
+      "rules": []
+    },
+    {
+      "name": "draft_inspection_values",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "POST", "path": "/api/pets/{petSn}/inspection-values"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "ckupRcdSn": {"in": "body", "type": "long", "required": true},
+        "values": {"in": "body", "type": "array", "required": true, "minItems": 1, "items": {"inspArtclCd": {"type": "code", "group": "HLTG12", "maxLength": 8}, "inspArtclDrctInptNm": {"type": "string", "maxLength": 40}, "rsltNvl": {"type": "decimal", "required": true, "min": 0, "precision": 9, "scale": 2}, "unitNm": {"type": "string", "required": true, "maxLength": 20}, "refLlmtNvl": {"type": "decimal", "min": 0, "precision": 9, "scale": 2}, "refUplmtNvl": {"type": "decimal", "min": 0, "precision": 9, "scale": 2}, "memoCn": {"type": "string", "maxLength": 200}}}
       },
       "rules": []
     },

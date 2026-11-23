@@ -58,6 +58,9 @@ class RegisterDraft(_Camel):
 class PetChoice(_Camel):
     pet_sn: int
     pet_nm: str
+    # 같은 이름 반려동물을 칩에서 구별해 보여 줄 때(FN-AIM-012-04), 모르면 칸 없음
+    pet_se_nm: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    vrty_nm: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class RegisterCard(RegisterDraft):
@@ -305,6 +308,7 @@ class ImageIntentKind(StrEnum):
     CHARACTER = "CHARACTER"  # 반려동물 사진 -> 캐릭터 만들기
     MEDICAL_RECEIPT = "MEDICAL_RECEIPT"  # 동물병원 영수증 -> 영수증 분석
     EXPENSE_RECEIPT = "EXPENSE_RECEIPT"  # 그 밖의 영수증 -> 가계부
+    CHECKUP_PDF = "CHECKUP_PDF"  # PDF -> 검사결과지 분석 (판단 LLM 미호출, 2026-11-23)
     ASK = "ASK"  # 모름 -> React가 칩으로 되물음
 
 
@@ -315,3 +319,37 @@ class ImageIntentResult(_Camel):
     kind: ImageIntentKind
     ai_cnvrs_room_sn: int
     messages: list[ConversationMessage]
+
+
+class CheckupResult(StrEnum):
+    RECOGNIZED = "RECOGNIZED"  # 분석 성공(인식 0건 포함)
+    NOT_LAB_RESULT = "NOT_LAB_RESULT"  # 검사결과지가 아님(lab-results 422)
+    ERROR = "ERROR"  # 일시 오류(시간 초과·API 오류)
+    CANCELED = "CANCELED"  # 분석 중 [취소]
+
+
+class CheckupLabItem(_Camel):
+    # POST /ai/checkups/lab-results LabResultItem 그대로(Java InspectionValueItemRequest 칸 이름)
+    insp_artcl_cd: str | None = None
+    insp_artcl_drct_inpt_nm: str | None = None
+    rslt_nvl: float | None = None
+    unit_nm: str | None = None
+    ref_llmt_nvl: float | None = None
+    ref_uplmt_nvl: float | None = None
+
+
+class CheckupCardRequest(_Camel):
+    """대화창 검사결과지 PDF 분석 뒤 결과 요약 저장 + 검사 수치 저장 확인 카드 (2026-11-23)
+    - React가 lab-results 응답을 그대로 보낸다. RECOGNIZED일 때만 items를 쓴다"""
+
+    result: CheckupResult
+    # 대상 반려동물 : 영수증처럼 React가 정함(FN-AIM-013-03)
+    pet_sn: int = Field(ge=1)
+    items: list[CheckupLabItem] = Field(default_factory=list, max_length=100)
+    excluded_artcl_nms: list[str] = Field(default_factory=list, max_length=100)
+
+
+class CheckupCardResult(_Camel):
+    # 저장한 AI 메시지와 확인 카드(없으면 null). 카드는 done.action과 같은 모양, 저장 안 함
+    messages: list[ConversationMessage]
+    action: ActionCard | None = None
