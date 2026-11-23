@@ -1,10 +1,10 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-대화창 PDF 첨부 검사결과지 분석 (SCR-AIM-013, 추가 요청) — 끝 (2026-11-23). `image-intent`가 PDF를 판단 LLM 없이 `CHECKUP_PDF`로(`[PDF]` 저장), 새 `POST /ai/conversations/{방}/checkup-card`가 결과 요약 + 검사 수치 저장 확인 카드(`draft_inspection_values`, 검진기록 1건이면 채움·여럿이면 빈 칸+최근 3건·0건이면 안내), READ 뒤 같은 쓰기 도구는 돌려받은 카드 input을 바탕으로. 추가-1: 도구 설명 `tool_prompts.yaml`·스냅샷에 먼저 넣음(백엔드 병합 전). 검증 통과(1회차), 사람 확인 끝
+대화창 검사 수치 카드 백엔드 병합 확인 (SCR-AIM-013, 추가 요청) — 끝 (2026-11-23). 백엔드 PR #293 병합 뒤 로컬 Java `GET /internal/ai/tools`로 `data/tools.snapshot.json` 갱신(코드 값 제외). 먼저 넣은 `draft_inspection_values`와 다른 곳은 수치 칸 3개 `precision` 7→9·`max` 없음뿐, 설명·가짜·테스트 변경 없음. structureVersion `09ec2c1d…` → `b419994c…`. 검증 통과(1회차), 사람 확인 끝
 
 ## 다음에 할 것
-- 연결 남음: SCR-AIM-013 대화창 PDF 검사 수치 카드 — 백엔드 `@AiTool(draft_inspection_values)` 병합 뒤 Java 응답으로 `data/tools.snapshot.json` 다시 뽑아 먼저 넣은 도구와 맞는지 확인 (LJS 백엔드 → LJS)
+- SDMA 코드 반영 (LJS): Java HLTG12에 SDMA `HLTC0078`이 생겼다(2026-11-23 도구 목록). `data/lab_items.yaml` SDMA에 `cd`를 넣고 5행 주석을 고친다 — 지금은 직접입력명으로 보내 Java가 `HLTC0035`(직접입력)로 저장. 아래 JAJ 요청 줄의 후속
 - 연결 남음: SCR-AIM-013 대화창 PDF 프론트 (LJS 프론트, frontend 세션에 알림): `ChatInput.jsx` PDF 허용 → `image-intent` `CHECKUP_PDF`면 `POST /ai/checkups/lab-results` → `POST /ai/conversations/{방}/checkup-card`(`docs/api/chat.md`) → 기존 확인 카드로 그림. 실행 뒤 같은 `ckupRcdSn`에 PDF 첨부(`checkup-attachments`)할지 프론트가 정함
 - 같은 이름 반려동물 후속 (LJS 프론트): `PetChoiceChips`가 같은 이름이면 "연탄 (강아지·말티즈)"처럼 `petSeNm`·`vrtyNm` 표시(칩에 두 칸 실림, `docs/api/chat.md` petChoices) — frontend 세션에 알림
 - 테스트 시간 후속 (LJS): pytest-xdist 병렬은 부하 낮을 때 전체 시간을 다시 재고 정함(새 의존성·`scripts/check.sh` 변경)
@@ -12,7 +12,7 @@
 - 대화창 판정 지연 (LJS, 사람 결정 대기): 9회차(2026-11-20, `tool-calling.md` 7-1절)로 T01~T44 중앙값 1,849~2,020ms는 글 답변 19문항을 뺀 쓰기 카드 고르기 시간(1.6~1.7초, 앞에 thinking)이 정한다. 고르기 끝 중앙값은 1.2~1.5초. thinking 끄기는 정확 13·14/44로 못 씀, 도구 10개만 싣기는 0.1~0.3초 빠르나 2단계 고르기 설계 필요. 정할 것: 기준을 고르기 끝으로 바꿀지, 쓰기 도구 설명 줄이기, ③ 설계
 - 연결 남음: FN-AIM-012-05·10 채팅으로 등록 확인·FN-AIM-013-02 사진 턴 저장 프론트 연결 (LJS 프론트, frontend 세션): `docs/api/chat.md` 확정(2026-11-13) 알림 보냄. 프론트는 모달 대신 `done.message` 글, `done.execute`면 `call` 실행 뒤 `action-result`, 사진은 `image-intent` 응답 `messages`로 그리고 `aiCnvrsRoomSn`으로 이어 감, MEDICAL_RECEIPT 경로의 `receipt-result`에 `cnvrsCn` 안 보냄. 프론트 몫 1~5(스크롤·유효성 메시지·다른 화면 진입 이력·플로팅 버튼 반려동물·햄버거)도 frontend 세션
 - 채팅 확인 다듬기 (LJS): 빈 칸 이름이 도구 설명 앞부분이라 "병원일 때 검진유형"처럼 어색함(`_missing_names`), "해 줘"만은 확인으로 안 봄 — 실사용 뒤 정한다.
-- 로컬 DB 정리 (LJS 백엔드): 2026-11-13 검증으로 mbrSn 1에 대화방 461~468 생김 / 화면 확인으로 캐릭터 601·603·604·608~612·614 × 아이템 51 굽기 실패 행 9개 생김 / 2026-11-13 tool search 검증 방 480·481 / 2026-11-17 리포트 화면 확인으로 mbrSn 6의 petSn 20에 산책 기록 `dailyHlthRcdSn` 55532 / 2026-11-19 tool_eval 검증 대화방 557~563·여러 명령 ② 검증 방 567·568(mbrSn 1) / FN-MYP-010-23 재생성 확인(2026-11-19): 문의 235·237·238, 작업 810·820·821·822, 캐릭터 621·600·625
+- 로컬 DB 정리 (LJS 백엔드): 2026-11-13 검증으로 mbrSn 1에 대화방 461~468 생김 / 화면 확인으로 캐릭터 601·603·604·608~612·614 × 아이템 51 굽기 실패 행 9개 생김 / 2026-11-13 tool search 검증 방 480·481 / 2026-11-17 리포트 화면 확인으로 mbrSn 6의 petSn 20에 산책 기록 `dailyHlthRcdSn` 55532 / 2026-11-19 tool_eval 검증 대화방 557~563·여러 명령 ② 검증 방 567·568(mbrSn 1) / FN-MYP-010-23 재생성 확인(2026-11-19): 문의 235·237·238, 작업 810·820·821·822, 캐릭터 621·600·625 / 2026-11-23 검사 수치 카드 검증: 대화방 635 메시지 2156, 검사 수치 `inspNvlSn` 3112(petSn 327)
 - 연결 남음: FN-MYP-011-01·FN-MYP-010-13·FN-ADM-070-02 그림 참고 굽기 남은 사람 확인 (LJS): 설계 9절 "확인하지 않은 것"(강아지·어두운 털·얼굴·의상·여러 부위 동시 착용)과 그림 한 장 더 넣는 굽기 단가. 로컬은 시트 파일이 있는 캐릭터가 흰 고양이 1마리뿐이라 못 봄. 시험 굽기 `/ai/items/trial-preview`의 그림 참고는 React 요청 계약 변경과 함께(관리자 프론트). 로컬 시험 아이템 51(머리 거북이)·53(가방 거북이)은 판매 중지나 정리
 - `docs/api/chat.md` 20·80행 고지 문구 (LJS, 2026-11-11 검증 메모, 사람 결정 대기): "SEARCH면 끝에 의료 고지"라고 적혀 있으나 실제는 사용법 안내·가계부 등 READ·잡담에는 없음(READ는 도구별 `notice`, `tool-catalog.md` 1절). 맞출지 정한다. 도구 없이 바로 쓴 글 답변은 지금도 잡담만 빼고 고지
 - 연결 남음: FN-ADM-070-02 관리자 프론트 아이템 등록 (관리자 프론트): 사진을 고르면 [픽셀로 만들기] `POST /ai/items/pixel-image`(form `image`·`regnCd`·`itemNm`, 응답 `image/png`, 30~40초·이미지 1장 과금) → 미리보기 → [이 그림 쓰기]면 그 PNG를 Java 아이템 등록 이미지로(원본 사진 그대로 쓰는 선택도 남김, 2026-11-11). [굽기 지시 만들기](`POST /ai/items/bake-hints`)·[시험해 보기](`POST /ai/items/trial-preview`), 등록 뒤 `POST /ai/items/{itemSn}/bake`를 `lastYn` true까지 반복(한 번 30~40초, 매 호출 전 토큰 갱신, 502면 멈춤)
