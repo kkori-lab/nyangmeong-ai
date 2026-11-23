@@ -162,6 +162,9 @@ ACTION_CHAINED = (
 # 카드가 둘 이상일 때 : 번호 붙은 요약 줄, 빈 칸은 카드 번호로
 ACTION_ASK_LINE = "{no}. {summary}"
 ACTION_ASK_MISSING_NO = "아직 {no}번의 {names} 비어 있어요. 말로 알려 주세요."
+# 카드 여럿에서 같은 이름 반려동물이라 못 정함 : 카드 하나일 때 문구에 번호, 남은 빈 칸은 이어서
+ACTION_ASK_SAME_PET_NO = "{no}번: {line}"
+ACTION_ASK_MISSING_REST_NO = "아직 {no}번의 {names} 비어 있어요."
 # 수정 도구(경로 번호 칸) : 번호를 이 턴 READ 결과에서 못 정하면 카드 없이 (SCR-AIM-012 2단계 ②)
 ACTION_TARGET_MISSING = (
     "바꿀 대상을 이 턴 읽기 결과에서 찾지 못해 카드를 띄우지 않음. "
@@ -277,6 +280,9 @@ class Judged:
     follow_shortcuts: list[Intent] | None = None
     # ACTION : 이어 고른 쓰기 도구의 (도구, 검증한 input). 첫 카드는 tool·action (여러 명령 ②)
     more: tuple[tuple[str, dict, tuple[str, ...]], ...] = ()
+    # ACTION 고치기 : 돌려받은 같은 도구 카드가 여럿(반려동물별로 나눈 카드)일 때
+    # 그 카드마다 (목록 번호, 검증한 input, 비운 칸). 어느 카드를 고칠지는 _action_reply가 정함
+    per_prior: tuple[tuple[int, dict, tuple[str, ...]], ...] = ()
 
 
 def _guide_shortcut(chunk_id: str) -> Intent | None:
@@ -521,18 +527,45 @@ def _card_judged(
     if now is not None and rules.mentions_now(text):
         # '방금·지금' : LLM이 비운 날짜·시각을 오늘·지금으로 (2026-11-13)
         args = catalog.fill_now(card, args, now)
-    if base:
-        # 추가-1 : 날짜를 말하지 않았으면 돌려받은 카드의 날짜를 유지
-        date_said = rules.mentions_date(text)
-        args = catalog.keep_prior_dates(card, args, base, date_said, today)
-    values = catalog.card_input(card, args, now, {}, base)
-    rejected = tuple(_rejected(card, args, values))
+    # LLM이 비운 날짜 : 문장의 날짜 말, 없으면 새 등록 기록 도구만 오늘 (2026-11-23)
+    args = catalog.fill_date(card, args, rules.said_dates(text, today), today)
+    values, rejected = _card_values(text, card, args, base, today, now)
     if catalog.missing_target_ids(card, values):
         # 경로·본문 필수 번호 칸은 카드에서 고를 수 없음 : 안내 글(SEARCH), 고지 없음
         logger.info("쓰기 도구 대상 번호 없음: %s", call.name)
         stream = _fixed(_target_missing(card))
         return Judged(Intent(kind=IntentKind.SEARCH), stream=stream, notice=False)
-    return Judged(Intent(kind=IntentKind.ACTION), tool=call.name, action=values, rejected=rejected)
+    # 반려동물별로 나눈 같은 도구 카드가 여럿이면 카드마다 그 input을 바탕으로 (2026-11-23)
+    same = [no for no, draft in enumerate(priors) if draft.tool == call.name]
+    per_prior = (
+        tuple((no, *_card_values(text, card, args, priors[no].values, today, now)) for no in same)
+        if len(same) > 1
+        else ()
+    )
+    return Judged(
+        Intent(kind=IntentKind.ACTION),
+        tool=call.name,
+        action=values,
+        rejected=rejected,
+        per_prior=per_prior,
+    )
+
+
+def _card_values(
+    text: str,
+    card: "catalog.CatalogEntry",
+    args: dict,
+    base: dict | None,
+    today: date,
+    now: datetime | None,
+) -> tuple[dict, tuple[str, ...]]:
+    # 도구 인자 -> 검증한 카드 input과 비운 칸. base는 돌려받은 카드 input
+    if base:
+        # 추가-1 : 날짜를 말하지 않았으면 돌려받은 카드의 날짜를 유지
+        date_said = rules.mentions_date(text)
+        args = catalog.keep_prior_dates(card, args, base, date_said, today)
+    values = catalog.card_input(card, args, now, {}, base)
+    return values, tuple(_rejected(card, args, values))
 
 
 def _route_mixed(
@@ -1562,18 +1595,71 @@ async def _action_reply(
         used += [e for draft in priors if (e := tools.card_entry(draft.tool)) is not None]
     pets = await register.contexts.get_pets() if any(_uses_pets(e) for e in used) else []
     named = named_pets(pets, text)
+    if keep:
+        return _kept_cards(picked, judged, priors, pets, named, turn.pet_sn)
+    # 두 마리 이상 이름 : 새 등록 카드를 이름마다 한 장씩 (2026-11-23). 넘치면 나누지 않음
+    groups = [_pet_groups(item, named) for item, *_ in picked]
+    if sum(len(group) or 1 for group in groups) > ACTION_MAX_CARDS:
+        groups = [[] for _ in picked]
     cards: list[ActionCard] = []
-    for item, values, rejected in picked:
+    for (item, values, rejected), group in zip(picked, groups, strict=True):
         prior = next((draft for draft in priors if draft.tool == item.name), None)
         draft_pet = prior.values.get(catalog.PET_SN) if prior is not None else None
-        cards.append(action_card(item, values, pets, named, draft_pet, turn.pet_sn, rejected))
-    if not keep:
-        return cards
+        for pets_of in group or [named]:
+            cards.append(action_card(item, values, pets, pets_of, draft_pet, turn.pet_sn, rejected))
+    if len(cards) > len(picked):
+        logger.info("반려동물별 쓰기 카드 %d장", len(cards))
+    return cards
+
+
+def _pet_groups(entry: "catalog.CatalogEntry", named: list[PetInfo]) -> list[list[PetInfo]]:
+    # 문장 속 다른 이름이 둘 이상이면 이름별 반려동물 묶음(같은 이름 여럿은 한 묶음), 아니면 빈 목록
+    # 반려동물 칸이 있는 새 등록 카드(POST)이고 번호 칸(…Sn, petSn 제외)이 없는 도구만 나눈다
+    # 케어 완료 체크·관찰 기록처럼 번호가 그 아이의 기록을 가리키는 도구는 나누면 남의 번호가 됨
+    if "pet" not in entry.hooks or entry.call.method.upper() != "POST":
+        return []
+    if any(catalog.is_id(name) for name in entry.params):
+        return []
+    by_name: dict[str, list[PetInfo]] = {}
+    for pet in named:
+        by_name.setdefault(pet.pet_nm, []).append(pet)
+    return list(by_name.values()) if len(by_name) > 1 else []
+
+
+def _kept_cards(
+    picked: list[tuple["catalog.CatalogEntry", dict, tuple[str, ...]]],
+    judged: Judged,
+    priors: list[ActionDraft],
+    pets: list[PetInfo],
+    named: list[PetInfo],
+    room_pet: int | None,
+) -> list[ActionCard]:
+    # 고치기(여러 명령 ②) : 고른 도구의 카드만 바뀌고 나머지 카드는 그대로 목록으로
+    # 같은 도구 카드가 여럿이면(반려동물별) 이름이 나온 아이의 카드만, 없으면 모두 (2026-11-23)
+    per_prior = {no: (values, rejected) for no, values, rejected in judged.per_prior}
+    named_sns = {pet.pet_sn for pet in named}
+    targets = {no for no in per_prior if priors[no].values.get(catalog.PET_SN) in named_sns} or set(
+        per_prior
+    )
+    built: dict[str, ActionCard] = {}
     merged: list[ActionCard] = []
-    for draft in priors:
-        found = next((card for card in cards if card.tool == draft.tool), None)
-        if found is None:
-            found = _prior_card(draft, pets, turn.pet_sn)
+    for no, draft in enumerate(priors):
+        spec = next((item for item in picked if item[0].name == draft.tool), None)
+        draft_pet = draft.values.get(catalog.PET_SN)
+        if spec is None or (no in per_prior and no not in targets):
+            found = _prior_card(draft, pets, room_pet)
+        elif no in per_prior:
+            values, rejected = per_prior[no]
+            # 이름으로 고른 카드면 그 이름, 아니면 카드의 반려동물 그대로
+            own = [pet for pet in named if pet.pet_sn == draft_pet] if named_sns else []
+            found = action_card(spec[0], values, pets, own, draft_pet, room_pet, rejected)
+        else:
+            if draft.tool not in built:
+                entry, values, rejected = spec
+                built[draft.tool] = action_card(
+                    entry, values, pets, named, draft_pet, room_pet, rejected
+                )
+            found = built[draft.tool]
         if found is not None:
             merged.append(found)
     return merged
@@ -1637,11 +1723,21 @@ def _missing_lines(cards: list[ActionCard]) -> list[str]:
         if not rest:
             return [same]
         return [same, ACTION_ASK_MISSING_REST.format(names=_names_subject(rest))]
-    return [
-        ACTION_ASK_MISSING_NO.format(no=no, names=_names_subject(_missing_names(item)))
-        for no, item in enumerate(cards, start=1)
-        if item.missing
-    ]
+    lines: list[str] = []
+    for no, item in enumerate(cards, start=1):
+        if not item.missing:
+            continue
+        names = _missing_names(item)
+        same = _same_pet_line(item)
+        if same is None:
+            lines.append(ACTION_ASK_MISSING_NO.format(no=no, names=_names_subject(names)))
+            continue
+        # 같은 이름이라 못 정함 : 카드 하나일 때처럼 어느 아이인지 먼저 (2026-11-23)
+        lines.append(ACTION_ASK_SAME_PET_NO.format(no=no, line=same))
+        rest = [name for name in names if name != PET_LABEL]
+        if rest:
+            lines.append(ACTION_ASK_MISSING_REST_NO.format(no=no, names=_names_subject(rest)))
+    return lines
 
 
 def _same_pet_line(card: ActionCard) -> str | None:

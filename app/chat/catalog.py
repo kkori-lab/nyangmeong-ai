@@ -534,6 +534,25 @@ def fill_now(entry: CatalogEntry, values: dict, now: datetime) -> dict:
     return filled
 
 
+def fill_date(entry: CatalogEntry, values: dict, said: list[date], today: date) -> dict:
+    """LLM이 date hook 날짜를 비웠을 때 서버가 채운다 (2026-11-23, '오늘 음수량 50ml'에 날짜 빔 3/4)
+    - 문장의 날짜 말이 하나면 그 날짜. 여럿이면 어느 카드 것인지 몰라 빈 칸(되물음)
+    - 날짜 말이 없으면 새 등록 기록 도구(시간 입력 칸·경로 번호 칸 없음)만 오늘.
+      일정 등록·수정 카드는 빈 칸 그대로
+    - LLM이 준 날짜는 덮지 않는다"""
+    if "date" not in entry.hooks:
+        return values
+    ymd = next((n for n, r in entry.hook_roles.items() if r == "date:ymd"), None)
+    if ymd is None or values.get(ymd) not in (None, ""):
+        return values
+    if said:
+        return values | {ymd: said[0].isoformat()} if len(said) == 1 else values
+    path_ids = [n for n, p in entry.params.items() if p.loc == "path" and is_id(n)]
+    if HR_INPUT in entry.params or path_ids:
+        return values
+    return values | {ymd: today.isoformat()}
+
+
 def _compose_datetime(entry: CatalogEntry, ymd, tm, now: datetime | None) -> dict:
     target = next((name for name, p in entry.params.items() if p.type == "datetime"), None)
     if ymd is None or target is None:
