@@ -143,6 +143,12 @@ ACTION_SHOWN = (
 # 확인 카드를 모달 대신 채팅으로 확인 (2026-11-13) : 카드 턴의 저장 글과 다음 턴의 확인·취소
 ACTION_ASK_TEMPLATE = "이렇게 할까요?\n{summary}"
 ACTION_ASK_MISSING = "아직 {names} 비어 있어요. 말로 알려 주세요."
+# FN-AIM-012-04 : 같은 이름 반려동물이라 못 정함(칩이 모두 같은 이름)
+ACTION_ASK_SAME_PET = "{name} {count}. 칩에서 고르거나 '{hint} {pet}'처럼 알려 주세요."
+ACTION_ASK_SAME_PET_CHIP = "{name} {count}. 칩에서 골라 주세요."
+ACTION_ASK_MISSING_REST = "아직 {names} 비어 있어요."
+# 빈 반려동물 칸의 이름(되물음 글)
+PET_LABEL = "반려동물"
 ACTION_ASK_CONFIRM = "맞으면 '등록해 줘'라고 말해 주세요. 바꿀 내용은 말로 알려 주시면 고칠게요."
 ACTION_EXECUTE_MESSAGE = "등록할게요."
 ACTION_DROP_MESSAGE = "등록하지 않았어요."
@@ -609,7 +615,7 @@ class _ReadPets:
         return self._pets
 
     def named(self, pets: list[PetInfo]) -> list[PetInfo]:
-        return [p for p in pets if p.pet_nm in self.compact]
+        return named_pets(pets, self.compact)
 
     def targets(self, pets: list[PetInfo]) -> list[PetInfo]:
         """읽을 반려동물 : 문장 속 이름들 > 펫 태그 방의 그 아이 > 모든 아이"""
@@ -1244,6 +1250,33 @@ def _answer_fill(text: str, draft: RegisterDraft, pet_names: list[str]) -> dict:
     return {}
 
 
+# FN-AIM-012-04 : 같은 이름 반려동물을 좁히는 종 말. "개"는 "두 개"·"개월"과 겹쳐 쓰지 않는다
+SPECIES_WORDS = {"강아지": ("강아지", "댕댕이", "멍멍이"), "고양이": ("고양이", "냥이")}
+
+
+def named_pets(pets: list[PetInfo], text: str) -> list[PetInfo]:
+    """문장 속 이름에 걸린 반려동물. 같은 이름이 여럿이면 문장의 품종 이름 > 종 말로 좁힌다
+    (FN-AIM-012-04 보강, 2026-11-23). 다른 이름끼리 여럿("초코랑 까미")은 좁히지 않는다"""
+    compact = re.sub(r"\s+", "", text)
+    named = [pet for pet in pets if pet.pet_nm in compact]
+    if len(named) < 2 or len({pet.pet_nm for pet in named}) > 1:
+        return named
+    by_vrty = [p for p in named if p.vrty_nm and re.sub(r"\s+", "", p.vrty_nm) in compact]
+    named = by_vrty or named
+    said = {se for se, words in SPECIES_WORDS.items() if any(word in compact for word in words)}
+    by_se = [pet for pet in named if pet.pet_se_nm in said]
+    return by_se or named
+
+
+def pet_choices(pets: list[PetInfo], named: list[PetInfo]) -> list[PetChoice]:
+    # 못 정했을 때 칩 : 이름이 여러 마리에 걸렸으면 그 아이들만, 아니면 양육 반려동물 전부
+    shown = named if len(named) > 1 else pets
+    return [
+        PetChoice(pet_sn=p.pet_sn, pet_nm=p.pet_nm, pet_se_nm=p.pet_se_nm, vrty_nm=p.vrty_nm)
+        for p in shown
+    ]
+
+
 def _pick_pet(
     pets: list[PetInfo], named: list[PetInfo], draft_pet: int | None, room_pet: int | None
 ) -> PetInfo | None:
@@ -1251,7 +1284,12 @@ def _pick_pet(
     if len(named) == 1:
         return named[0]
     if named:
-        return None
+        # 같은 이름 여럿 : 그 안에 직전 카드 반려동물 > 펫 태그가 있으면 그 아이(2026-11-23 추가-1)
+        # 다른 이름끼리 여럿("초코랑 까미")은 두 마리를 말한 것이라 정하지 않는다
+        if len({pet.pet_nm for pet in named}) > 1:
+            return None
+        same = {pet.pet_sn: pet for pet in named}
+        return same.get(draft_pet) or same.get(room_pet)
     by_sn = {pet.pet_sn: pet for pet in pets}
     if draft_pet in by_sn:
         return by_sn[draft_pet]
@@ -1271,8 +1309,7 @@ async def build_card(
     # FN-AIM-012-02~08·10. 초안이 있는데 이 메시지에서 뽑힌 칸이 없으면 None(일반 판정으로)
     pets = await deps.contexts.get_pets()
     names = [pet.pet_nm for pet in pets]
-    compact = re.sub(r"\s+", "", text)
-    named = [pet for pet in pets if pet.pet_nm in compact]
+    named = named_pets(pets, text)
     parsed = rules.parse_register(text, deps.today, names).values()
     if draft is None:
         values = parsed
@@ -1306,7 +1343,7 @@ async def build_card(
         card_type=CardType.ASK if missing else CardType.CARE_ITEM if care else CardType.SCHEDULE,
         pet_sn=pet.pet_sn if pet else None,
         pet_nm=pet.pet_nm if pet else None,
-        pet_choices=[] if pet else [PetChoice(pet_sn=p.pet_sn, pet_nm=p.pet_nm) for p in pets],
+        pet_choices=[] if pet else pet_choices(pets, named),
         missing=[to_camel(name) for name in missing],
         **values,
     )
@@ -1474,7 +1511,7 @@ def action_card(
         if pet is not None:
             values[catalog.PET_SN] = pet.pet_sn
         else:
-            choices = [PetChoice(pet_sn=p.pet_sn, pet_nm=p.pet_nm) for p in pets]
+            choices = pet_choices(pets, named)
     notice = None
     name = values.get("careArtclNm")
     warn = "same_name_warning" in entry.hooks and pet is not None and isinstance(name, str)
@@ -1524,8 +1561,7 @@ async def _action_reply(
     if keep:
         used += [e for draft in priors if (e := tools.card_entry(draft.tool)) is not None]
     pets = await register.contexts.get_pets() if any(_uses_pets(e) for e in used) else []
-    compact = re.sub(r"\s+", "", text)
-    named = [pet for pet in pets if pet.pet_nm in compact]
+    named = named_pets(pets, text)
     cards: list[ActionCard] = []
     for item, values, rejected in picked:
         prior = next((draft for draft in priors if draft.tool == item.name), None)
@@ -1592,12 +1628,41 @@ def _missing_lines(cards: list[ActionCard]) -> list[str]:
     if len(cards) == 1:
         if not cards[0].missing:
             return []
-        return [ACTION_ASK_MISSING.format(names=_names_subject(_missing_names(cards[0])))]
+        names = _missing_names(cards[0])
+        same = _same_pet_line(cards[0])
+        if same is None:
+            return [ACTION_ASK_MISSING.format(names=_names_subject(names))]
+        # 같은 이름이라 못 정함 : 어느 아이인지 먼저, 나머지 빈 칸은 이어서 (추가-2)
+        rest = [name for name in names if name != PET_LABEL]
+        if not rest:
+            return [same]
+        return [same, ACTION_ASK_MISSING_REST.format(names=_names_subject(rest))]
     return [
         ACTION_ASK_MISSING_NO.format(no=no, names=_names_subject(_missing_names(item)))
         for no, item in enumerate(cards, start=1)
         if item.missing
     ]
+
+
+def _same_pet_line(card: ActionCard) -> str | None:
+    # 반려동물 칸이 비었고 칩이 모두 같은 이름일 때 : 무엇으로 구별할지 예시
+    if catalog.PET_SN not in card.missing:
+        return None
+    choices = card.pet_choices
+    if len(choices) < 2 or len({choice.pet_nm for choice in choices}) > 1:
+        return None
+    pet = choices[0].pet_nm
+    counts = {2: "둘이에요", 3: "셋이에요", 4: "넷이에요"}
+    count = counts.get(len(choices), f"{len(choices)}마리예요")
+    name = _names_subject([pet])
+    hints = [
+        [choice.pet_se_nm for choice in choices],
+        [choice.vrty_nm for choice in choices],
+    ]
+    hint = next((h[0] for h in hints if all(h) and len(set(h)) == len(h)), None)
+    if hint is None:
+        return ACTION_ASK_SAME_PET_CHIP.format(name=name, count=count)
+    return ACTION_ASK_SAME_PET.format(name=name, count=count, hint=hint, pet=pet)
 
 
 def _missing_names(card: ActionCard) -> list[str]:
@@ -1610,7 +1675,7 @@ def _missing_names(card: ActionCard) -> list[str]:
     names: list[str] = []
     for java in card.missing:
         if java == catalog.PET_SN:
-            names.append("반려동물")
+            names.append(PET_LABEL)
             continue
         key = re.sub(r"\[\d+\]", "[]", java)
         llm = by_java.get(key)

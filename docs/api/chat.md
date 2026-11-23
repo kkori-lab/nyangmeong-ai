@@ -111,7 +111,7 @@ RegisterDraft의 필드에 아래가 더해진다. 필수 칸이 모두 찬 경�
 | --- | --- | --- | --- | --- |
 | cardType | String | Y | `SCHEDULE` 일정 카드·`CARE_ITEM` 케어 항목 카드·`ASK` 되물음 | AIM-012-05·06·07 |
 | petNm | String | N | 정한 반려동물 이름 | AIM-012-04 |
-| petChoices | List<`{petSn, petNm}`> | Y | 반려동물을 정하지 못했을 때 이름 칩(양육 반려동물 전부). 정했으면 빈 배열 | AIM-012-04 |
+| petChoices | List<`{petSn, petNm, petSeNm?, vrtyNm?}`> | Y | 반려동물을 정하지 못했을 때 이름 칩(양육 반려동물 전부, 문장 속 이름이 여러 마리에 걸렸으면 그 아이들만(같은 이름이면 문장의 품종 이름·종 말 "강아지"·"댕댕이"·"멍멍이"·"고양이"·"냥이"로 먼저 좁힘). `petSeNm`(종 이름)·`vrtyNm`(품종 이름)은 Java가 줄 때만 실림 — 같은 이름 칩을 "까미 (강아지·말티즈)"처럼 구별해 보여 줄 때 쓴다. 같은 이름이라 못 정하면 저장 글은 "까미가 둘이에요. 칩에서 고르거나 '강아지 까미'처럼 알려 주세요."). 정했으면 빈 배열 | AIM-012-04 |
 | missing | List<String> | Y | ASK일 때 빈 필수 칸 필드 이름(`petSn`·`schdlKndCd`·`schdlYmd`·`ckupTypeCd`·`hsptlNm`·`schdlNm`·`careArtclNm`·`careCycleCd`·`cycleDays`). 필수: 일정 = 종류·날짜 + 병원이면 검진유형·병원명, 그 외 일정명 / 케어 항목 = 항목명 + 정기관리면 주기 | AIM-012-05·12 |
 | nxtmPrnmntYmd | LocalDate | N | CARE_ITEM의 다음 예정일 = 마지막으로 한 날(없으면 오늘) + 주기, 매일은 다음 날, 한달은 같은 날짜(말일 넘으면 말일) | AIM-012-07 |
 | duplicateName | Boolean | Y | 같은 반려동물에 같은 이름(띄어쓰기 무시) 케어 항목이 있음 | AIM-012-08 |
@@ -138,7 +138,7 @@ RegisterDraft의 필드에 아래가 더해진다. 필수 칸이 모두 찬 경�
 | rules | List<`{field, when, equals}`> | Y | 조건부 필수(`when` 칸이 `equals`면 `field` 필수). 폼에서 값이 바뀌면 React가 다시 판정 | Java 도구 목록 `rules[].requiredIf` |
 | input | Object | Y | Python이 검증한 값(Java 칸 이름). 틀린 값은 비운다. 번호 칸(`…Sn`, petSn 제외)은 같은 턴 읽기 결과에 나온 값만(돌려받은 `action.input`의 값은 그대로). 경로의 번호 칸(수정 도구의 `schdlSn`·`careArtclSn`·`expndSn`)을 정하지 못하면 카드를 주지 않는다: 바로 고른 경우 SEARCH로 "바꿀 <대상>을 찾지 못했어요. 이름이나 날짜를 넣어 다시 말해 주세요."(고지 없음, 저장), 읽기 결과를 본 뒤면 LLM이 글로 다시 물어본다. datetime 칸에 날짜만 오면 오늘은 지금 시각, 다른 날은 빈 칸. 단 수정 카드(경로 번호 칸·date hook·`hrInptYn`이 있는 도구)는 날짜만 오면 원래 시간을 쓴다(원래 시간이 미입력이면 그대로 미입력). 원래 값은 같은 턴 읽기 결과의 그 번호 행, 없으면 돌려받은 카드 `input` | |
 | missing | List<String> | Y | 빈 필수·조건부 필수 칸(Java 칸 이름, `petSn` 포함). 빈 필수 배열·`minItems` 미만은 `lines`, 항목 안 빈 필수 칸은 `lines[0].expndAmt`(중첩은 `pets[0].drugs[1].mdcnNm`). 필수 파일 칸은 늘 들어 있다(첨부하면 React가 다시 판정) | |
-| petChoices | List<`{petSn, petNm}`> | Y | 반려동물을 정하지 못했을 때 이름 칩(양육 반려동물 전부). 정했거나 반려동물 칸이 없는 도구면 빈 배열 | AIM-012-04 |
+| petChoices | List<`{petSn, petNm, petSeNm?, vrtyNm?}`> | Y | 반려동물을 정하지 못했을 때 이름 칩(양육 반려동물 전부, 문장 속 이름이 여러 마리에 걸렸으면 그 아이들만(같은 이름이면 문장의 품종 이름·종 말 "강아지"·"댕댕이"·"멍멍이"·"고양이"·"냥이"로 먼저 좁힘). `petSeNm`(종 이름)·`vrtyNm`(품종 이름)은 Java가 줄 때만 실림 — 같은 이름 칩을 "까미 (강아지·말티즈)"처럼 구별해 보여 줄 때 쓴다. 같은 이름이라 못 정하면 저장 글은 "까미가 둘이에요. 칩에서 고르거나 '강아지 까미'처럼 알려 주세요."). 정했거나 반려동물 칸이 없는 도구면 빈 배열 | AIM-012-04 |
 | petNm | String | N | 정한 반려동물 이름 | AIM-012-04 |
 | notice | String | N | 카드 위에 보여 줄 안내 문구. 지금은 케어 항목 등록에서 같은 반려동물에 같은 이름(띄어쓰기 무시)의 케어 항목이 있을 때만 `{petNm}에게 '{이름}' 항목이 이미 있어요. 그래도 새로 등록할까요?`, 없으면 null | AIM-012-08 |
 

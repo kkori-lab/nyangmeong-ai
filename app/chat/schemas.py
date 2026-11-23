@@ -58,6 +58,9 @@ class RegisterDraft(_Camel):
 class PetChoice(_Camel):
     pet_sn: int
     pet_nm: str
+    # 같은 이름 반려동물을 칩에서 구별해 보여 줄 때(FN-AIM-012-04), 모르면 칸 없음
+    pet_se_nm: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    vrty_nm: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class RegisterCard(RegisterDraft):
