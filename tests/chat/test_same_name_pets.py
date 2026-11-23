@@ -8,6 +8,7 @@ from app.chat import rules
 from app.chat.clients import tool_system
 from tests.chat.fakes import FakeToolAgent
 from tests.chat.test_action import WEIGHT, send
+from tests.chat.test_action_multi import HOSPITAL, SequenceAgent
 from tests.chat.test_messages import MessageJava, events
 from tests.chat.test_read_tools import FakeToolReader, use_reader
 from tests.chat.test_register import TODAY
@@ -174,23 +175,27 @@ def test_태그_아이가_같은_이름_밖이면_칩을_보여야_한다(client
     assert [choice["petSn"] for choice in action["petChoices"]] == [DOG, CAT]
 
 
-def test_펫_태그_방이어도_다른_이름끼리_여럿이면_정하지_않아야_한다(client, java):
+def test_펫_태그_방이어도_다른_이름끼리_여럿이면_태그로_정하지_않아야_한다(client, java):
+    # 2026-11-23 : 다른 이름끼리 여럿이면 이름마다 카드. 까미 카드는 태그(초코)로 정하지 않음
     use_agent(client, weight_agent())
     room = room_of(client, java, pet_sn=1)
 
-    action = events(send(client, room, "초코랑 까미 체중 4.2kg 기록해줘"))[-1][1]["action"]
+    actions = events(send(client, room, "초코랑 까미 체중 4.2kg 기록해줘"))[-1][1]["actions"]
 
-    assert action["missing"] == ["petSn"]
+    assert actions[0]["input"]["petSn"] == 1
+    assert actions[1]["missing"] == ["petSn"]
 
 
-def test_다른_이름끼리_여럿이면_좁히지_않고_그_아이들을_칩으로_보여야_한다(client, java):
+def test_다른_이름끼리_여럿이면_좁히지_않고_이름마다_카드를_나눠야_한다(client, java):
+    # 2026-11-23 : 초코 카드 + 까미 카드(같은 이름 둘이라 그 아이들 칩)
     use_agent(client, weight_agent())
     room = room_of(client, java)
 
-    action = events(send(client, room, "강아지 초코랑 까미 체중 4.2kg 기록해줘"))[-1][1]["action"]
+    actions = events(send(client, room, "강아지 초코랑 까미 체중 4.2kg 기록해줘"))[-1][1]["actions"]
 
-    assert action["missing"] == ["petSn"]
-    assert [choice["petSn"] for choice in action["petChoices"]] == [1, DOG, CAT]
+    assert actions[0]["input"]["petSn"] == 1
+    assert actions[1]["missing"] == ["petSn"]
+    assert [choice["petSn"] for choice in actions[1]["petChoices"]] == [DOG, CAT]
 
 
 def test_도구_규칙은_쓰기_요청에_반려동물을_글로_되묻지_말라고_해야_한다():
@@ -224,3 +229,61 @@ def test_종_품종_칸이_없는_Java_응답이면_지금처럼_칩에_이름�
         {"petSn": CAT, "petNm": "까미"},
     ]
     assert evs[-1][1]["message"]["cnvrsCn"].endswith("까미가 둘이에요. 칩에서 골라 주세요.")
+
+
+def test_카드가_여럿이면_같은_이름_되물음에_번호를_붙여야_한다(client, java):
+    # 2026-11-23 : 여러 카드에서도 카드 하나일 때 문구, 남은 빈 칸은 이어서
+    health = {"daily_rcd_idct_cd": "HLTC0014", "rcd_ymd": "2026-09-27", "rcd_nvl": 4.2}
+    use_agent(
+        client, SequenceAgent(("draft_daily_health_record", health), ("draft_schedule", HOSPITAL))
+    )
+    room = room_of(client, java)
+
+    evs = events(
+        send(client, room, "까미 그저께 체중 4.2kg 기록하고 10월 6일 3시 병원 일정도 잡아줘")
+    )
+
+    done = evs[-1][1]
+    assert [card["missing"] for card in done["actions"]] == [["petSn", "rcdDt"], ["petSn"]]
+    lines = done["message"]["cnvrsCn"].split("\n")
+    assert lines[-3:] == [
+        "1번: 까미가 둘이에요. 칩에서 고르거나 '강아지 까미'처럼 알려 주세요.",
+        "아직 1번의 기록 날짜가 비어 있어요.",
+        "2번: 까미가 둘이에요. 칩에서 고르거나 '강아지 까미'처럼 알려 주세요.",
+    ]
+
+
+def test_카드가_여럿이고_종_품종으로_못_가르면_칩에서_고르라고_해야_한다(client, java):
+    java.pets = [{"petSn": DOG, "petNm": "까미", "careArtclNms": []}]
+    java.pets.append({"petSn": CAT, "petNm": "까미", "careArtclNms": []})
+    health = {"daily_rcd_idct_cd": "HLTC0014", "rcd_ymd": TODAY.isoformat(), "rcd_nvl": 4.2}
+    use_agent(
+        client, SequenceAgent(("draft_daily_health_record", health), ("draft_schedule", HOSPITAL))
+    )
+    room = room_of(client, java)
+
+    evs = events(
+        send(client, room, "까미 오늘 체중 4.2kg 기록하고 10월 6일 3시 병원 일정도 잡아줘")
+    )
+
+    lines = evs[-1][1]["message"]["cnvrsCn"].split("\n")
+    assert lines[-2:] == [
+        "1번: 까미가 둘이에요. 칩에서 골라 주세요.",
+        "2번: 까미가 둘이에요. 칩에서 골라 주세요.",
+    ]
+
+
+def test_카드가_여럿이어도_같은_이름이_아닌_빈_칸은_지금_번호_줄이어야_한다(client, java):
+    health = {"daily_rcd_idct_cd": "HLTC0014", "rcd_ymd": "2026-09-27", "rcd_nvl": 4.2}
+    use_agent(
+        client, SequenceAgent(("draft_daily_health_record", health), ("draft_schedule", HOSPITAL))
+    )
+    room = room_of(client, java)
+
+    evs = events(
+        send(client, room, "초코 그저께 체중 4.2kg 기록하고 10월 6일 3시 병원 일정도 잡아줘")
+    )
+
+    text = evs[-1][1]["message"]["cnvrsCn"]
+    assert text.endswith("아직 1번의 기록 날짜가 비어 있어요. 말로 알려 주세요.")
+    assert "둘이에요" not in text
