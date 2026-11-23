@@ -641,3 +641,26 @@
 - 기다리는 것: 없음
 - 완료 조건: `/start` 기획의 완료 조건을 따른다.
 - 연결 남음: 없음
+
+## (화면 ID 미정) 반려동물 피부 병변 분석 · YOLO ONNX 추론·Haiku 게이트·보호자용 설명 (추가 요청, 기능명세서 작성 전) — 대기
+- 기능: 없음. 기능명세서 FN 행을 새로 만들어야 함(DMS `피부`·`질환` 제목·태그 검색 0건, 2026-11-23). 화면 ID가 생기기 전에는 `milestone-status.sh`로 상태를 못 바꿈
+- 요청: 2026-11-23 LJS (외부 작업 지시서 "반려동물 질환 평가 플로우(YOLO + Claude Haiku)"를 이 저장소 구조에 맞춰 다시 기획)
+- 결정 (2026-11-23 LJS):
+  - 흐름은 저장소 결정대로: React → `/ai/**`(Python: 업로드 검증·Haiku 게이트·ONNX 추론·등급·설명) → 저장은 Java 내부 API. 지시서의 Spring → FastAPI 호출·`X-Internal-Token`은 쓰지 않음. 응답은 `ApiResponse`, 라우터는 `require_member`·`X-Requested-With`
+  - Python은 인스턴스 1(Java·MySQL과 같은 서버)에 유지. 지시서의 "실패하면 인스턴스 2로 이동"은 탈출구에서 뺌
+  - 저장은 요청 끝에 한 번(사진·평가·탐지·설명, 트랜잭션은 Java). 저장 실패는 멱등 키로 재시도(대화 저장 ④와 같은 방식)
+  - 설명 LLM 입력에 반려동물 정보(종·나이)를 넣지 않음(POL-006). 게이트에는 사진(512px)만 — `/ai/image-intent` 선례
+  - 등급은 Python `rules.py` 순수 함수 + `RULE_VERSION`, 위험군·임계값은 `data/*.yaml`(검수 전 TODO)
+  - 그대로 두는 지시서 결정: 서버 추론은 ONNX Runtime만(torch·ultralytics·opencv 없음), 공식 가중치만, Haiku는 판단하지 않음, 설명에 이미지 안 보냄, RAG 없음, 의료 내용 지어내지 않음, 지식 카드 없으면 템플릿 + WARN, "참고용 분석"·수의사 상담 문구
+- 측정 (2026-11-23, 인스턴스 2 = Ubuntu 24.04·Python 3.12, onnxruntime 1.32.0, 스레드 1, 공식 `yolo26n` 416 ONNX 9.4MB, 측정 뒤 서버 임시 파일 삭제):
+  - RSS: numpy 30MB → +import 48 → +세션 로드(247ms) 78 → 첫 추론 98 → 60회 뒤 114MB. 지금 앱 기준 약 +84MB. 60회 동안 계속 늘어 멈추는 지점은 미확인
+  - 추론: wall 중앙값 183ms·p90 189·최대 255ms, CPU 시간 = wall(약 11초 부하에서는 CPU 한도에 안 걸림, 긴 부하는 미확인)
+  - 출력 `[1, 84, 3549]`: 기본 export는 NMS 없음 → 앱에서 NMS
+  - 인스턴스 2 자체: `nproc` 2, 전체 952MB, `available` 559MB, 스왑 0, Rust 서비스 RSS 21MB
+- 기다리는 것: 인스턴스 1 `free -m`(채팅·OCR 요청 직후)·`swapon --show` 출력 (접속 키가 다른 PC) — 판정 기준 `available` ≥ 약 234MB(통과 기준 150 + 84) / 기능명세서 FN 행 / Java 저장·지식 카드 내부 API (LJS 백엔드)
+- 정할 것: 지식 카드 위치(Java 테이블 / `data/*.yaml`), `/ai/**` 경로·DTO와 Java 내부 API 초안, 게이트 tool 스키마·`unclear` 화면·게이트 건너뜀 문구, 등급 규칙 경계, 후처리 필터(기존 코드 재사용 여부 미확인), 학습 의존성 분리(uv 그룹 / `training/` 별도), ONNX 메모리 풀 설정(`enable_cpu_mem_arena`)과 긴 추론 RSS 측정
+- 백엔드에 알릴 것: 지시서의 Spring 플래그 `-Xmx256m` + `-XX:MaxMetaspaceSize=128m` = 384MB로 목표 300MB를 넘음
+- 마일스톤 나누기 후보: M0 측정 마무리(인스턴스 1·긴 추론) / M1 `training/`(변환 인터페이스·TODO, train·export·inspect·pt↔onnx 비교) / M2 ONNX 후처리·모델 레지스트리 / M3 `/ai/**` 엔드포인트(Java 가짜 응답) / M4 Java 연결(백엔드 PR과 함께)
+- 새 의존성 후보: `onnxruntime`(서버), `ultralytics>=8.4.0`(학습 전용, 8.4.216에서 `yolo26n` 받기·ONNX 내보내기 확인)
+- 완료 조건 후보: 가짜 ONNX 출력으로 NMS·좌표 복원(`[1,K,6]`·`[1,4+nc,A]`) 테스트 통과 / 가짜 Haiku·가짜 Java로 `/ai/**` 요청이 정상·게이트 거절·게이트 시간 초과·Java 502·동시 요청 429·카드 누락(템플릿 + WARN) 응답을 준다
+- 연결 남음: 없음
