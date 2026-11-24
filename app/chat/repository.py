@@ -24,6 +24,13 @@ ROUTES_PATH = "/internal/ai/routes"
 REQUESTED_WITH_HEADER = "X-Requested-With"
 
 
+class ConversationContext(ConversationDetail):
+    # 추가 요청(2026-11-24) : 컨텍스트 요약(Java 내부 응답에만). React 응답에는 싣지 않음
+    smry_cn: str | None = None
+    # 요약 경계선 : 이 msgSeq까지 요약에 들어감
+    smry_end_msg_seq: int | None = None
+
+
 class ConversationRepository(Protocol):
     async def create_room(
         self, pet_sn: int | None, title: str, first_cn: str
@@ -31,7 +38,7 @@ class ConversationRepository(Protocol):
 
     async def list_rooms(self, pet_sn: int | None) -> list[ConversationSummary]: ...
 
-    async def get_room(self, room_sn: int) -> ConversationDetail: ...
+    async def get_room(self, room_sn: int) -> ConversationContext: ...
 
     async def delete_room(self, room_sn: int) -> None: ...
 
@@ -40,6 +47,8 @@ class ConversationRepository(Protocol):
     async def add_message(
         self, room_sn: int, role_cd: str, cn: str, cmptn_yn: bool = True
     ) -> ConversationMessage: ...
+
+    async def save_summary(self, room_sn: int, cn: str, end_msg_seq: int) -> None: ...
 
 
 class JavaConversationRepository:
@@ -66,9 +75,9 @@ class JavaConversationRepository:
             raise external_error()
         return [_parse(ConversationSummary, item) for item in data]
 
-    async def get_room(self, room_sn: int) -> ConversationDetail:
+    async def get_room(self, room_sn: int) -> ConversationContext:
         data = await self._call("GET", f"{CONVERSATIONS_PATH}/{room_sn}")
-        return _parse(ConversationDetail, data)
+        return _parse(ConversationContext, data)
 
     async def delete_room(self, room_sn: int) -> None:
         await self._call("DELETE", f"{CONVERSATIONS_PATH}/{room_sn}")
@@ -88,6 +97,11 @@ class JavaConversationRepository:
             body["cmptnYn"] = False
         data = await self._call("POST", f"{CONVERSATIONS_PATH}/{room_sn}/messages", json=body)
         return _parse(ConversationMessage, data)
+
+    async def save_summary(self, room_sn: int, cn: str, end_msg_seq: int) -> None:
+        # 추가 요청(2026-11-24) : 방당 1행 덮어쓰기, 경계선이 더 클 때만 바꾸는 것·암호화는 Java
+        body = {"smryCn": cn, "smryEndMsgSeq": end_msg_seq}
+        await self._call("PUT", f"{CONVERSATIONS_PATH}/{room_sn}/summary", json=body)
 
     async def _call(self, method: str, path: str, **kwargs):
         return await call_backend(
@@ -115,8 +129,8 @@ def get_conversation_repository(
 class AiSettings:
     # SYS_STNG_AI_TKN_UPLMT_CNT : 답변 최대 생성 토큰(FN-AIM-002-02)
     max_tokens: int = 4500
-    # SYS_STNG_AI_CNVRS_TURN_CNT : 컨텍스트 턴 수(FN-AIM-011-15)
-    context_turns: int = 6
+    # SYS_STNG_AI_CNVRS_TURN_CNT : 컨텍스트 턴 수(FN-AIM-011-15). 15턴마다 요약 (2026-11-24 결정)
+    context_turns: int = 15
 
 
 def get_ai_settings() -> AiSettings:

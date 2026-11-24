@@ -161,6 +161,70 @@ def get_title_generator(
     return AnthropicTitleGenerator(get_anthropic_client(settings), settings.llm_model, usage)
 
 
+# 추가 요청(2026-11-24) : 컨텍스트 요약 상한
+SUMMARY_MAX_LENGTH = 2000
+SUMMARY_MAX_TOKENS = 4096
+CONVERSATION_SUMMARY_SYSTEM = (
+    "반려동물 케어 앱의 AI 대화창 대화를 다음 대화에서 이어 쓸 요약으로 줄인다. "
+    "이전 요약이 있으면 그 내용을 잃지 말고 새 대화와 합친다. "
+    "반려동물 이름, 회원이 알려 준 사실(증상·체중·식사·일정 등), 회원의 요청과 그 결과를 남긴다. "
+    "각 사실 앞에 그 말이 나온 날짜(예: 11월 3일)를 붙인다. "
+    "끝난 등록·수정·취소는 결과만 한 줄로 쓰고, 확인을 기다리는 카드나 초안의 칸 값은 쓰지 않는다. "
+    "대화에 없는 내용을 덧붙이지 않는다. "
+    "한국어 짧은 문장 목록으로 2,000자를 넘지 않게, 요약만 쓴다."
+)
+
+
+class ConversationSummarizer(Protocol):
+    # 실패·거절이면 빈 문자열 : 요약 저장 안 함
+    async def summarize(self, previous: str | None, transcript: str) -> str: ...
+
+
+class AnthropicConversationSummarizer:
+    # 클라이언트는 요약할 때 만듦 : 키 없는 환경에서 메시지 전송 의존성이 502로 막히지 않게
+    def __init__(self, settings: Settings, usage: UsageReporter = NO_USAGE):
+        self.settings = settings
+        self.usage = usage
+
+    async def summarize(self, previous: str | None, transcript: str) -> str:
+        client = get_anthropic_client(self.settings)
+        started = time.monotonic()
+        content = f"이전 요약:\n{previous or '없음'}\n\n새 대화:\n{transcript}"
+        try:
+            response = await client.messages.create(
+                model=self.settings.llm_model,
+                max_tokens=SUMMARY_MAX_TOKENS,
+                system=CONVERSATION_SUMMARY_SYSTEM,
+                messages=[{"role": "user", "content": content}],
+                output_config={"effort": LLM_EFFORT},
+            )
+        except anthropic.APIError as error:
+            self.usage.record(errored(ExternalApi.CHAT, started, error))
+            _log_failure("대화 요약", started, _failure_reason(error))
+            return ""
+        if response.stop_reason == "refusal":
+            self.usage.record(failed(ExternalApi.CHAT, started, "refusal", response.usage))
+            _log_failure("대화 요약", started, "refusal")
+            return ""
+        self.usage.record(succeeded(ExternalApi.CHAT, started, response.usage))
+        text = next((block.text for block in response.content if block.type == "text"), "")
+        summary = text.strip()[:SUMMARY_MAX_LENGTH]
+        logger.info(
+            "LLM 대화 요약: 입력 %d자 → %d자 (%.0fms)",
+            len(content),
+            len(summary),
+            (time.monotonic() - started) * 1000,
+        )
+        return summary
+
+
+def get_conversation_summarizer(
+    settings: Annotated[Settings, Depends(get_settings)],
+    usage: Annotated[UsageReporter, Depends(get_usage_reporter)] = NO_USAGE,
+) -> ConversationSummarizer:
+    return AnthropicConversationSummarizer(settings, usage)
+
+
 class ClassifyError(Exception):
     """도구 고르기 LLM 장애(API 오류·시간 초과). reason은 로그용 실패 종류(원문 없음)"""
 

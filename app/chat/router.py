@@ -9,10 +9,12 @@ from pydantic import BaseModel
 
 from app.chat import rules, service
 from app.chat.clients import (
+    ConversationSummarizer,
     ImageIntentJudge,
     RegisterExtractor,
     TitleGenerator,
     ToolAgent,
+    get_conversation_summarizer,
     get_image_intent_judge,
     get_register_extractor,
     get_title_generator,
@@ -139,6 +141,7 @@ async def send_message(
     agent: Annotated[ToolAgent, Depends(get_tool_agent)],
     reader: Annotated[ToolReader, Depends(get_tool_reader)],
     routes: Annotated[RouteRepository, Depends(get_route_repository)],
+    summarizer: Annotated[ConversationSummarizer, Depends(get_conversation_summarizer)],
     room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
 ) -> StreamingResponse:
     # 스트림 시작 전 오류(400·401·403·404·502)는 다른 API와 같은 JSON 응답
@@ -149,7 +152,9 @@ async def send_message(
     await service.route_cache.refresh(routes)
     limits = service.AnswerLimits(settings.answer_first_token_sec, settings.answer_total_sec)
     register = service.RegisterDeps(contexts, extractor, rules.today_kst())
-    events = service.answer_turn(turn, repo, agent, ai, limits, register, titles, reader)
+    events = service.answer_turn(
+        turn, repo, agent, ai, limits, register, titles, reader, summarizer
+    )
     return StreamingResponse(_sse(events), media_type="text/event-stream")
 
 
