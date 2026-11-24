@@ -1,0 +1,59 @@
+# 안구 병변 판정 목록·등급 규칙 (docs/api/eyelesion.md, 2026-11-24)
+# TODO(검수 전): 병변 목록·위험군·안내 문장은 초안이다. 수의사·팀 검수 뒤 rule_version을 올린다
+# key는 DB 공통코드가 아니라 이 파일의 내부 키다(Java 저장을 붙일 때 맞춘다)
+# 피부 목록(data/skin_lesions.yaml)과 섞지 않는다(2026-11-24 결정). 나중에 YOLO 판정기를 붙이면 학습 클래스를 이 목록과 같게 맞춘다
+rule_version: "2026-11-24-draft"
+
+# 위험군 risk: NONE < OBSERVE < VISIT < URGENT. 등급은 찾은 병변 중 가장 높은 위험군(NONE만이면 OBSERVE)
+lesions:
+  - key: normal
+    name: 이상 없음
+    risk: NONE
+  - key: tear_stain
+    name: 눈물 자국
+    risk: OBSERVE
+  - key: mild_discharge
+    name: 맑은 눈곱·눈물 많음
+    risk: OBSERVE
+  - key: discharge
+    name: 누렇거나 초록빛 눈곱
+    risk: VISIT
+  - key: redness
+    name: 흰자 충혈
+    risk: VISIT
+  - key: eyelid_swelling
+    name: 눈꺼풀 부음
+    risk: VISIT
+  - key: cloudy
+    name: 눈이 뿌옇거나 하얗게 보임
+    risk: VISIT
+  - key: third_eyelid
+    name: 눈 안쪽 붉은 살 돌출(체리아이)
+    risk: VISIT
+  - key: squinting
+    name: 눈을 못 뜨거나 찡그림
+    risk: URGENT
+  - key: bulging
+    name: 안구가 튀어나옴
+    risk: URGENT
+  - key: wound
+    name: 눈 상처·출혈
+    risk: URGENT
+
+notice: "참고용 분석이며 진단이 아니에요. 증상이 계속되거나 심해지면 수의사와 상담하세요."
+
+# rslt·grade별 고정 안내 문장 (LLM이 쓰지 않는다)
+guide:
+  OBSERVE:
+    - "며칠 동안 같은 눈을 사진으로 남겨 변화를 비교해 보세요."
+    - "젖은 눈곱은 깨끗한 거즈로 살살 닦아 주고, 아이가 눈을 비비는지 살펴 주세요."
+  VISIT:
+    - "가까운 시일 안에 동물병원 진료를 받아 보세요."
+    - "진료 때 이 사진과 언제부터 보였는지 알려 주면 도움이 돼요."
+  URGENT:
+    - "눈은 빨리 나빠질 수 있어요. 가능한 한 빨리 동물병원에 방문하세요."
+    - "눈을 비비거나 긁지 않게 하고, 사람용 안약은 넣지 마세요."
+  UNCLEAR:
+    - "사진으로는 판단하기 어려워요. 밝은 곳에서 눈을 정면으로 가까이 다시 찍어 주세요."
+  NOT_PET_EYE:
+    - "반려동물 눈이 잘 보이는 사진을 올려 주세요."

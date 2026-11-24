@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     health_report_timeout_sec: float = 20.0
     # 피부 병변 분석 제한 시간(초) : LLM 한 번 (docs/api/skinlesion.md)
     skin_analyze_timeout_sec: float = 20.0
+    # 안구 병변 분석 제한 시간(초) : LLM 한 번 (docs/api/eyelesion.md)
+    eye_analyze_timeout_sec: float = 20.0
 
     # 이미지 생성(OpenAI, 2026-10-28 결정) : 비면 캐릭터 생성 API 502
     openai_api_key: SecretStr = SecretStr("")
