@@ -756,3 +756,9 @@
 - 완료 조건: `/start` 기획의 완료 조건을 따른다.
 - 결과 (2026-11-24): 검증 통과(1회차), 사람 확인. 실제 Java 방에 SKIN·EYE 201, 눈 카드 input + 사진으로 `observation-items` 201, `action-result` DONE 글 확인. 기획 고침 1건(기존 테스트 도구 목록 기대값·가짜 HLTG16 코드, 사진 칸은 글로 묻지 않음). 같은 부위 관찰 중이면 `draft_observation_cycle`로 바꾸기는 다음
 - 연결 남음: SCR-AIM-013 lesion-card (프론트 SKIN·EYE 결과 뒤 호출·카드에 같은 사진 첨부, LJS 프론트)
+
+## SCR-ADM-112 외부 API 사용량 · Python 호출 통지 (AI 대화·분류·OCR·PDF 분석, SCR-ADM-082 공통) — 진행
+- 기능: Python이 외부 AI API를 부를 때마다 Java `POST /internal/ai/external-api-calls`로 종류·결과·응답 시간·토큰을 통지한다(FN-ADM-112-01·02, FN-ADM-082-03). 통지 실패는 사용자 응답을 막지 않는다. 캐릭터 생성(SYSC0017)은 다음 마일스톤
+- 요청: 2026-11-24 backend-6d (백엔드 `7515d16` develop 병합)
+- 기다리는 것: 없음
+- 완료 조건: `/start` 기획의 완료 조건을 따른다.

@@ -10,6 +10,15 @@ from pydantic import BaseModel, ValidationError
 
 from app.core.config import Settings, get_settings
 from app.core.llm import get_anthropic_client
+from app.core.usage import (
+    NO_USAGE,
+    ExternalApi,
+    UsageReporter,
+    errored,
+    failed,
+    get_usage_reporter,
+    succeeded,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,10 +67,18 @@ READ_SYSTEM = (
 class ClaudePdfClient:
     # FN-HLT-005-04 : PDF를 document 블록으로 그대로 전송 (텍스트·스캔 PDF 모두)
     # 로그에는 건수·크기·소요 시간만
-    def __init__(self, llm: AsyncAnthropic, model: str, timeout_sec: float) -> None:
+    # FN-ADM-082-03 : 호출마다 사용량 통지, 검사결과지 아님도 성공
+    def __init__(
+        self,
+        llm: AsyncAnthropic,
+        model: str,
+        timeout_sec: float,
+        usage: UsageReporter = NO_USAGE,
+    ) -> None:
         self._llm = llm
         self._model = model
         self._timeout_sec = timeout_sec
+        self._usage = usage
 
     async def read(self, pdf: bytes) -> LabResultOutput:
         started = time.monotonic()
@@ -89,19 +106,25 @@ class ClaudePdfClient:
                 output_config={"effort": LLM_EFFORT},
                 output_format=LabResultOutput,
             )
-        except anthropic.APITimeoutError:
+        except anthropic.APITimeoutError as error:
+            self._usage.record(errored(ExternalApi.PDF, started, error))
             logger.warning("LLM 검사결과지 분석 시간 초과 (%.0fms)", _elapsed(started))
             raise TimeoutError from None
-        except anthropic.APIError:
+        except anthropic.APIError as error:
+            self._usage.record(errored(ExternalApi.PDF, started, error))
             logger.warning("LLM 검사결과지 분석 실패 (%.0fms)", _elapsed(started))
             raise PdfAnalyzeApiError("llm") from None
         except ValidationError:
+            self._usage.record(failed(ExternalApi.PDF, started, "invalid_output"))
             logger.warning("LLM 검사결과지 분석 모양 오류 (%.0fms)", _elapsed(started))
             raise PdfAnalyzeApiError("llm") from None
         output = response.parsed_output
         if response.stop_reason == "refusal" or output is None:
-            logger.warning("LLM 검사결과지 분석 결과 없음: %s", response.stop_reason or "no_output")
+            reason = response.stop_reason or "no_output"
+            self._usage.record(failed(ExternalApi.PDF, started, reason, response.usage))
+            logger.warning("LLM 검사결과지 분석 결과 없음: %s", reason)
             raise PdfAnalyzeApiError("llm")
+        self._usage.record(succeeded(ExternalApi.PDF, started, response.usage))
         logger.info(
             "LLM 검사결과지 분석: PDF %d바이트 → %d행 (%.0fms)",
             len(pdf),
@@ -117,11 +140,12 @@ def _elapsed(started: float) -> float:
 
 def get_lab_result_client(
     settings: Annotated[Settings, Depends(get_settings)],
+    usage: Annotated[UsageReporter, Depends(get_usage_reporter)] = NO_USAGE,
 ) -> LabResultClient | None:
     # 키 없으면 None : 업로드 검증 먼저, 502는 service에서
     if not settings.llm_api_key.get_secret_value():
         logger.error("PDF 분석 불가: .env.local의 LLM_API_KEY가 비어 있습니다")
         return None
     return ClaudePdfClient(
-        get_anthropic_client(settings), settings.llm_model, settings.pdf_analyze_timeout_sec
+        get_anthropic_client(settings), settings.llm_model, settings.pdf_analyze_timeout_sec, usage
     )
