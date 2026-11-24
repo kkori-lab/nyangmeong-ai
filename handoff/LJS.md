@@ -1,10 +1,10 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-ADM-112 외부 API 사용량 · Python 호출 통지 (AI 대화·분류·OCR·PDF 분석, SCR-ADM-082 공통) — 끝 (2026-11-24). `app/core/usage.py`가 요청 쿠키로 Java `POST /internal/ai/external-api-calls`에 통지(기다리지 않음, 실패는 경고 로그만): SYSC0015 제목·도구 고르기·답변, SYSC0024 사진 용도·등록 칸 추출, SYSC0016 Vision·LLM 각 1건, SYSC0025 PDF(검사결과지 아님도 성공). 입력 토큰 = input + 캐시 읽기·쓰기. 검증 통과(1회차 실패는 관리자 쿠키 없음, 재검증 통과), 사람 확인. PR #112
+SCR-ADM-112 외부 API 사용량 · 캐릭터 생성 호출 통지 (SYSC0017, 추가 요청) — 끝 (2026-11-24). `app/character/clients.py`가 OpenAI 호출마다(눈 판별·시트·굽기 시도·굽기 지시·픽셀 그림) SYSC0017 통지, 스레드에서 모아 돌아온 뒤 `record`, 굽기 큐는 넣은 요청의 쿠키. `app/core/usage.py` OpenAI 토큰 이름·예외. 검증 통과(1회차), 사람 확인. 남은 것(LJS 백엔드와): 건강 리포트·피부·눈 분석은 SYSG05 코드가 없어 통지 안 함, 백엔드 토큰 집계가 SYSC0015·0024만 합쳐 캐릭터 토큰은 안 보임
 
 ## 다음에 할 것
-- 캐릭터 생성 사용량 통지 SYSC0017 (LJS, SCR-ADM-112 다음 마일스톤): OpenAI 동기 호출이 스레드·공유 굽기 큐에서 돌아 작업마다 쿠키를 실어 통지. 건강 리포트·피부·눈 분석은 SYSG05 코드가 없어 통지 안 함 — 코드를 정할지 백엔드(LJS 백엔드)와
+- 대화창 lesion-card 후속 (LJS, 2026-11-24 frontend-66 요청, 받았다고 회신함 — 고친 뒤 알림): ① 카드가 떠 있을 때 "등록해 줘"가 `missing ["file"]`·execute false로 "아직 file가 비어 있어요" — 확인 말 판정·빈 칸 안내에서 `file` 칸(React가 붙임)을 빼고 Java 칸 이름 노출도 고침(`docs/api/chat.md` lesion-card "missing에 file이 있지만 글로 묻지 않음"과 맞춤, 아래 "채팅 확인 다듬기"와 함께) ② lesion-card `memoCn`에 "규칙 2026-11-24-draft"(ruleVersion)가 붙어 회원 메모에 보임 — 빼거나 보이지 않는 곳에, `data/eye_lesions.yaml`·`data/skin_lesions.yaml` 둘 다
 - 연결 남음: SCR-AIM-013 lesion-card (LJS 프론트): `SKIN`·`EYE` 분석 뒤 `POST /ai/conversations/{방}/lesion-card`(분석 응답 + `kind`·`petSn`, 실패·취소는 `ERROR`·`CANCELED`) → `action`을 확인 카드로, 실행 때 분석한 같은 사진을 `file`로 붙임(`docs/api/chat.md`). 프론트에 알릴 것
 - 연결 남음: SCR-AIM-013 checkup-card 검진기록 0건 (LJS 프론트): 프론트 PR #501은 글("검진기록이 없어요")로 판단 → AI 병합 뒤 `noCardReason === "NO_CHECKUP"`으로 바꿈(프론트 핸드오프에 있음, 2026-11-24 알림 보냄)
 - 연결 남음: SCR-AIM-013 image-intent `SKIN` 분기·ASK 칩에 피부 분석 (LJS 프론트, frontend 세션에 `docs/api/chat.md` 계약과 함께 알림). 로컬 DB: 검증 대화방 652~669·685·704(메시지 2411, petSn 1006)(mbrSn 1) 정리
