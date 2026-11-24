@@ -14,6 +14,7 @@ from typing import Annotated, Any, Protocol
 
 import anthropic
 import httpx2
+import openai
 from fastapi import Depends, Request
 
 from app.core.config import Settings, get_settings
@@ -143,14 +144,18 @@ def elapsed_ms(started: float) -> int:
 
 def token_counts(usage: Any) -> tuple[int | None, int | None]:
     # 2026-11-24 사람 결정 : 입력 = input + 캐시 읽기 + 캐시 쓰기, 출력 = output
+    # OpenAI 채팅은 prompt_tokens(캐시 포함)·completion_tokens, 이미지는 input·output_tokens
     if usage is None:
         return None, None
     total = (
-        (getattr(usage, "input_tokens", 0) or 0)
+        (getattr(usage, "input_tokens", None) or getattr(usage, "prompt_tokens", 0) or 0)
         + (getattr(usage, "cache_read_input_tokens", 0) or 0)
         + (getattr(usage, "cache_creation_input_tokens", 0) or 0)
     )
-    return total, getattr(usage, "output_tokens", None)
+    output = getattr(usage, "output_tokens", None)
+    if output is None:
+        output = getattr(usage, "completion_tokens", None)
+    return total, output
 
 
 def succeeded(
@@ -185,11 +190,12 @@ def failed(
 def errored(api: ExternalApi, started: float, error: BaseException) -> ExternalCall:
     """예외로 끝난 호출 -> 시간초과·실패 구분"""
     ms = elapsed_ms(started)
-    if isinstance(error, (anthropic.APITimeoutError, httpx2.TimeoutException, TimeoutError)):
+    timeouts = (anthropic.APITimeoutError, openai.APITimeoutError)
+    if isinstance(error, (*timeouts, httpx2.TimeoutException, TimeoutError)):
         return ExternalCall(api, CallResult.TIMEOUT, ms, fail_reason="timeout")
-    if isinstance(error, anthropic.APIStatusError):
+    if isinstance(error, (anthropic.APIStatusError, openai.APIStatusError)):
         status = error.status_code
         return ExternalCall(api, CallResult.FAIL, ms, status, fail_reason=f"api_error {status}")
-    if isinstance(error, anthropic.APIError):
+    if isinstance(error, (anthropic.APIError, openai.APIError)):
         return ExternalCall(api, CallResult.FAIL, ms, fail_reason="api_error")
     return ExternalCall(api, CallResult.FAIL, ms, fail_reason=f"network {type(error).__name__}")

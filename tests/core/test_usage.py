@@ -1,10 +1,12 @@
 import asyncio
 import json
 import logging
+from types import SimpleNamespace
 from typing import Annotated
 
 import anthropic
 import httpx2
+import openai
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
@@ -239,3 +241,34 @@ def test_Java_클라이언트가_없는_앱은_통지하지_않는다():
 
 def test_기본_통지기는_아무것도_하지_않는다():
     assert NO_USAGE.record(CALL) is None
+
+
+# FN-ADM-112-02 : OpenAI 채팅(prompt·completion)·이미지(input·output) 토큰
+def test_OpenAI_채팅_토큰_이름도_읽는다():
+    chat = SimpleNamespace(prompt_tokens=100, completion_tokens=20)
+    image = SimpleNamespace(input_tokens=300, output_tokens=50)
+    assert token_counts(chat) == (100, 20)
+    assert token_counts(image) == (300, 50)
+
+
+OPENAI_REQUEST = httpx2.Request("POST", "https://api.openai.com/v1/images/edits")
+
+
+@pytest.mark.parametrize(
+    ("error", "result", "status", "reason"),
+    [
+        (openai.APITimeoutError(request=OPENAI_REQUEST), CallResult.TIMEOUT, None, "timeout"),
+        (
+            openai.APIStatusError(
+                "busy", response=httpx2.Response(429, request=OPENAI_REQUEST), body=None
+            ),
+            CallResult.FAIL,
+            429,
+            "api_error 429",
+        ),
+        (openai.APIConnectionError(request=OPENAI_REQUEST), CallResult.FAIL, None, "api_error"),
+    ],
+)
+def test_OpenAI_예외도_시간초과와_실패로_나눈다(error, result, status, reason):
+    call = errored(ExternalApi.CHARACTER, 0.0, error)
+    assert (call.result, call.http_status, call.fail_reason) == (result, status, reason)
