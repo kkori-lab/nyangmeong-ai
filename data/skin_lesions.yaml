@@ -1,0 +1,53 @@
+# 피부 병변 판정 목록·등급 규칙 (docs/api/skinlesion.md, 2026-11-24)
+# TODO(검수 전): 병변 목록·위험군·안내 문장은 초안이다. 수의사·팀 검수 뒤 rule_version을 올린다
+# key는 DB 공통코드가 아니라 이 파일의 내부 키다(Java 저장을 붙일 때 맞춘다)
+# 나중에 YOLO 판정기를 붙이면 학습 클래스를 이 목록과 같게 맞춘다
+rule_version: "2026-11-24-draft"
+
+# 위험군 risk: NONE < OBSERVE < VISIT < URGENT. 등급은 찾은 병변 중 가장 높은 위험군(NONE만이면 OBSERVE)
+lesions:
+  - key: normal
+    name: 이상 없음
+    risk: NONE
+  - key: dandruff
+    name: 각질·비듬
+    risk: OBSERVE
+  - key: redness
+    name: 붉은 기·발진
+    risk: OBSERVE
+  - key: scab
+    name: 딱지
+    risk: OBSERVE
+  - key: hyperpigmentation
+    name: 피부가 검게 변함
+    risk: OBSERVE
+  - key: hair_loss
+    name: 털 빠짐
+    risk: VISIT
+  - key: pustule
+    name: 고름집·여드름 모양
+    risk: VISIT
+  - key: lump
+    name: 혹·덩어리
+    risk: VISIT
+  - key: wound
+    name: 상처·궤양
+    risk: URGENT
+
+notice: "참고용 분석이며 진단이 아니에요. 증상이 계속되거나 심해지면 수의사와 상담하세요."
+
+# rslt·grade별 고정 안내 문장 (LLM이 쓰지 않는다)
+guide:
+  OBSERVE:
+    - "며칠 동안 같은 부위를 사진으로 남겨 변화를 비교해 보세요."
+    - "아이가 그 부위를 자꾸 핥거나 긁는지 살펴 주세요."
+  VISIT:
+    - "가까운 시일 안에 동물병원 진료를 받아 보세요."
+    - "진료 때 이 사진과 언제부터 보였는지 알려 주면 도움이 돼요."
+  URGENT:
+    - "가능한 한 빨리 동물병원에 방문하세요."
+    - "그 부위를 핥지 않게 하고 깨끗하게 지켜 주세요."
+  UNCLEAR:
+    - "사진으로는 판단하기 어려워요. 밝은 곳에서 털을 헤치고 피부가 잘 보이게 다시 찍어 주세요."
+  NOT_PET_SKIN:
+    - "반려동물 피부가 잘 보이는 사진을 올려 주세요."

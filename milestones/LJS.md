@@ -697,7 +697,11 @@
   - 추론: wall 중앙값 183ms·p90 189·최대 255ms, CPU 시간 = wall(약 11초 부하에서는 CPU 한도에 안 걸림, 긴 부하는 미확인)
   - 출력 `[1, 84, 3549]`: 기본 export는 NMS 없음 → 앱에서 NMS
   - 인스턴스 2 자체: `nproc` 2, 전체 952MB, `available` 559MB, 스왑 0, Rust 서비스 RSS 21MB
-- 기다리는 것: 인스턴스 1 `free -m`(채팅·OCR 요청 직후)·`swapon --show` 출력 (접속 키가 다른 PC) — 판정 기준 `available` ≥ 약 234MB(통과 기준 150 + 84) / 기능명세서 FN 행 / Java 저장·지식 카드 내부 API (LJS 백엔드)
+  - 인스턴스 1 (2026-11-24, 요청 직후 여부 미확인): 전체 765MB, used 580, `available` 167MB, 스왑 8GB 파일 중 1.4GB 사용 중. 판정: 기준 234MB 미달(ONNX +84MB면 약 83MB, 통과 기준 150 아래). 스왑이 있어 바로 OOM은 아니지만 이미 RAM보다 큰 작업 집합을 스왑으로 버티는 중 → "Python은 인스턴스 1 유지" 결정 다시 정할 것. 스왑이 실제로 오가는지(`vmstat 1` si·so) 미확인
+- YOLO 방향 (2026-11-24 LJS): 추론은 인스턴스 2의 Rust 캐릭터 서버에 추가(여유 559MB). Python 판정기가 Rust를 부르는 판정기로 바뀌어 끼워진다(키 없이 서버 간 호출, nginx 밖). 먼저 할 것: 학습 데이터셋 확보(AI Hub 피부질환·안구질환 2개, 이용 약관·공개 저장소에 원본 안 올림), 학습 장소 — 개발 PC는 GT 710이라 GPU 학습 불가(CPU 시험만), M3 MacBook Air 16GB의 MPS로 학습(데이터가 밖으로 안 나감, 팬 없음이라 전원 연결·나눠 학습, 먼저 일부 데이터로 한 바퀴 시간 측정). 안구질환은 피부와 같은 구조(목록 + 판정기)의 별도 기능 후보, 클래스 목록을 `data/skin_lesions.yaml` 병변 목록과 맞추기, Rust 쪽 ONNX 엔진(`ort` / `tract`) 선택. 아키텍처 문서의 "AI는 Python" 결정 보완 필요
+- 결과 M1 (2026-11-24): `POST /ai/skin-analyses` Haiku 판정(목록 enum)·규칙 등급·고정 안내문, 저장 없음. 검증 통과(1회차), 사람 확인. 실제 키로 개 모낭충증 사진 `ANALYZED`/`VISIT`, 사람 얼굴 `NOT_PET_SKIN`. 목록 초안 검수 전
+- 결정 (2026-11-24 LJS): 인스턴스 1 메모리 미달로 YOLO를 미루고 Haiku가 정해진 목록 안에서 판정하는 것부터 붙인다(핸드오프 기획). YOLO·ONNX는 그다음 검토 — 아래 측정·M0~M2 후보는 그때 다시 씀
+- 기다리는 것: 기능명세서 FN 행 / Java 저장·지식 카드 내부 API (LJS 백엔드)
 - 정할 것: 지식 카드 위치(Java 테이블 / `data/*.yaml`), `/ai/**` 경로·DTO와 Java 내부 API 초안, 게이트 tool 스키마·`unclear` 화면·게이트 건너뜀 문구, 등급 규칙 경계, 후처리 필터(기존 코드 재사용 여부 미확인), 학습 의존성 분리(uv 그룹 / `training/` 별도), ONNX 메모리 풀 설정(`enable_cpu_mem_arena`)과 긴 추론 RSS 측정
 - 백엔드에 알릴 것: 지시서의 Spring 플래그 `-Xmx256m` + `-XX:MaxMetaspaceSize=128m` = 384MB로 목표 300MB를 넘음
 - 마일스톤 나누기 후보: M0 측정 마무리(인스턴스 1·긴 추론) / M1 `training/`(변환 인터페이스·TODO, train·export·inspect·pt↔onnx 비교) / M2 ONNX 후처리·모델 레지스트리 / M3 `/ai/**` 엔드포인트(Java 가짜 응답) / M4 Java 연결(백엔드 PR과 함께)
