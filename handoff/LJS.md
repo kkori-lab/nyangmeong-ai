@@ -1,29 +1,9 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-ADM-112 외부 API 사용량 · Python 호출 통지 (AI 대화·분류·OCR·PDF 분석, SCR-ADM-082 공통) — 진행 중 (검증 1회차 실패로 보관, 사람 확인 2026-11-24)
-
-부를 API: Java `POST /internal/ai/external-api-calls` (LJS 백엔드, `7515d16` develop 병합. 정본 백엔드 `docs/api/global.md` ExternalApiCallRequest·ExternalApiCallResponse). 요청 `{extlApiSeCd, callRsltCd, callDt?, rspnsMs?, httpSttsVl?(100~599), inptTknCnt?, otptTknCnt?, failRsn?(≤1000)}`, 201 `data {extlApiCallLogSn}`. 사용자 `Cookie` 그대로·`X-Requested-With`. `callDt`는 보내지 않는다(Java 저장 시각, 통지가 호출 직후라 차이 ms)
-
-- 공통 통지기: `app/core/usage.py`(새 파일) — `ExternalApi`(SYSC0015 대화·SYSC0024 분류·SYSC0016 OCR·SYSC0017 캐릭터·SYSC0025 PDF)·`CallResult`(SYSC0021·0022·0023)·`ExternalCall` 값, `UsageReporter` Protocol, `JavaUsageReporter(client, settings, cookie)`의 `record(call)`은 `asyncio.create_task`로 보내고 바로 돌아온다(참조는 모듈 집합에 두고 끝나면 뺀다). 쿠키·Java 주소가 없으면 보내지 않는다. 통지 실패(연결·4xx·5xx)는 경고 로그 한 줄(이유만, 쿠키·본문 없음). `get_usage_reporter(request)` 의존성. 도우미: Anthropic `usage` → 입력 = input + cache_read + cache_creation, 출력 = output(사람 결정 2026-11-24), Anthropic 예외 → 결과·HTTP 상태·이유(`APITimeoutError` 시간초과, `APIStatusError` 실패+상태 코드, 그 밖 실패). 요청마다 쿠키를 들고 만드는 명시 주입(컨텍스트 변수는 캐릭터 굽기 큐처럼 요청을 넘는 작업에서 회원이 섞일 수 있어 쓰지 않음). `docs/convention/architecture.md` core 규칙 확인
-  - 완료 조건 `명령:` `tests/core/test_usage.py` — httpx2 MockTransport로 본문·헤더(쿠키·X-Requested-With)·경로, 토큰 합산, 예외 분류, 쿠키 없음이면 안 보냄, Java 500·연결 실패여도 예외 없이 경고 로그
-- FN-ADM-112-01·02 AI 대화(SYSC0015): `app/chat/clients.py` `AnthropicTitleGenerator`(제목 생성·요약), `AnthropicToolAgent`(도구 고르기·도구 결과 답변·텍스트 스트림, `_log` 자리에서 성공 통지, 예외 자리에서 실패·시간초과 통지). `get_title_generator`·`get_tool_agent`가 통지기를 받는다. 거절(`refusal`)은 실패(`failRsn` "refusal")
-  - 완료 조건 `명령:` `tests/chat/`에 가짜 통지기로 성공(토큰 합)·시간초과·API 오류 각 1건, 평가 스크립트(`on_usage`)는 그대로
-  - `화면:` 로컬 Java·Python 띄우고 Postman으로 대화 메시지 1번 → 관리자 `GET /api/admin/external-api-usage/tokens`(또는 사용량 조회)에 SYSC0015 건수·토큰이 오른다
-- FN-ADM-112-01·02 AI 분류(SYSC0024): `AnthropicImageIntentJudge`(사진 용도), `AnthropicRegisterExtractor`(등록 칸 추출). 의존성에 통지기
-  - 완료 조건 `명령:` 가짜 통지기로 성공·실패 각 1건. `화면:` Postman `POST /ai/image-intent` 1번 → SYSC0024 1건
-- FN-ADM-082-03 PDF 분석(SYSC0025): `app/checkup/clients.py` `ClaudePdfClient` — 성공(검사결과지 아님 `is_lab_result: false`도 성공), 시간초과 SYSC0023, API 오류·모양 오류·거절 SYSC0022. `get_lab_result_client`가 통지기를 받는다
-  - 완료 조건 `명령:` `tests/checkup/`에 성공·아님·시간초과·API 오류 각 통지값. `화면:` Postman `POST /ai/checkups/lab-results` 1번 → 관리자 `GET /api/admin/processing/pdf-analyses` summary에 요청 1 오름
-- FN-ADM-112-01 OCR(SYSC0016): `app/ocr/clients.py` `GoogleVisionOcrClient` — Vision 호출과 Anthropic 구조화 호출을 각각 1건으로(외부 API 호출마다, Vision은 HTTP 상태, Anthropic은 토큰도). `get_ocr_client`가 통지기를 받는다. 대화창·건강 일지·가계부 출처 모두 같은 클라이언트라 한 번에 된다
-  - 완료 조건 `명령:` `tests/ocr/`에 Vision 성공·실패, LLM 성공·시간초과 통지값. `화면:` Postman `POST /ai/receipts` 1번 → SYSC0016 2건
-- 문서: `docs/api/internal.md` "Python → Java" 표에 `POST /internal/ai/external-api-calls` 행(정본 백엔드 `docs/api/global.md`, 통지 대상·실패 규칙·캐릭터는 다음)
-  - 완료 조건 `명령:` `sh scripts/check.sh` 종료 0
-- 이번에 안 하는 것: 캐릭터 생성(SYSC0017, OpenAI 동기 호출이 스레드·공유 굽기 큐에서 돌아 작업마다 쿠키를 실어야 함) → 다음 마일스톤. 건강 리포트·피부·눈 분석은 맞는 SYSG05 코드가 없어 통지하지 않음(코드를 정하면 추가, 백엔드에 물을 것). 쿠키 없는 기동 때 도구 목록 받기는 Java 호출이라 대상 아님
-
-새 의존성: 없음
+SCR-ADM-112 외부 API 사용량 · Python 호출 통지 (AI 대화·분류·OCR·PDF 분석, SCR-ADM-082 공통) — 끝 (2026-11-24). `app/core/usage.py`가 요청 쿠키로 Java `POST /internal/ai/external-api-calls`에 통지(기다리지 않음, 실패는 경고 로그만): SYSC0015 제목·도구 고르기·답변, SYSC0024 사진 용도·등록 칸 추출, SYSC0016 Vision·LLM 각 1건, SYSC0025 PDF(검사결과지 아님도 성공). 입력 토큰 = input + 캐시 읽기·쓰기. 검증 통과(1회차 실패는 관리자 쿠키 없음, 재검증 통과), 사람 확인. PR #112
 
 ## 다음에 할 것
-- SCR-ADM-112 외부 API 사용량 통지 (LJS): 검증 루프 1회차 실패로 보관 중. 기획은 고치지 않는다. 루프를 버리려면 `! sh scripts/verify-loop.sh clear`. 1회차 실패 항목: 화면 확인 못 함(내 것) — 관리자 쿠키 없이 SYSC0015·0024·0016·0025 집계 확인 불가(코드 고칠 곳 없음, `check.sh` 0). 사람은 2026-11-24 화면 확인함. 다음 `/verify`에서는 관리자 쿠키를 dev-tokens `{"mbrSn": 2}`(로컬 관리자)로 받는다
 - 캐릭터 생성 사용량 통지 SYSC0017 (LJS, SCR-ADM-112 다음 마일스톤): OpenAI 동기 호출이 스레드·공유 굽기 큐에서 돌아 작업마다 쿠키를 실어 통지. 건강 리포트·피부·눈 분석은 SYSG05 코드가 없어 통지 안 함 — 코드를 정할지 백엔드(LJS 백엔드)와
 - 연결 남음: SCR-AIM-013 lesion-card (LJS 프론트): `SKIN`·`EYE` 분석 뒤 `POST /ai/conversations/{방}/lesion-card`(분석 응답 + `kind`·`petSn`, 실패·취소는 `ERROR`·`CANCELED`) → `action`을 확인 카드로, 실행 때 분석한 같은 사진을 `file`로 붙임(`docs/api/chat.md`). 프론트에 알릴 것
 - 연결 남음: SCR-AIM-013 checkup-card 검진기록 0건 (LJS 프론트): 프론트 PR #501은 글("검진기록이 없어요")로 판단 → AI 병합 뒤 `noCardReason === "NO_CHECKUP"`으로 바꿈(프론트 핸드오프에 있음, 2026-11-24 알림 보냄)
