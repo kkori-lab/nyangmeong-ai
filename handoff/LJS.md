@@ -1,10 +1,10 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-013 대화창 · 피부·눈 분석 결과 요약·지속 관찰 확인 카드 (lesion-card, 추가 요청) — 끝 (2026-11-24). `POST /ai/conversations/{방}/lesion-card`: 요약 AI 메시지 + `draft_observation_item` 확인 카드(피부는 부위 비움, 눈은 얼굴), 스냅샷·tool_prompts에 도구 추가. 검증 통과(1회차), 사람 확인. 같은 부위 관찰 중이면 관찰 기록으로 바꾸기는 다음
+SCR-ADM-112 외부 API 사용량 · Python 호출 통지 (AI 대화·분류·OCR·PDF 분석, SCR-ADM-082 공통) — 끝 (2026-11-24). `app/core/usage.py`가 요청 쿠키로 Java `POST /internal/ai/external-api-calls`에 통지(기다리지 않음, 실패는 경고 로그만): SYSC0015 제목·도구 고르기·답변, SYSC0024 사진 용도·등록 칸 추출, SYSC0016 Vision·LLM 각 1건, SYSC0025 PDF(검사결과지 아님도 성공). 입력 토큰 = input + 캐시 읽기·쓰기. 검증 통과(1회차 실패는 관리자 쿠키 없음, 재검증 통과), 사람 확인. PR #112
 
 ## 다음에 할 것
-- 외부 API 사용량 통지 (LJS, 2026-11-24 backend-6d 요청, 다음 `/start` 후보): AI가 Anthropic 호출마다 Java `POST /internal/ai/external-api-calls`(사용자 쿠키, 실패해도 응답은 안 막음·로그만)로 통지. `extlApiSeCd` SYSC0015 AI 대화·SYSC0024 AI 분류(사진 용도·등록 칸 추출)·SYSC0025 PDF 분석·SYSC0016 OCR·SYSC0017 캐릭터, `callRsltCd` SYSC0021 성공(검사결과지 아님도 성공)·SYSC0022 실패·SYSC0023 시간초과, `rspnsMs`·`httpSttsVl`·`failRsn`(≤1000). 토큰은 사람 결정: `inptTknCnt` = input + cache_read + cache_creation, `otptTknCnt` = output(`app/chat/clients.py` `_log`가 이미 읽음). 백엔드 연결 남음 FN-ADM-112-02·FN-ADM-082-03
+- 캐릭터 생성 사용량 통지 SYSC0017 (LJS, SCR-ADM-112 다음 마일스톤): OpenAI 동기 호출이 스레드·공유 굽기 큐에서 돌아 작업마다 쿠키를 실어 통지. 건강 리포트·피부·눈 분석은 SYSG05 코드가 없어 통지 안 함 — 코드를 정할지 백엔드(LJS 백엔드)와
 - 연결 남음: SCR-AIM-013 lesion-card (LJS 프론트): `SKIN`·`EYE` 분석 뒤 `POST /ai/conversations/{방}/lesion-card`(분석 응답 + `kind`·`petSn`, 실패·취소는 `ERROR`·`CANCELED`) → `action`을 확인 카드로, 실행 때 분석한 같은 사진을 `file`로 붙임(`docs/api/chat.md`). 프론트에 알릴 것
 - 연결 남음: SCR-AIM-013 checkup-card 검진기록 0건 (LJS 프론트): 프론트 PR #501은 글("검진기록이 없어요")로 판단 → AI 병합 뒤 `noCardReason === "NO_CHECKUP"`으로 바꿈(프론트 핸드오프에 있음, 2026-11-24 알림 보냄)
 - 연결 남음: SCR-AIM-013 image-intent `SKIN` 분기·ASK 칩에 피부 분석 (LJS 프론트, frontend 세션에 `docs/api/chat.md` 계약과 함께 알림). 로컬 DB: 검증 대화방 652~669·685·704(메시지 2411, petSn 1006)(mbrSn 1) 정리

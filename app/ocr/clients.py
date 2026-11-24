@@ -13,6 +13,15 @@ from pydantic import BaseModel, ValidationError
 from app.core.backend import external_error
 from app.core.config import Settings, get_settings
 from app.core.llm import get_anthropic_client
+from app.core.usage import (
+    NO_USAGE,
+    ExternalApi,
+    UsageReporter,
+    errored,
+    failed,
+    get_usage_reporter,
+    succeeded,
+)
 from app.ocr.rules import layout_text, paid_amount
 from app.ocr.schemas import ReceiptOcrResponse, Section
 
@@ -100,12 +109,15 @@ class GoogleVisionOcrClient:
         model: str,
         timeout_sec: float,
         transport: httpx2.AsyncBaseTransport | None = None,
+        usage: UsageReporter = NO_USAGE,
     ) -> None:
         self._api_key = api_key
         self._llm = llm
         self._model = model
         self._timeout_sec = timeout_sec
         self._transport = transport
+        # FN-ADM-112-01 : Vision·LLM 호출마다 한 건씩 통지
+        self._usage = usage
 
     async def recognize(self, image: bytes) -> ReceiptOcrResponse:
         text = await self._read_text(image)
@@ -129,22 +141,37 @@ class GoogleVisionOcrClient:
                 timeout=self._timeout_sec, transport=self._transport
             ) as http:
                 res = await http.post(VISION_URL, params={"key": self._api_key}, json=body)
-        except httpx2.TimeoutException:
+        except httpx2.TimeoutException as error:
+            self._usage.record(errored(ExternalApi.OCR, started, error))
             logger.warning("Vision 시간 초과 (%.0fms)", _elapsed(started))
             raise TimeoutError from None
-        except httpx2.HTTPError:
+        except httpx2.HTTPError as error:
+            self._usage.record(errored(ExternalApi.OCR, started, error))
             logger.warning("Vision 연결 실패 (%.0fms)", _elapsed(started))
             raise OcrApiError("vision") from None
         if not res.is_success:
+            status = res.status_code
+            self._usage.record(
+                failed(ExternalApi.OCR, started, f"vision {status}", http_status=status)
+            )
             logger.warning("Vision 오류 %d (%.0fms)", res.status_code, _elapsed(started))
             raise OcrApiError("vision")
         try:
             response = res.json()["responses"][0]
         except (ValueError, KeyError, IndexError, TypeError):
+            status = res.status_code
+            self._usage.record(
+                failed(ExternalApi.OCR, started, "vision invalid_output", http_status=status)
+            )
             raise OcrApiError("vision") from None
         if "error" in response:
+            status = res.status_code
+            self._usage.record(
+                failed(ExternalApi.OCR, started, "vision error_response", http_status=status)
+            )
             logger.warning("Vision 오류 응답 (%.0fms)", _elapsed(started))
             raise OcrApiError("vision")
+        self._usage.record(succeeded(ExternalApi.OCR, started, http_status=res.status_code))
         # 줄 순서를 낱말 위치로 재구성 (품목과 금액을 같은 줄에)
         text = layout_text(response.get("fullTextAnnotation") or {})
         logger.info("Vision 글자 %d자 (%.0fms)", len(text), _elapsed(started))
@@ -163,19 +190,25 @@ class GoogleVisionOcrClient:
                 output_config={"effort": LLM_EFFORT},
                 output_format=ReceiptOutput,
             )
-        except anthropic.APITimeoutError:
+        except anthropic.APITimeoutError as error:
+            self._usage.record(errored(ExternalApi.OCR, started, error))
             logger.warning("LLM 영수증 정리 시간 초과 (%.0fms)", _elapsed(started))
             raise TimeoutError from None
-        except anthropic.APIError:
+        except anthropic.APIError as error:
+            self._usage.record(errored(ExternalApi.OCR, started, error))
             logger.warning("LLM 영수증 정리 실패 (%.0fms)", _elapsed(started))
             raise OcrApiError("llm") from None
         except ValidationError:
+            self._usage.record(failed(ExternalApi.OCR, started, "invalid_output"))
             logger.warning("LLM 영수증 정리 모양 오류 (%.0fms)", _elapsed(started))
             raise OcrApiError("llm") from None
         output = response.parsed_output
         if response.stop_reason == "refusal" or output is None:
-            logger.warning("LLM 영수증 정리 결과 없음: %s", response.stop_reason or "no_output")
+            reason = response.stop_reason or "no_output"
+            self._usage.record(failed(ExternalApi.OCR, started, reason, response.usage))
+            logger.warning("LLM 영수증 정리 결과 없음: %s", reason)
             raise OcrApiError("llm")
+        self._usage.record(succeeded(ExternalApi.OCR, started, response.usage))
         logger.info(
             "LLM 영수증 정리: 글자 %d자 → 구역 %d개 (%.0fms)",
             len(text),
@@ -217,12 +250,19 @@ def _elapsed(started: float) -> float:
     return (time.monotonic() - started) * 1000
 
 
-def get_ocr_client(settings: Annotated[Settings, Depends(get_settings)]) -> OcrClient:
+def get_ocr_client(
+    settings: Annotated[Settings, Depends(get_settings)],
+    usage: Annotated[UsageReporter, Depends(get_usage_reporter)] = NO_USAGE,
+) -> OcrClient:
     api_key = settings.google_vision_api_key.get_secret_value()
     if not api_key:
         # 키 없는 PC·CI : 실제 API 미호출, 502 (키 값은 로그 제외)
         logger.error("OCR 호출 불가: .env.local의 GOOGLE_VISION_API_KEY가 비어 있습니다")
         raise external_error()
     return GoogleVisionOcrClient(
-        api_key, get_anthropic_client(settings), settings.llm_model, settings.ocr_timeout_sec
+        api_key,
+        get_anthropic_client(settings),
+        settings.llm_model,
+        settings.ocr_timeout_sec,
+        usage=usage,
     )

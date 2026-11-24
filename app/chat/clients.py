@@ -18,6 +18,15 @@ from app.chat import rules, tools
 from app.chat.schemas import ImageIntentJudgement, ImageIntentKind
 from app.core.config import Settings, get_settings
 from app.core.llm import get_anthropic_client
+from app.core.usage import (
+    NO_USAGE,
+    ExternalApi,
+    UsageReporter,
+    errored,
+    failed,
+    get_usage_reporter,
+    succeeded,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -71,9 +80,10 @@ SUMMARY_TITLE_SYSTEM = (
 class AnthropicTitleGenerator:
     # FN-AIM-011-11 : 첫 메시지만 전송 (FN-AIM-011-16 반려동물 기록 제외)
     # 실패해도 대화 생성 유지 : mock과 같은 앞 30자 사용
-    def __init__(self, client: AsyncAnthropic, model: str):
+    def __init__(self, client: AsyncAnthropic, model: str, usage: UsageReporter = NO_USAGE):
         self.client = client
         self.model = model
+        self.usage = usage
 
     async def generate(self, first_message: str) -> str:
         if len(first_message.strip()) <= SHORT_TITLE_LENGTH:
@@ -88,11 +98,14 @@ class AnthropicTitleGenerator:
                 output_config={"effort": LLM_EFFORT},
             )
         except anthropic.APIError as error:
+            self.usage.record(errored(ExternalApi.CHAT, started, error))
             _log_failure("제목 생성", started, _failure_reason(error))
             return _head(first_message)
         if response.stop_reason == "refusal":
+            self.usage.record(failed(ExternalApi.CHAT, started, "refusal", response.usage))
             _log_failure("제목 생성", started, "refusal")
             return _head(first_message)
+        self.usage.record(succeeded(ExternalApi.CHAT, started, response.usage))
         text = next((block.text for block in response.content if block.type == "text"), "")
         title = _clean_title(text)
         logger.info(
@@ -116,11 +129,14 @@ class AnthropicTitleGenerator:
                 output_config={"effort": LLM_EFFORT},
             )
         except anthropic.APIError as error:
+            self.usage.record(errored(ExternalApi.CHAT, started, error))
             _log_failure("제목 요약", started, _failure_reason(error))
             return ""
         if response.stop_reason == "refusal":
+            self.usage.record(failed(ExternalApi.CHAT, started, "refusal", response.usage))
             _log_failure("제목 요약", started, "refusal")
             return ""
+        self.usage.record(succeeded(ExternalApi.CHAT, started, response.usage))
         text = next((block.text for block in response.content if block.type == "text"), "")
         title = _clean_title(text)
         logger.info(
@@ -138,8 +154,11 @@ def _clean_title(text: str) -> str:
     return line.strip(TITLE_QUOTES).strip().rstrip(".").strip()
 
 
-def get_title_generator(settings: Annotated[Settings, Depends(get_settings)]) -> TitleGenerator:
-    return AnthropicTitleGenerator(get_anthropic_client(settings), settings.llm_model)
+def get_title_generator(
+    settings: Annotated[Settings, Depends(get_settings)],
+    usage: Annotated[UsageReporter, Depends(get_usage_reporter)] = NO_USAGE,
+) -> TitleGenerator:
+    return AnthropicTitleGenerator(get_anthropic_client(settings), settings.llm_model, usage)
 
 
 class ClassifyError(Exception):
@@ -379,10 +398,12 @@ class AnthropicToolAgent:
         client: AsyncAnthropic,
         model: str,
         on_usage: Callable[[str, object], None] | None = None,
+        usage: UsageReporter = NO_USAGE,
     ):
         self.client = client
         self.model = model
         self.on_usage = on_usage
+        self.usage = usage
 
     def _request(self, messages: list[dict], max_tokens: int, system: list[dict]) -> dict:
         return {
@@ -416,12 +437,15 @@ class AnthropicToolAgent:
                 elif event.type == "content_block_start" and event.content_block.type == "text":
                     return ToolDecision(text=self._texts(events, started, "도구 답변"))
         except (anthropic.APIError, httpx2.HTTPError) as error:
+            self.usage.record(errored(ExternalApi.CHAT, started, error))
             reason = _stream_failure(error)
             _log_failure("도구 고르기", started, reason)
             await events.aclose()
             raise ClassifyError(reason) from None
         if final is None or final.stop_reason == "refusal":
-            _log_failure("도구 고르기", started, final.stop_reason if final else "no_output")
+            reason = (final.stop_reason if final else None) or "no_output"
+            self._record_failure(final, started, reason)
+            _log_failure("도구 고르기", started, reason)
             return ToolDecision()
         self._log(final, "도구 고르기", started)
         use = next((block for block in final.content if block.type == "tool_use"), None)
@@ -440,6 +464,7 @@ class AnthropicToolAgent:
             async for event in events:
                 if isinstance(event, Message):
                     if event.stop_reason == "refusal":
+                        self._record_failure(event, started, "refusal")
                         _log_failure(task, started, "refusal")
                         raise AnswerError("refusal")
                     if any(block.type == "tool_use" for block in event.content):
@@ -450,6 +475,7 @@ class AnthropicToolAgent:
                     length += len(event.delta.text)
                     yield event.delta.text
         except (anthropic.APIError, httpx2.HTTPError) as error:
+            self.usage.record(errored(ExternalApi.CHAT, started, error))
             reason = _stream_failure(error)
             _log_failure(task, started, reason)
             raise AnswerError(reason) from None
@@ -491,6 +517,7 @@ class AnthropicToolAgent:
                             yield text
                         return
             except (anthropic.APIError, httpx2.HTTPError) as error:
+                self.usage.record(errored(ExternalApi.CHAT, started, error))
                 reason = _stream_failure(error)
                 _log_failure("도구 결과 답변", started, reason)
                 raise AnswerError(reason) from None
@@ -498,6 +525,7 @@ class AnthropicToolAgent:
                 await events.aclose()
             if final is None or final.stop_reason == "refusal":
                 reason = (final.stop_reason if final else None) or "no_output"
+                self._record_failure(final, started, reason)
                 _log_failure("도구 결과 답변", started, reason)
                 raise AnswerError(reason)
             self._log(final, "도구 결과 답변", started)
@@ -522,8 +550,13 @@ class AnthropicToolAgent:
         async for text in self._texts(self._events(request), time.monotonic(), "도구 결과 답변"):
             yield text
 
+    def _record_failure(self, final: Message | None, started: float, reason: str) -> None:
+        usage = final.usage if final is not None else None
+        self.usage.record(failed(ExternalApi.CHAT, started, reason, usage))
+
     def _log(self, final: Message, task: str, started: float, length: int | None = None) -> None:
         usage = final.usage
+        self.usage.record(succeeded(ExternalApi.CHAT, started, usage))
         if self.on_usage is not None:
             self.on_usage(task, usage)
         logger.info(
@@ -560,9 +593,12 @@ def with_result(
     ]
 
 
-def get_tool_agent(settings: Annotated[Settings, Depends(get_settings)]) -> ToolAgent:
+def get_tool_agent(
+    settings: Annotated[Settings, Depends(get_settings)],
+    usage: Annotated[UsageReporter, Depends(get_usage_reporter)] = NO_USAGE,
+) -> ToolAgent:
     # 2026-11-09 결정 : 대화창 판정은 항상 도구 흐름(끄는 설정 없음)
-    return AnthropicToolAgent(get_anthropic_client(settings), settings.llm_model)
+    return AnthropicToolAgent(get_anthropic_client(settings), settings.llm_model, usage=usage)
 
 
 class RegisterExtractor(Protocol):
@@ -605,9 +641,10 @@ EXTRACT_SYSTEM = (
 
 class AnthropicRegisterExtractor:
     # FN-AIM-012-03 : 반려동물 목록·기록 데이터 제외 (POL-006), 실패 시 빈 칸 (되물음)
-    def __init__(self, client: AsyncAnthropic, model: str):
+    def __init__(self, client: AsyncAnthropic, model: str, usage: UsageReporter = NO_USAGE):
         self.client = client
         self.model = model
+        self.usage = usage
 
     async def extract(self, text: str, today: date) -> dict:
         started = time.monotonic()
@@ -622,15 +659,20 @@ class AnthropicRegisterExtractor:
                 output_format=ExtractOutput,
             )
         except anthropic.APIError as error:
+            self.usage.record(errored(ExternalApi.CLASSIFY, started, error))
             _log_failure("등록 칸 추출", started, _failure_reason(error))
             return {}
         except ValidationError:
+            self.usage.record(failed(ExternalApi.CLASSIFY, started, "invalid_output"))
             _log_failure("등록 칸 추출", started, "invalid_output")
             return {}
         output = response.parsed_output
         if response.stop_reason == "refusal" or output is None:
-            _log_failure("등록 칸 추출", started, response.stop_reason or "no_output")
+            reason = response.stop_reason or "no_output"
+            self.usage.record(failed(ExternalApi.CLASSIFY, started, reason, response.usage))
+            _log_failure("등록 칸 추출", started, reason)
             return {}
+        self.usage.record(succeeded(ExternalApi.CLASSIFY, started, response.usage))
         values = output.model_dump(exclude_none=True)
         logger.info(
             "LLM 등록 칸 추출: 입력 %d자 → %d칸 (%.0fms)",
@@ -643,8 +685,9 @@ class AnthropicRegisterExtractor:
 
 def get_register_extractor(
     settings: Annotated[Settings, Depends(get_settings)],
+    usage: Annotated[UsageReporter, Depends(get_usage_reporter)] = NO_USAGE,
 ) -> RegisterExtractor:
-    return AnthropicRegisterExtractor(get_anthropic_client(settings), settings.llm_model)
+    return AnthropicRegisterExtractor(get_anthropic_client(settings), settings.llm_model, usage)
 
 
 class ImageIntentError(Exception):
@@ -695,9 +738,10 @@ def judgement_of(output: ImageIntentOutput) -> ImageIntentJudgement:
 
 class AnthropicImageIntentJudge:
     # 거절·깨진 출력 -> ASK, API 오류·시간 초과 -> ImageIntentError (서비스가 ASK로)
-    def __init__(self, client: AsyncAnthropic, model: str):
+    def __init__(self, client: AsyncAnthropic, model: str, usage: UsageReporter = NO_USAGE):
         self.client = client
         self.model = model
+        self.usage = usage
 
     async def judge(self, jpeg: bytes, text: str | None) -> ImageIntentJudgement:
         started = time.monotonic()
@@ -722,16 +766,21 @@ class AnthropicImageIntentJudge:
                 output_format=ImageIntentOutput,
             )
         except anthropic.APIError as error:
+            self.usage.record(errored(ExternalApi.CLASSIFY, started, error))
             reason = _failure_reason(error)
             _log_failure("사진 용도 판단", started, reason)
             raise ImageIntentError(reason) from error
         except ValidationError:
+            self.usage.record(failed(ExternalApi.CLASSIFY, started, "invalid_output"))
             _log_failure("사진 용도 판단", started, "invalid_output")
             return ImageIntentJudgement(kind=ImageIntentKind.ASK)
         output = response.parsed_output
         if response.stop_reason == "refusal" or output is None:
-            _log_failure("사진 용도 판단", started, response.stop_reason or "no_output")
+            reason = response.stop_reason or "no_output"
+            self.usage.record(failed(ExternalApi.CLASSIFY, started, reason, response.usage))
+            _log_failure("사진 용도 판단", started, reason)
             return ImageIntentJudgement(kind=ImageIntentKind.ASK)
+        self.usage.record(succeeded(ExternalApi.CLASSIFY, started, response.usage))
         logger.info(
             "LLM 사진 용도 판단: 이미지 %d바이트·글 %d자 → %s (%.0fms)",
             len(jpeg),
@@ -744,5 +793,6 @@ class AnthropicImageIntentJudge:
 
 def get_image_intent_judge(
     settings: Annotated[Settings, Depends(get_settings)],
+    usage: Annotated[UsageReporter, Depends(get_usage_reporter)] = NO_USAGE,
 ) -> ImageIntentJudge:
-    return AnthropicImageIntentJudge(get_anthropic_client(settings), settings.llm_model)
+    return AnthropicImageIntentJudge(get_anthropic_client(settings), settings.llm_model, usage)
