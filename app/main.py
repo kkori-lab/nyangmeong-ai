@@ -14,6 +14,7 @@ from app.core.config import get_settings
 from app.core.errors import register_error_handlers
 from app.healthreport import router as healthreport_router
 from app.ocr import router as ocr_router
+from app.skinlesion import router as skinlesion_router
 
 
 @asynccontextmanager
@@ -46,6 +47,7 @@ def create_app() -> FastAPI:
     app.include_router(character_router.router)
     app.include_router(checkup_router.router)
     app.include_router(healthreport_router.router)
+    app.include_router(skinlesion_router.router)
     app.include_router(chat_router.me_router)
     app.include_router(chat_router.router)
     return app
