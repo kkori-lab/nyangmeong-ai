@@ -2,7 +2,14 @@ from datetime import date, datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 from pydantic.alias_generators import to_camel
 
 MAX_MESSAGE_LENGTH = 1000
@@ -362,6 +369,65 @@ class CheckupCardRequest(_Camel):
 class CheckupNoCardReason(StrEnum):
     # 카드가 없는 이유 중 프론트가 다음 흐름을 여는 것 (2026-11-24)
     NO_CHECKUP = "NO_CHECKUP"  # 그 아이 검진기록 0건 : 프론트가 검진기록 추가로 잇는다
+
+
+class LesionKind(StrEnum):
+    SKIN = "SKIN"  # POST /ai/skin-analyses
+    EYE = "EYE"  # POST /ai/eye-analyses
+
+
+class LesionResult(StrEnum):
+    ANALYZED = "ANALYZED"
+    NOT_PET_SKIN = "NOT_PET_SKIN"
+    NOT_PET_EYE = "NOT_PET_EYE"
+    UNCLEAR = "UNCLEAR"
+    ERROR = "ERROR"  # 일시 오류(시간 초과·API 오류) : React가 남김
+    CANCELED = "CANCELED"  # 분석 중 [취소] : React가 남김
+
+
+class LesionGrade(StrEnum):
+    OBSERVE = "OBSERVE"
+    VISIT = "VISIT"
+    URGENT = "URGENT"
+
+
+class LesionConfidence(StrEnum):
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+
+
+class LesionFinding(_Camel):
+    # skin-analyses·eye-analyses findings 그대로
+    lesion_cd: str = Field(min_length=1, max_length=40)
+    lesion_nm: str = Field(min_length=1, max_length=40)
+    cnfdnc: LesionConfidence
+
+
+class LesionCardRequest(_Camel):
+    """대화창 피부·눈 분석 뒤 결과 요약 저장 + 지속 관찰 항목 확인 카드 (2026-11-24)
+    - React가 분석 응답을 그대로 보낸다 + kind·petSn"""
+
+    kind: LesionKind
+    pet_sn: int = Field(ge=1)
+    rslt: LesionResult
+    grade: LesionGrade | None = None
+    findings: list[LesionFinding] = Field(default_factory=list, max_length=3)
+    guide: list[str] = Field(default_factory=list, max_length=10)
+    notice: str | None = Field(None, max_length=500)
+    rule_version: str | None = Field(None, max_length=40)
+
+    @model_validator(mode="after")
+    def _graded(self) -> "LesionCardRequest":
+        # 판정 결과에는 등급 필수(분석 응답 규칙)
+        if self.rslt is LesionResult.ANALYZED and self.grade is None:
+            raise ValueError("ANALYZED에는 grade가 필요합니다.")
+        return self
+
+
+class LesionCardResult(_Camel):
+    # 저장한 AI 메시지와 확인 카드(없으면 null). 카드는 done.action과 같은 모양, 저장 안 함
+    messages: list[ConversationMessage]
+    action: ActionCard | None = None
 
 
 class CheckupCardResult(_Camel):

@@ -219,6 +219,17 @@ FAKE_CODES: dict[str, list[dict]] = {
         {"cd": "MYPC0019", "nm": "직접입력"},
         {"cd": "MYPC0020", "nm": "OCR"},
     ],
+    "HLTG16": [
+        {"cd": "HLTC0043", "nm": "머리"},
+        {"cd": "HLTC0044", "nm": "얼굴"},
+        {"cd": "HLTC0045", "nm": "목"},
+        {"cd": "HLTC0046", "nm": "등"},
+        {"cd": "HLTC0047", "nm": "배"},
+        {"cd": "HLTC0048", "nm": "앞다리"},
+        {"cd": "HLTC0049", "nm": "뒷다리"},
+        {"cd": "HLTC0050", "nm": "꼬리"},
+        {"cd": "HLTC0051", "nm": "기타"},
+    ],
     "HLTG17": [
         {"cd": "HLTC0052", "nm": "작아짐"},
         {"cd": "HLTC0053", "nm": "그대로"},

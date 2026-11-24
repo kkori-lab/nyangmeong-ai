@@ -748,3 +748,11 @@
 - 완료 조건: `/start` 기획의 완료 조건을 따른다.
 - 결과 (2026-11-24): 검증 통과(2회차, 1회차는 눈·피부 실사진 없어 확인 못 함), 사람 확인. 실제 키로 고양이 눈 근접 사진 `EYE`(글 없음·"눈 봐줘"), "캐릭터 만들어줘"면 `ASK`, 몸 전체 + "눈 봐줘" `EYE`, 피부 `SKIN`·몸 전체 `CHARACTER`·동물병원 영수증 `MEDICAL_RECEIPT` 회귀 없음. 사람 눈 사진은 글 없으면 `ASK`. `EXPENSE_RECEIPT` 회귀는 사진 없어 못 봄
 - 연결 남음: SCR-AIM-013 (`EYE` 분기·ASK 칩 "눈 분석", LJS 프론트), 결과 저장(지속 관찰 카드와 함께, LJS 백엔드)
+
+## SCR-AIM-013 대화창 · 피부·눈 분석 결과 요약·지속 관찰 확인 카드 (lesion-card, 추가 요청) — 끝
+- 기능: 피부(`POST /ai/skin-analyses`)·눈(`POST /ai/eye-analyses`) 분석이 끝나면 React가 결과를 보내고, Python이 결과 요약 AI 메시지를 저장하고 지속 관찰 항목 확인 카드(ACTION `draft_observation_item`, Java `POST /api/pets/{petSn}/observation-items`)를 준다. 기능 ID 없음(피부·안구 FN 행 작성 전)
+- 요청: 2026-11-24 LJS (핸드오프 피부 후속 ③·안구 후속 ②, 백엔드 PR #295 병합)
+- 기다리는 것: 없음 (PR #295 병합, 로컬 Java 도구 목록에 `draft_observation_item` 있음)
+- 완료 조건: `/start` 기획의 완료 조건을 따른다.
+- 결과 (2026-11-24): 검증 통과(1회차), 사람 확인. 실제 Java 방에 SKIN·EYE 201, 눈 카드 input + 사진으로 `observation-items` 201, `action-result` DONE 글 확인. 기획 고침 1건(기존 테스트 도구 목록 기대값·가짜 HLTG16 코드, 사진 칸은 글로 묻지 않음). 같은 부위 관찰 중이면 `draft_observation_cycle`로 바꾸기는 다음
+- 연결 남음: SCR-AIM-013 lesion-card (프론트 SKIN·EYE 결과 뒤 호출·카드에 같은 사진 첨부, LJS 프론트)

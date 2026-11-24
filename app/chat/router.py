@@ -35,6 +35,7 @@ from app.chat.schemas import (
     ActionResultRequest,
     CheckupCardRequest,
     ConversationCreateRequest,
+    LesionCardRequest,
     MessageSendRequest,
     ReceiptResultRequest,
     RegisterResultRequest,
@@ -199,6 +200,18 @@ async def save_checkup_card(
     room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
 ) -> JSONResponse:
     result = await service.save_checkup_card(repo, reader, contexts, room_sn, body)
+    return response.success(result.model_dump(by_alias=True, mode="json"), http_code=201)
+
+
+# 피부·눈 분석 뒤 (SCR-AIM-013, 2026-11-24) : 결과 요약 저장 + 지속 관찰 항목 확인 카드
+@router.post("/{aiCnvrsRoomSn}/lesion-card", dependencies=[Depends(require_member)])
+async def save_lesion_card(
+    body: LesionCardRequest,
+    repo: Repo,
+    contexts: Annotated[RegisterContextRepository, Depends(get_register_context_repository)],
+    room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
+) -> JSONResponse:
+    result = await service.save_lesion_card(repo, contexts, room_sn, body)
     return response.success(result.model_dump(by_alias=True, mode="json"), http_code=201)
 
 

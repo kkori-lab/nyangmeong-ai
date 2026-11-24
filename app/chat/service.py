@@ -56,6 +56,10 @@ from app.chat.schemas import (
     ImageIntentResult,
     Intent,
     IntentKind,
+    LesionCardRequest,
+    LesionCardResult,
+    LesionKind,
+    LesionResult,
     PetChoice,
     ReceiptResult,
     ReceiptResultRequest,
@@ -2282,3 +2286,105 @@ async def save_checkup_card(
             logger.info("검사 수치 확인 카드: %d줄 검진기록 %d건", len(rows), len(records))
     saved = await repo.add_message(room_sn, ROLE_AI, "\n".join(lines))
     return CheckupCardResult(messages=[saved], action=card, no_card_reason=reason)
+
+
+# 대화창 피부·눈 분석 결과 카드 (SCR-AIM-013, 2026-11-24)
+# React가 skin-analyses·eye-analyses 결과를 보내면 요약 글 저장 + 지속 관찰 항목 확인 카드(ACTION)
+OBSERVATION_TOOL = "draft_observation_item"
+OBSERVATION_NAME = "obsrvArtclNm"
+OBSERVATION_REGION = "obsrvRegnCd"
+OBSERVATION_DT = "obsrvDt"
+OBSERVATION_MEMO = "memoCn"
+# 목록 파일(data/skin_lesions.yaml·eye_lesions.yaml)의 "이상 없음" 키 : 이것만이면 카드 없음
+LESION_NORMAL = "normal"
+# 눈 분석 : 부위 코드 이름(Java HLTG16), 2026-11-24 사람 결정으로 눈 코드 추가 없이 얼굴
+EYE_REGION_NAME = "얼굴"
+LESION_TITLES = {LesionKind.SKIN: "피부", LesionKind.EYE: "눈"}
+LESION_GRADES = {"OBSERVE": "지켜보기", "VISIT": "진료 권장", "URGENT": "빨리 진료"}
+LESION_CONFIDENCES = {"HIGH": "높음", "MEDIUM": "보통"}
+LESION_MESSAGES = {
+    LesionResult.NOT_PET_SKIN: "반려동물 {title} 사진이 아니에요",
+    LesionResult.NOT_PET_EYE: "반려동물 {title} 사진이 아니에요",
+    LesionResult.UNCLEAR: "사진으로 판단하기 어려워요",
+    LesionResult.ERROR: "일시적인 오류로 분석하지 못했어요",
+    LesionResult.CANCELED: "취소했어요",
+}
+LESION_ASK = "{pet}지속 관찰 항목으로 남길까요? 카드에 분석한 사진을 붙여 저장해요."
+LESION_EYE_REGION = "부위는 얼굴로 골라 두었어요. 왼쪽 눈인지 오른쪽 눈인지 말해 주시면 적을게요."
+LESION_NO_TOOL = "건강기록의 지속 관찰에서 직접 남길 수 있어요."
+
+
+def _lesion_memo(request: LesionCardRequest, title: str, limit: int | None) -> str:
+    # "피부 분석 참고: 탈모(높음)·비듬(보통), 진료 권장, 규칙 2026-11-24-draft"
+    found = "·".join(
+        f"{f.lesion_nm}({LESION_CONFIDENCES[f.cnfdnc]})"
+        for f in request.findings
+        if f.lesion_cd != LESION_NORMAL
+    )
+    parts = [f"{title} 분석 참고: {found}", LESION_GRADES[request.grade or "OBSERVE"]]
+    if request.rule_version:
+        parts.append(f"규칙 {request.rule_version}")
+    memo = ", ".join(parts)
+    return memo[:limit] if limit else memo
+
+
+def _region_code(entry: "catalog.CatalogEntry", name: str) -> str | None:
+    # 부위 코드는 Java 도구 목록에서 이름으로(코드 값 하드코딩 없음)
+    param = entry.params.get(OBSERVATION_REGION)
+    codes = param.codes if param is not None else None
+    return next((c.cd for c in codes or [] if c.nm == name), None)
+
+
+async def save_lesion_card(
+    repo: ConversationRepository,
+    contexts: RegisterContextRepository,
+    room_sn: int,
+    request: LesionCardRequest,
+) -> LesionCardResult:
+    """피부·눈 분석 결과 요약 AI 메시지 + 지속 관찰 항목 확인 카드(카드는 미저장)"""
+    title = LESION_TITLES[request.kind]
+    prefix = f"{title} 분석 — "
+    if request.rslt is not LesionResult.ANALYZED:
+        lines = [prefix + LESION_MESSAGES[request.rslt].format(title=title)]
+        if request.rslt in (LesionResult.ERROR, LesionResult.CANCELED):
+            return LesionCardResult(messages=[await repo.add_message(room_sn, ROLE_AI, lines[0])])
+        lines += [*request.guide, *([request.notice] if request.notice else [])]
+        saved = await repo.add_message(room_sn, ROLE_AI, "\n".join(lines))
+        return LesionCardResult(messages=[saved])
+    lines = [prefix + LESION_GRADES[request.grade]]
+    lines += [f"- {f.lesion_nm} (확신도 {LESION_CONFIDENCES[f.cnfdnc]})" for f in request.findings]
+    lines += [*request.guide, *([request.notice] if request.notice else [])]
+    lesions = [f for f in request.findings if f.lesion_cd != LESION_NORMAL]
+    entry = tools.card_entry(OBSERVATION_TOOL)
+    card: ActionCard | None = None
+    if lesions and entry is None:
+        logger.info("관찰 항목 등록 도구 없음: 카드 없이 안내")
+        lines.append(LESION_NO_TOOL)
+    elif lesions:
+        params = entry.params
+        name_limit = params[OBSERVATION_NAME].max_length if OBSERVATION_NAME in params else None
+        memo_param = params.get(OBSERVATION_MEMO)
+        name = lesions[0].lesion_nm
+        values: dict = {
+            OBSERVATION_NAME: name[:name_limit] if name_limit else name,
+            OBSERVATION_DT: rules.now_kst()
+            .replace(second=0, microsecond=0, tzinfo=None)
+            .isoformat(),
+        }
+        if memo_param is not None:
+            values[OBSERVATION_MEMO] = _lesion_memo(request, title, memo_param.max_length)
+        region = _region_code(entry, EYE_REGION_NAME) if request.kind is LesionKind.EYE else None
+        if region is not None:
+            values[OBSERVATION_REGION] = region
+        pets = await contexts.get_pets()
+        card = action_card(entry, values, pets, [], request.pet_sn, request.pet_sn)
+        pet = f"{card.pet_nm}의 " if card.pet_nm else ""
+        lines.append(LESION_ASK.format(pet=pet))
+        if region is not None:
+            lines.append(LESION_EYE_REGION)
+        # 사진 칸 : 카드에서 분석한 사진을 붙이므로 말로 묻지 않음
+        said = [m for m in card.missing if m not in params or params[m].type != catalog.FILE]
+        lines += _missing_lines([card.model_copy(update={"missing": said})]) or [ACTION_ASK_CONFIRM]
+        logger.info("관찰 항목 확인 카드: %s 병변 %d개", request.kind, len(lesions))
+    saved = await repo.add_message(room_sn, ROLE_AI, "\n".join(lines))
+    return LesionCardResult(messages=[saved], action=card)
