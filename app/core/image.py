@@ -1,3 +1,7 @@
+import io
+
+from PIL import Image, ImageOps, UnidentifiedImageError
+
 from app.core.response import AppError
 
 # 업로드 제약(REQ-NFR-003) : 영수증(FN-AIM-008-05)·캐릭터 사진(FN-MYP-010-08)
@@ -24,3 +28,19 @@ def validate_upload(image: bytes, file_name: str | None) -> None:
     expected = EXTENSION_TYPES.get(extension.lower()) if dot else None
     if expected is None or detect_image_type(image) != expected:
         raise AppError("FILE_TYPE_NOT_ALLOWED", 400, "jpg·jpeg·png·webp 이미지만 올릴 수 있습니다.")
+
+
+def to_jpeg(image: bytes, long_edge: int, quality: int = 85) -> bytes:
+    """EXIF 회전 반영 후 긴 변 long_edge 이하 RGB JPEG (열 수 없으면 400)"""
+    try:
+        with Image.open(io.BytesIO(image)) as opened:
+            flat = ImageOps.exif_transpose(opened).convert("RGB")
+    except (UnidentifiedImageError, OSError, ValueError) as error:
+        # 시그니처만 맞고 열 수 없는 파일
+        raise AppError(
+            "FILE_TYPE_NOT_ALLOWED", 400, "jpg·jpeg·png·webp 이미지만 올릴 수 있습니다."
+        ) from error
+    flat.thumbnail((long_edge, long_edge), Image.LANCZOS)
+    out = io.BytesIO()
+    flat.save(out, "JPEG", quality=quality)
+    return out.getvalue()

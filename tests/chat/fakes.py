@@ -1,3 +1,4 @@
+import functools
 import json
 import re
 from collections.abc import AsyncIterator
@@ -9,6 +10,8 @@ from app.chat.rules import RouteRow
 from app.core.backend import external_error
 
 TITLE_LENGTH = 30
+# 검사 수치 저장 확인 카드 (SCR-AIM-013 대화창 PDF, 2026-11-23)
+INSPECTION_TOOL = "draft_inspection_values"
 # 기본 가짜 도구 고르기가 질문으로 보는 표현
 QUESTION = re.compile(r"[?？]|뭐|왜|어떻게|알려|어때|될까|되나|나요|까요")
 
@@ -216,6 +219,17 @@ FAKE_CODES: dict[str, list[dict]] = {
         {"cd": "MYPC0019", "nm": "직접입력"},
         {"cd": "MYPC0020", "nm": "OCR"},
     ],
+    "HLTG16": [
+        {"cd": "HLTC0043", "nm": "머리"},
+        {"cd": "HLTC0044", "nm": "얼굴"},
+        {"cd": "HLTC0045", "nm": "목"},
+        {"cd": "HLTC0046", "nm": "등"},
+        {"cd": "HLTC0047", "nm": "배"},
+        {"cd": "HLTC0048", "nm": "앞다리"},
+        {"cd": "HLTC0049", "nm": "뒷다리"},
+        {"cd": "HLTC0050", "nm": "꼬리"},
+        {"cd": "HLTC0051", "nm": "기타"},
+    ],
     "HLTG17": [
         {"cd": "HLTC0052", "nm": "작아짐"},
         {"cd": "HLTC0053", "nm": "그대로"},
@@ -303,6 +317,10 @@ def fake_catalog_json(structure_version: str | None = None) -> dict:
         for param in tool["params"].values():
             if param["type"] == "code":
                 param["codes"] = FAKE_CODES[param["group"]]
+        if tool["name"] == INSPECTION_TOOL:
+            # 배열 항목 코드 칸(inspArtclCd)도 Java처럼 코드 값을 싣는다 (2026-11-23)
+            item = tool["params"]["values"]["items"]["inspArtclCd"]
+            item["codes"] = FAKE_CODES[item["group"]]
     if structure_version is not None:
         raw["structureVersion"] = structure_version
     return raw
@@ -325,5 +343,7 @@ class FakeToolCatalogClient:
         return catalog.ToolCatalogResponse.model_validate(self.response)
 
 
+# Built once: neither tests nor app mutate the catalog, and building 50 tool schemas is slow
+@functools.cache
 def fake_catalog() -> catalog.Catalog:
     return catalog.build(catalog.ToolCatalogResponse.model_validate(fake_catalog_json()))

@@ -2,7 +2,14 @@ from datetime import date, datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 from pydantic.alias_generators import to_camel
 
 MAX_MESSAGE_LENGTH = 1000
@@ -58,6 +65,9 @@ class RegisterDraft(_Camel):
 class PetChoice(_Camel):
     pet_sn: int
     pet_nm: str
+    # 같은 이름 반려동물을 칩에서 구별해 보여 줄 때(FN-AIM-012-04), 모르면 칸 없음
+    pet_se_nm: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    vrty_nm: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class RegisterCard(RegisterDraft):
@@ -305,7 +315,18 @@ class ImageIntentKind(StrEnum):
     CHARACTER = "CHARACTER"  # 반려동물 사진 -> 캐릭터 만들기
     MEDICAL_RECEIPT = "MEDICAL_RECEIPT"  # 동물병원 영수증 -> 영수증 분석
     EXPENSE_RECEIPT = "EXPENSE_RECEIPT"  # 그 밖의 영수증 -> 가계부
+    SKIN = "SKIN"  # 반려동물 피부·털 문제 사진 -> 피부 병변 분석 (2026-11-24)
+    EYE = "EYE"  # 반려동물 눈 문제 사진 -> 안구 질환 분석 (2026-11-24)
+    CHECKUP_PDF = "CHECKUP_PDF"  # PDF -> 검사결과지 분석 (판단 LLM 미호출, 2026-11-23)
     ASK = "ASK"  # 모름 -> React가 칩으로 되물음
+
+
+class ImageIntentJudgement(BaseModel):
+    """사진 용도 판단 결과 (내부용) : ASK 안내 문구를 이유별로 고르기 위함 (2026-11-24)
+    - character_photo_unfit : 글이 캐릭터를 원하지만 사진에 반려동물 얼굴·몸이 안 보여 ASK"""
+
+    kind: ImageIntentKind
+    character_photo_unfit: bool = False
 
 
 class ImageIntentResult(_Camel):
@@ -315,3 +336,103 @@ class ImageIntentResult(_Camel):
     kind: ImageIntentKind
     ai_cnvrs_room_sn: int
     messages: list[ConversationMessage]
+
+
+class CheckupResult(StrEnum):
+    RECOGNIZED = "RECOGNIZED"  # 분석 성공(인식 0건 포함)
+    NOT_LAB_RESULT = "NOT_LAB_RESULT"  # 검사결과지가 아님(lab-results 422)
+    ERROR = "ERROR"  # 일시 오류(시간 초과·API 오류)
+    CANCELED = "CANCELED"  # 분석 중 [취소]
+
+
+class CheckupLabItem(_Camel):
+    # POST /ai/checkups/lab-results LabResultItem 그대로(Java InspectionValueItemRequest 칸 이름)
+    insp_artcl_cd: str | None = None
+    insp_artcl_drct_inpt_nm: str | None = None
+    rslt_nvl: float | None = None
+    unit_nm: str | None = None
+    ref_llmt_nvl: float | None = None
+    ref_uplmt_nvl: float | None = None
+
+
+class CheckupCardRequest(_Camel):
+    """대화창 검사결과지 PDF 분석 뒤 결과 요약 저장 + 검사 수치 저장 확인 카드 (2026-11-23)
+    - React가 lab-results 응답을 그대로 보낸다. RECOGNIZED일 때만 items를 쓴다"""
+
+    result: CheckupResult
+    # 대상 반려동물 : 영수증처럼 React가 정함(FN-AIM-013-03)
+    pet_sn: int = Field(ge=1)
+    items: list[CheckupLabItem] = Field(default_factory=list, max_length=100)
+    excluded_artcl_nms: list[str] = Field(default_factory=list, max_length=100)
+
+
+class CheckupNoCardReason(StrEnum):
+    # 카드가 없는 이유 중 프론트가 다음 흐름을 여는 것 (2026-11-24)
+    NO_CHECKUP = "NO_CHECKUP"  # 그 아이 검진기록 0건 : 프론트가 검진기록 추가로 잇는다
+
+
+class LesionKind(StrEnum):
+    SKIN = "SKIN"  # POST /ai/skin-analyses
+    EYE = "EYE"  # POST /ai/eye-analyses
+
+
+class LesionResult(StrEnum):
+    ANALYZED = "ANALYZED"
+    NOT_PET_SKIN = "NOT_PET_SKIN"
+    NOT_PET_EYE = "NOT_PET_EYE"
+    UNCLEAR = "UNCLEAR"
+    ERROR = "ERROR"  # 일시 오류(시간 초과·API 오류) : React가 남김
+    CANCELED = "CANCELED"  # 분석 중 [취소] : React가 남김
+
+
+class LesionGrade(StrEnum):
+    OBSERVE = "OBSERVE"
+    VISIT = "VISIT"
+    URGENT = "URGENT"
+
+
+class LesionConfidence(StrEnum):
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+
+
+class LesionFinding(_Camel):
+    # skin-analyses·eye-analyses findings 그대로
+    lesion_cd: str = Field(min_length=1, max_length=40)
+    lesion_nm: str = Field(min_length=1, max_length=40)
+    cnfdnc: LesionConfidence
+
+
+class LesionCardRequest(_Camel):
+    """대화창 피부·눈 분석 뒤 결과 요약 저장 + 지속 관찰 항목 확인 카드 (2026-11-24)
+    - React가 분석 응답을 그대로 보낸다 + kind·petSn"""
+
+    kind: LesionKind
+    pet_sn: int = Field(ge=1)
+    rslt: LesionResult
+    grade: LesionGrade | None = None
+    findings: list[LesionFinding] = Field(default_factory=list, max_length=3)
+    guide: list[str] = Field(default_factory=list, max_length=10)
+    notice: str | None = Field(None, max_length=500)
+    rule_version: str | None = Field(None, max_length=40)
+
+    @model_validator(mode="after")
+    def _graded(self) -> "LesionCardRequest":
+        # 판정 결과에는 등급 필수(분석 응답 규칙)
+        if self.rslt is LesionResult.ANALYZED and self.grade is None:
+            raise ValueError("ANALYZED에는 grade가 필요합니다.")
+        return self
+
+
+class LesionCardResult(_Camel):
+    # 저장한 AI 메시지와 확인 카드(없으면 null). 카드는 done.action과 같은 모양, 저장 안 함
+    messages: list[ConversationMessage]
+    action: ActionCard | None = None
+
+
+class CheckupCardResult(_Camel):
+    # 저장한 AI 메시지와 확인 카드(없으면 null). 카드는 done.action과 같은 모양, 저장 안 함
+    messages: list[ConversationMessage]
+    action: ActionCard | None = None
+    # 카드가 없는 이유. 검진기록 0건일 때만 NO_CHECKUP, 그 밖은 null
+    no_card_reason: CheckupNoCardReason | None = None

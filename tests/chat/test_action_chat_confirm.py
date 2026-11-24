@@ -89,7 +89,8 @@ def test_빈_칸이_있는_카드_턴은_빈_칸을_말로_묻는다(client, jav
     use_agent(client, FakeToolAgent(HEALTH, {"daily_rcd_idct_cd": WEIGHT, "rcd_nvl": 4.2}))
     room = room_of(client, java, pet_sn=CHOCO)
 
-    done = done_of(send(client, room, "초코 체중 4.2kg 기록해줘"))
+    # 날짜 말이 없으면 오늘로 채우므로(2026-11-23) 다른 날·시간 없음으로 빈 칸을 만든다
+    done = done_of(send(client, room, "초코 그저께 체중 4.2kg 기록해줘"))
 
     assert done["action"]["missing"] == ["rcdDt"]
     assert "아직 기록 날짜가 비어 있어요" in done["message"]["cnvrsCn"]

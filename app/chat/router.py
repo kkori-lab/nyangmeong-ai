@@ -33,7 +33,9 @@ from app.chat.repository import (
 from app.chat.schemas import (
     MAX_MESSAGE_LENGTH,
     ActionResultRequest,
+    CheckupCardRequest,
     ConversationCreateRequest,
+    LesionCardRequest,
     MessageSendRequest,
     ReceiptResultRequest,
     RegisterResultRequest,
@@ -73,8 +75,16 @@ async def judge_image_intent(
     # 10MB + 1바이트까지만 읽기 : 초과 판정용
     image = await file.read(MAX_IMAGE_BYTES + 1)
     # 형식·크기 400은 판단 전에 끝남 : 저장 없음
-    kind = await service.judge_image_intent(judge, image, file.filename or "", cnvrs_cn)
-    result = await service.save_image_turn(repo, titles, room_sn, pet_sn, cnvrs_cn, kind)
+    judgement = await service.judge_image_intent(judge, image, file.filename or "", cnvrs_cn)
+    result = await service.save_image_turn(
+        repo,
+        titles,
+        room_sn,
+        pet_sn,
+        cnvrs_cn,
+        judgement.kind,
+        character_photo_unfit=judgement.character_photo_unfit,
+    )
     return response.success(result.model_dump(by_alias=True, mode="json"))
 
 
@@ -158,10 +168,13 @@ async def save_register_result(
 async def save_action_result(
     body: ActionResultRequest,
     repo: Repo,
+    reader: Annotated[ToolReader, Depends(get_tool_reader)],
+    contexts: Annotated[RegisterContextRepository, Depends(get_register_context_repository)],
     room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
 ) -> JSONResponse:
     # 2단계 쓰기 : 확인 카드의 결과(완료·취소·실패) 텍스트 요약 저장
-    result = await service.save_action_result(repo, room_sn, body)
+    # 검사 수치 저장은 반려동물·검진기록을 읽어 글에 붙인다(읽기 실패면 빼고 저장)
+    result = await service.save_action_result(repo, reader, contexts, room_sn, body)
     return response.success(result.model_dump(by_alias=True), http_code=201)
 
 
@@ -175,6 +188,31 @@ async def save_receipt_result(
     # FN-AIM-013-02·09 : 영수증 분석 후 함께 보낸 텍스트·결과 요약 저장
     saved = await service.save_receipt_result(repo, room_sn, body)
     return response.success([m.model_dump(by_alias=True) for m in saved], http_code=201)
+
+
+# 검사결과지 PDF 분석 뒤 (SCR-AIM-013, 2026-11-23) : 결과 요약 저장 + 검사 수치 저장 확인 카드
+@router.post("/{aiCnvrsRoomSn}/checkup-card", dependencies=[Depends(require_member)])
+async def save_checkup_card(
+    body: CheckupCardRequest,
+    repo: Repo,
+    reader: Annotated[ToolReader, Depends(get_tool_reader)],
+    contexts: Annotated[RegisterContextRepository, Depends(get_register_context_repository)],
+    room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
+) -> JSONResponse:
+    result = await service.save_checkup_card(repo, reader, contexts, room_sn, body)
+    return response.success(result.model_dump(by_alias=True, mode="json"), http_code=201)
+
+
+# 피부·눈 분석 뒤 (SCR-AIM-013, 2026-11-24) : 결과 요약 저장 + 지속 관찰 항목 확인 카드
+@router.post("/{aiCnvrsRoomSn}/lesion-card", dependencies=[Depends(require_member)])
+async def save_lesion_card(
+    body: LesionCardRequest,
+    repo: Repo,
+    contexts: Annotated[RegisterContextRepository, Depends(get_register_context_repository)],
+    room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
+) -> JSONResponse:
+    result = await service.save_lesion_card(repo, contexts, room_sn, body)
+    return response.success(result.model_dump(by_alias=True, mode="json"), http_code=201)
 
 
 async def _sse(events: AsyncIterator[service.Event]) -> AsyncIterator[str]:

@@ -246,12 +246,14 @@ def test_bake_안_구운_캐릭터를_굽고_다_끝나면_200과_lastYn(monkeyp
 
 
 def test_bake_대상이_묶음보다_많으면_나눠_굽고_마지막에_lastYn(monkeypatch, repo) -> None:
-    repo.jobs = {sn: character(sn) for sn in range(1, 31)}
+    # small batch keeps the real image work to 5 bakes
+    monkeypatch.setattr(service, "BAKE_BATCH", 2)
+    repo.jobs = {sn: character(sn) for sn in range(1, 6)}
     generator = BakeClient()
     client = make_client(monkeypatch, repo, generator)
     results = [post_bake(client).json()["data"] for _ in range(3)]
-    assert [(r["bakedCnt"], r["lastYn"]) for r in results] == [(13, False), (13, False), (4, True)]
-    assert len(generator.calls) == 30
+    assert [(r["bakedCnt"], r["lastYn"]) for r in results] == [(2, False), (2, False), (1, True)]
+    assert len(generator.calls) == 5
     assert all(SWEATER in saved.item_sheets for saved in repo.jobs.values())
 
 

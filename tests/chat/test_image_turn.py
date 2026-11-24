@@ -8,13 +8,20 @@ import pytest
 
 from app.chat import clients
 from app.chat.schemas import ROLE_AI, ROLE_USER, ImageIntentKind
-from app.chat.service import IMAGE_MESSAGES, IMAGE_TITLE
+from app.chat.service import (
+    CHARACTER_PHOTO_UNFIT_MESSAGE,
+    IMAGE_MESSAGES,
+    IMAGE_TITLE,
+    PDF_MARK,
+    PDF_TITLE,
+)
 from tests.chat.conftest import AJAX, as_member
 from tests.chat.fakes import FakeTitleGenerator
 from tests.chat.test_image_intent import FakeImageIntentJudge, image_bytes
 from tests.chat.test_messages import MessageJava
 
 URL = "/ai/image-intent"
+PDF_FILE = ("result.pdf", b"%PDF-1.7 0000", "application/pdf")
 
 
 @pytest.fixture
@@ -134,11 +141,34 @@ def test_판단_실패로_ASK여도_저장한다(client, java, judge, titles):
 
 
 def test_형식_오류면_저장하지_않는다(client, java, judge, titles):
-    res = post(client, {}, ("doc.pdf", b"%PDF-1.4", "application/pdf"))
+    # 확장자는 PDF인데 실제 형식이 이미지 : 400, 저장 없음
+    res = post(client, {}, ("doc.pdf", image_bytes(), "application/pdf"))
 
     assert res.status_code == 400
     assert java.rooms == {}
     assert judge.calls == []
+
+
+def test_PDF는_판단_없이_PDF_자리_표시만_저장하고_안내는_없다(client, java, judge, titles):
+    # 대화창 PDF 첨부 (2026-11-23) : 결과 요약은 checkup-card가 저장
+    room = java.add_room(1, "제목", cn="안녕")
+
+    res = post(client, {"aiCnvrsRoomSn": str(room), "cnvrsCn": "검사 결과야"}, PDF_FILE)
+
+    data = res.json()["data"]
+    assert data["kind"] == "CHECKUP_PDF"
+    assert saved(java, room)[1:] == [(ROLE_USER, f"{PDF_MARK} 검사 결과야")]
+    assert [m["cnvrsCn"] for m in data["messages"]] == [f"{PDF_MARK} 검사 결과야"]
+    assert judge.calls == []
+
+
+def test_PDF만_보내면_새_방_제목은_PDF_대화이고_제목_LLM_미호출(client, java, judge, titles):
+    data = post(client, {}, PDF_FILE).json()["data"]
+
+    room = java.rooms[data["aiCnvrsRoomSn"]]
+    assert room["cnvrsTtl"] == PDF_TITLE
+    assert saved(java, data["aiCnvrsRoomSn"]) == [(ROLE_USER, PDF_MARK)]
+    assert titles.generated == []
 
 
 def test_남의_방이면_Java_404를_그대로_준다(client, java, judge, titles):
@@ -169,3 +199,71 @@ def test_저장한_사진_턴은_다음_턴_맥락에_들어간다(client, java,
     context = agent.decides[0][0]
     assert {"role": "user", "content": "[사진] 이거 뭐야"} in context
     assert json.dumps(context, ensure_ascii=False).count("[사진]") == 1
+
+
+def test_피부_사진은_사진_메시지와_피부_분석_안내를_저장한다(client, java, judge, titles):
+    judge.kind = ImageIntentKind.SKIN
+    room = java.add_room(1, "제목", cn="안녕")
+
+    data = post(client, {"cnvrsCn": "피부 봐줘", "aiCnvrsRoomSn": str(room)}).json()["data"]
+
+    assert data["kind"] == "SKIN"
+    assert saved(java, room)[-2:] == [
+        (ROLE_USER, "[사진] 피부 봐줘"),
+        (ROLE_AI, "피부 분석으로 이어 갈게요."),
+    ]
+    assert [m["cnvrsCn"] for m in data["messages"]] == [
+        "[사진] 피부 봐줘",
+        "피부 분석으로 이어 갈게요.",
+    ]
+
+
+def test_되물음_안내에_피부_분석이_있다():
+    assert "피부 분석" in IMAGE_MESSAGES[ImageIntentKind.ASK]
+
+
+def test_눈_사진은_사진_메시지와_눈_분석_안내를_저장한다(client, java, judge, titles):
+    judge.kind = ImageIntentKind.EYE
+    room = java.add_room(1, "제목", cn="안녕")
+
+    data = post(client, {"cnvrsCn": "눈 봐줘", "aiCnvrsRoomSn": str(room)}).json()["data"]
+
+    assert data["kind"] == "EYE"
+    assert saved(java, room)[-2:] == [
+        (ROLE_USER, "[사진] 눈 봐줘"),
+        (ROLE_AI, "눈 분석으로 이어 갈게요."),
+    ]
+    assert [m["cnvrsCn"] for m in data["messages"]] == [
+        "[사진] 눈 봐줘",
+        "눈 분석으로 이어 갈게요.",
+    ]
+
+
+def test_되물음_안내에_눈_분석이_있다():
+    assert IMAGE_MESSAGES[ImageIntentKind.ASK] == (
+        "이 사진으로 무엇을 할까요? "
+        "캐릭터 만들기, 영수증 분석, 피부 분석, 눈 분석 중에 골라 주세요."
+    )
+
+
+def test_캐릭터를_원하지만_사진이_안_맞으면_이유를_안내한다(client, java, judge, titles):
+    judge.kind = ImageIntentKind.ASK
+    judge.character_photo_unfit = True
+    room = java.add_room(1, "제목", cn="안녕")
+
+    data = post(client, {"cnvrsCn": "캐릭터 만들어줘", "aiCnvrsRoomSn": str(room)}).json()["data"]
+
+    assert data["kind"] == "ASK"
+    assert saved(java, room)[-2:] == [
+        (ROLE_USER, "[사진] 캐릭터 만들어줘"),
+        (ROLE_AI, CHARACTER_PHOTO_UNFIT_MESSAGE),
+    ]
+    assert "얼굴이나 몸 전체" in CHARACTER_PHOTO_UNFIT_MESSAGE
+
+
+def test_되물음_이유가_없으면_기본_안내(client, java, judge, titles):
+    room = java.add_room(1, "제목", cn="안녕")
+
+    post(client, {"aiCnvrsRoomSn": str(room)})
+
+    assert saved(java, room)[-1] == (ROLE_AI, IMAGE_MESSAGES[ImageIntentKind.ASK])

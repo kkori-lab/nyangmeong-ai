@@ -42,14 +42,24 @@ from app.chat.schemas import (
     ActionStatus,
     AnswerDone,
     CardType,
+    CheckupCardRequest,
+    CheckupCardResult,
+    CheckupLabItem,
+    CheckupNoCardReason,
+    CheckupResult,
     ConversationCreateRequest,
     ConversationDetail,
     ConversationMessage,
     ConversationSummary,
+    ImageIntentJudgement,
     ImageIntentKind,
     ImageIntentResult,
     Intent,
     IntentKind,
+    LesionCardRequest,
+    LesionCardResult,
+    LesionKind,
+    LesionResult,
     PetChoice,
     ReceiptResult,
     ReceiptResultRequest,
@@ -59,8 +69,9 @@ from app.chat.schemas import (
     RegisterResultRequest,
     StreamError,
 )
-from app.core.backend import BackendError, failure_reason
+from app.core.backend import BackendError, external_error, failure_reason
 from app.core.image import validate_upload
+from app.core.pdf import is_pdf_name, validate_pdf
 from app.core.response import AppError
 
 logger = logging.getLogger(__name__)
@@ -143,6 +154,15 @@ ACTION_SHOWN = (
 # 확인 카드를 모달 대신 채팅으로 확인 (2026-11-13) : 카드 턴의 저장 글과 다음 턴의 확인·취소
 ACTION_ASK_TEMPLATE = "이렇게 할까요?\n{summary}"
 ACTION_ASK_MISSING = "아직 {names} 비어 있어요. 말로 알려 주세요."
+# FN-AIM-012-04 : 같은 이름 반려동물이라 못 정함(칩이 모두 같은 이름)
+ACTION_ASK_SAME_PET = "{name} {count}. 칩에서 고르거나 '{hint} {pet}'처럼 알려 주세요."
+ACTION_ASK_SAME_PET_CHIP = "{name} {count}. 칩에서 골라 주세요."
+ACTION_ASK_MISSING_REST = "아직 {names} 비어 있어요."
+# 빈 칸에 표시 이름(LLM 칸 설명)이 하나도 없을 때 : Java 칸 이름을 보이지 않는다 (2026-11-24)
+ACTION_ASK_MISSING_UNNAMED = "카드에 빈 칸이 있어요. 말로 알려 주세요."
+ACTION_ASK_MISSING_UNNAMED_NO = "{no}번 카드에 빈 칸이 있어요. 말로 알려 주세요."
+# 빈 반려동물 칸의 이름(되물음 글)
+PET_LABEL = "반려동물"
 ACTION_ASK_CONFIRM = "맞으면 '등록해 줘'라고 말해 주세요. 바꿀 내용은 말로 알려 주시면 고칠게요."
 ACTION_EXECUTE_MESSAGE = "등록할게요."
 ACTION_DROP_MESSAGE = "등록하지 않았어요."
@@ -156,6 +176,9 @@ ACTION_CHAINED = (
 # 카드가 둘 이상일 때 : 번호 붙은 요약 줄, 빈 칸은 카드 번호로
 ACTION_ASK_LINE = "{no}. {summary}"
 ACTION_ASK_MISSING_NO = "아직 {no}번의 {names} 비어 있어요. 말로 알려 주세요."
+# 카드 여럿에서 같은 이름 반려동물이라 못 정함 : 카드 하나일 때 문구에 번호, 남은 빈 칸은 이어서
+ACTION_ASK_SAME_PET_NO = "{no}번: {line}"
+ACTION_ASK_MISSING_REST_NO = "아직 {no}번의 {names} 비어 있어요."
 # 수정 도구(경로 번호 칸) : 번호를 이 턴 READ 결과에서 못 정하면 카드 없이 (SCR-AIM-012 2단계 ②)
 ACTION_TARGET_MISSING = (
     "바꿀 대상을 이 턴 읽기 결과에서 찾지 못해 카드를 띄우지 않음. "
@@ -271,6 +294,9 @@ class Judged:
     follow_shortcuts: list[Intent] | None = None
     # ACTION : 이어 고른 쓰기 도구의 (도구, 검증한 input). 첫 카드는 tool·action (여러 명령 ②)
     more: tuple[tuple[str, dict, tuple[str, ...]], ...] = ()
+    # ACTION 고치기 : 돌려받은 같은 도구 카드가 여럿(반려동물별로 나눈 카드)일 때
+    # 그 카드마다 (목록 번호, 검증한 input, 비운 칸). 어느 카드를 고칠지는 _action_reply가 정함
+    per_prior: tuple[tuple[int, dict, tuple[str, ...]], ...] = ()
 
 
 def _guide_shortcut(chunk_id: str) -> Intent | None:
@@ -515,18 +541,45 @@ def _card_judged(
     if now is not None and rules.mentions_now(text):
         # '방금·지금' : LLM이 비운 날짜·시각을 오늘·지금으로 (2026-11-13)
         args = catalog.fill_now(card, args, now)
-    if base:
-        # 추가-1 : 날짜를 말하지 않았으면 돌려받은 카드의 날짜를 유지
-        date_said = rules.mentions_date(text)
-        args = catalog.keep_prior_dates(card, args, base, date_said, today)
-    values = catalog.card_input(card, args, now, {}, base)
-    rejected = tuple(_rejected(card, args, values))
+    # LLM이 비운 날짜 : 문장의 날짜 말, 없으면 새 등록 기록 도구만 오늘 (2026-11-23)
+    args = catalog.fill_date(card, args, rules.said_dates(text, today), today)
+    values, rejected = _card_values(text, card, args, base, today, now)
     if catalog.missing_target_ids(card, values):
         # 경로·본문 필수 번호 칸은 카드에서 고를 수 없음 : 안내 글(SEARCH), 고지 없음
         logger.info("쓰기 도구 대상 번호 없음: %s", call.name)
         stream = _fixed(_target_missing(card))
         return Judged(Intent(kind=IntentKind.SEARCH), stream=stream, notice=False)
-    return Judged(Intent(kind=IntentKind.ACTION), tool=call.name, action=values, rejected=rejected)
+    # 반려동물별로 나눈 같은 도구 카드가 여럿이면 카드마다 그 input을 바탕으로 (2026-11-23)
+    same = [no for no, draft in enumerate(priors) if draft.tool == call.name]
+    per_prior = (
+        tuple((no, *_card_values(text, card, args, priors[no].values, today, now)) for no in same)
+        if len(same) > 1
+        else ()
+    )
+    return Judged(
+        Intent(kind=IntentKind.ACTION),
+        tool=call.name,
+        action=values,
+        rejected=rejected,
+        per_prior=per_prior,
+    )
+
+
+def _card_values(
+    text: str,
+    card: "catalog.CatalogEntry",
+    args: dict,
+    base: dict | None,
+    today: date,
+    now: datetime | None,
+) -> tuple[dict, tuple[str, ...]]:
+    # 도구 인자 -> 검증한 카드 input과 비운 칸. base는 돌려받은 카드 input
+    if base:
+        # 추가-1 : 날짜를 말하지 않았으면 돌려받은 카드의 날짜를 유지
+        date_said = rules.mentions_date(text)
+        args = catalog.keep_prior_dates(card, args, base, date_said, today)
+    values = catalog.card_input(card, args, now, {}, base)
+    return values, tuple(_rejected(card, args, values))
 
 
 def _route_mixed(
@@ -586,6 +639,8 @@ class ReadDeps:
     room_pet: int | None = None
     # 쓰기 도구 datetime 칸 : 날짜만 오면 오늘은 이 시각
     now: datetime | None = None
+    # 돌려받은 확인 카드 : READ 뒤 같은 쓰기 도구를 고르면 그 input을 바탕으로 (2026-11-23)
+    priors: tuple[ActionDraft, ...] = ()
 
 
 class _ReadPets:
@@ -609,7 +664,7 @@ class _ReadPets:
         return self._pets
 
     def named(self, pets: list[PetInfo]) -> list[PetInfo]:
-        return [p for p in pets if p.pet_nm in self.compact]
+        return named_pets(pets, self.compact)
 
     def targets(self, pets: list[PetInfo]) -> list[PetInfo]:
         """읽을 반려동물 : 문장 속 이름들 > 펫 태그 방의 그 아이 > 모든 아이"""
@@ -618,6 +673,20 @@ class _ReadPets:
             return named
         tagged = [p for p in pets if p.pet_sn == self.read.room_pet]
         return tagged or pets
+
+
+def _same_name_kind(pet: PetInfo, pets: list[PetInfo]) -> str:
+    """같은 이름 반려동물 READ 구별 (2026-11-23) : 이름이 또 있는 아이만 "강아지·말티즈".
+    종·품종이 없으면 빈 글자(이름만)"""
+    if not any(p.pet_nm == pet.pet_nm and p.pet_sn != pet.pet_sn for p in pets):
+        return ""
+    return "·".join(part for part in (pet.pet_se_nm, pet.vrty_nm) if part)
+
+
+def _pet_list_name(pet: PetInfo, pets: list[PetInfo]) -> str:
+    # 여러 아이 일정 이름표 : "연탄(petSn 1006, 강아지·말티즈)", 이름이 안 겹치면 번호만
+    kind = _same_name_kind(pet, pets)
+    return f"{pet.pet_nm}(petSn {pet.pet_sn}{', ' + kind if kind else ''})"
 
 
 @dataclass
@@ -669,7 +738,7 @@ async def _read_once(
         if len(chosen) < len(found):
             pet_sns = ",".join(str(p.pet_sn) for p in chosen)
         # 결과 행에는 petSn만 있어 이름표를 붙인다
-        names = ", ".join(f"{p.pet_nm}(petSn {p.pet_sn})" for p in chosen)
+        names = ", ".join(_pet_list_name(p, found) for p in chosen)
         label = READ_PET_LABEL.format(name=names)
     requests = [
         catalog.read_request(entry, values, p.pet_sn if p else None, seen, pet_sns) for p in targets
@@ -711,7 +780,9 @@ async def _read_once(
                 catalog.seen_rows(data, rows)
             text = rules.read_result_text(catalog.drop_result_fields(entry, data), limit)
         if "pet" in entry.hooks and pet is not None:
-            text = READ_PET_LABEL.format(name=pet.pet_nm) + "\n" + text
+            kind = _same_name_kind(pet, await pets.pets())
+            name = f"{pet.pet_nm}({kind})" if kind else pet.pet_nm
+            text = READ_PET_LABEL.format(name=name) + "\n" + text
         elif label is not None:
             text = label + "\n" + text
         blocks.append(text)
@@ -791,13 +862,17 @@ class _Follow:
                 return None
             found = await self.pets.pets() if _uses_pets(card) else []
             raw = call.args.model_dump(exclude_none=True)
-            values = catalog.card_input(card, raw, self.read.now, self.seen, rows=self.rows)
+            # 돌려받은 같은 도구 카드가 있으면 그 input에 이 턴 값을 덮어씀(검사 수치 카드 검진기록)
+            prior = next((d for d in self.read.priors if d.tool == call.name), None)
+            base = prior.values if prior is not None else None
+            values = catalog.card_input(card, raw, self.read.now, self.seen, base, self.rows)
             if catalog.missing_target_ids(card, values):
                 logger.info("쓰기 도구 대상 번호 없음: %s", call.name)
                 return _target_missing_note(card)
             named = self.pets.named(found)
             rejected = _rejected(card, raw, values)
-            shown = action_card(card, values, found, named, None, self.read.room_pet, rejected)
+            draft_pet = base.get(catalog.PET_SN) if base else None
+            shown = action_card(card, values, found, named, draft_pet, self.read.room_pet, rejected)
             self.cards.append(shown)
             return _worded(ACTION_SHOWN, [shown]).format(summary=action_summary(shown))
         if call.name in (tools.NAVIGATE, tools.SEARCH_GUIDE) and call.args is not None:
@@ -991,7 +1066,7 @@ async def _run_turn(
             today = register.today if register is not None else rules.today_kst()
             now = datetime.combine(today, datetime.now(rules.KST).time())
             read = (
-                ReadDeps(reader, register.contexts, turn.pet_sn, now)
+                ReadDeps(reader, register.contexts, turn.pet_sn, now, tuple(priors))
                 if reader is not None and register is not None
                 else None
             )
@@ -1244,6 +1319,33 @@ def _answer_fill(text: str, draft: RegisterDraft, pet_names: list[str]) -> dict:
     return {}
 
 
+# FN-AIM-012-04 : 같은 이름 반려동물을 좁히는 종 말. "개"는 "두 개"·"개월"과 겹쳐 쓰지 않는다
+SPECIES_WORDS = {"강아지": ("강아지", "댕댕이", "멍멍이"), "고양이": ("고양이", "냥이")}
+
+
+def named_pets(pets: list[PetInfo], text: str) -> list[PetInfo]:
+    """문장 속 이름에 걸린 반려동물. 같은 이름이 여럿이면 문장의 품종 이름 > 종 말로 좁힌다
+    (FN-AIM-012-04 보강, 2026-11-23). 다른 이름끼리 여럿("초코랑 까미")은 좁히지 않는다"""
+    compact = re.sub(r"\s+", "", text)
+    named = [pet for pet in pets if pet.pet_nm in compact]
+    if len(named) < 2 or len({pet.pet_nm for pet in named}) > 1:
+        return named
+    by_vrty = [p for p in named if p.vrty_nm and re.sub(r"\s+", "", p.vrty_nm) in compact]
+    named = by_vrty or named
+    said = {se for se, words in SPECIES_WORDS.items() if any(word in compact for word in words)}
+    by_se = [pet for pet in named if pet.pet_se_nm in said]
+    return by_se or named
+
+
+def pet_choices(pets: list[PetInfo], named: list[PetInfo]) -> list[PetChoice]:
+    # 못 정했을 때 칩 : 이름이 여러 마리에 걸렸으면 그 아이들만, 아니면 양육 반려동물 전부
+    shown = named if len(named) > 1 else pets
+    return [
+        PetChoice(pet_sn=p.pet_sn, pet_nm=p.pet_nm, pet_se_nm=p.pet_se_nm, vrty_nm=p.vrty_nm)
+        for p in shown
+    ]
+
+
 def _pick_pet(
     pets: list[PetInfo], named: list[PetInfo], draft_pet: int | None, room_pet: int | None
 ) -> PetInfo | None:
@@ -1251,7 +1353,12 @@ def _pick_pet(
     if len(named) == 1:
         return named[0]
     if named:
-        return None
+        # 같은 이름 여럿 : 그 안에 직전 카드 반려동물 > 펫 태그가 있으면 그 아이(2026-11-23 추가-1)
+        # 다른 이름끼리 여럿("초코랑 까미")은 두 마리를 말한 것이라 정하지 않는다
+        if len({pet.pet_nm for pet in named}) > 1:
+            return None
+        same = {pet.pet_sn: pet for pet in named}
+        return same.get(draft_pet) or same.get(room_pet)
     by_sn = {pet.pet_sn: pet for pet in pets}
     if draft_pet in by_sn:
         return by_sn[draft_pet]
@@ -1271,8 +1378,7 @@ async def build_card(
     # FN-AIM-012-02~08·10. 초안이 있는데 이 메시지에서 뽑힌 칸이 없으면 None(일반 판정으로)
     pets = await deps.contexts.get_pets()
     names = [pet.pet_nm for pet in pets]
-    compact = re.sub(r"\s+", "", text)
-    named = [pet for pet in pets if pet.pet_nm in compact]
+    named = named_pets(pets, text)
     parsed = rules.parse_register(text, deps.today, names).values()
     if draft is None:
         values = parsed
@@ -1306,7 +1412,7 @@ async def build_card(
         card_type=CardType.ASK if missing else CardType.CARE_ITEM if care else CardType.SCHEDULE,
         pet_sn=pet.pet_sn if pet else None,
         pet_nm=pet.pet_nm if pet else None,
-        pet_choices=[] if pet else [PetChoice(pet_sn=p.pet_sn, pet_nm=p.pet_nm) for p in pets],
+        pet_choices=[] if pet else pet_choices(pets, named),
         missing=[to_camel(name) for name in missing],
         **values,
     )
@@ -1474,7 +1580,7 @@ def action_card(
         if pet is not None:
             values[catalog.PET_SN] = pet.pet_sn
         else:
-            choices = [PetChoice(pet_sn=p.pet_sn, pet_nm=p.pet_nm) for p in pets]
+            choices = pet_choices(pets, named)
     notice = None
     name = values.get("careArtclNm")
     warn = "same_name_warning" in entry.hooks and pet is not None and isinstance(name, str)
@@ -1524,20 +1630,72 @@ async def _action_reply(
     if keep:
         used += [e for draft in priors if (e := tools.card_entry(draft.tool)) is not None]
     pets = await register.contexts.get_pets() if any(_uses_pets(e) for e in used) else []
-    compact = re.sub(r"\s+", "", text)
-    named = [pet for pet in pets if pet.pet_nm in compact]
+    named = named_pets(pets, text)
+    if keep:
+        return _kept_cards(picked, judged, priors, pets, named, turn.pet_sn)
+    # 두 마리 이상 이름 : 새 등록 카드를 이름마다 한 장씩 (2026-11-23). 넘치면 나누지 않음
+    groups = [_pet_groups(item, named) for item, *_ in picked]
+    if sum(len(group) or 1 for group in groups) > ACTION_MAX_CARDS:
+        groups = [[] for _ in picked]
     cards: list[ActionCard] = []
-    for item, values, rejected in picked:
+    for (item, values, rejected), group in zip(picked, groups, strict=True):
         prior = next((draft for draft in priors if draft.tool == item.name), None)
         draft_pet = prior.values.get(catalog.PET_SN) if prior is not None else None
-        cards.append(action_card(item, values, pets, named, draft_pet, turn.pet_sn, rejected))
-    if not keep:
-        return cards
+        for pets_of in group or [named]:
+            cards.append(action_card(item, values, pets, pets_of, draft_pet, turn.pet_sn, rejected))
+    if len(cards) > len(picked):
+        logger.info("반려동물별 쓰기 카드 %d장", len(cards))
+    return cards
+
+
+def _pet_groups(entry: "catalog.CatalogEntry", named: list[PetInfo]) -> list[list[PetInfo]]:
+    # 문장 속 다른 이름이 둘 이상이면 이름별 반려동물 묶음(같은 이름 여럿은 한 묶음), 아니면 빈 목록
+    # 반려동물 칸이 있는 새 등록 카드(POST)이고 번호 칸(…Sn, petSn 제외)이 없는 도구만 나눈다
+    # 케어 완료 체크·관찰 기록처럼 번호가 그 아이의 기록을 가리키는 도구는 나누면 남의 번호가 됨
+    if "pet" not in entry.hooks or entry.call.method.upper() != "POST":
+        return []
+    if any(catalog.is_id(name) for name in entry.params):
+        return []
+    by_name: dict[str, list[PetInfo]] = {}
+    for pet in named:
+        by_name.setdefault(pet.pet_nm, []).append(pet)
+    return list(by_name.values()) if len(by_name) > 1 else []
+
+
+def _kept_cards(
+    picked: list[tuple["catalog.CatalogEntry", dict, tuple[str, ...]]],
+    judged: Judged,
+    priors: list[ActionDraft],
+    pets: list[PetInfo],
+    named: list[PetInfo],
+    room_pet: int | None,
+) -> list[ActionCard]:
+    # 고치기(여러 명령 ②) : 고른 도구의 카드만 바뀌고 나머지 카드는 그대로 목록으로
+    # 같은 도구 카드가 여럿이면(반려동물별) 이름이 나온 아이의 카드만, 없으면 모두 (2026-11-23)
+    per_prior = {no: (values, rejected) for no, values, rejected in judged.per_prior}
+    named_sns = {pet.pet_sn for pet in named}
+    targets = {no for no in per_prior if priors[no].values.get(catalog.PET_SN) in named_sns} or set(
+        per_prior
+    )
+    built: dict[str, ActionCard] = {}
     merged: list[ActionCard] = []
-    for draft in priors:
-        found = next((card for card in cards if card.tool == draft.tool), None)
-        if found is None:
-            found = _prior_card(draft, pets, turn.pet_sn)
+    for no, draft in enumerate(priors):
+        spec = next((item for item in picked if item[0].name == draft.tool), None)
+        draft_pet = draft.values.get(catalog.PET_SN)
+        if spec is None or (no in per_prior and no not in targets):
+            found = _prior_card(draft, pets, room_pet)
+        elif no in per_prior:
+            values, rejected = per_prior[no]
+            # 이름으로 고른 카드면 그 이름, 아니면 카드의 반려동물 그대로
+            own = [pet for pet in named if pet.pet_sn == draft_pet] if named_sns else []
+            found = action_card(spec[0], values, pets, own, draft_pet, room_pet, rejected)
+        else:
+            if draft.tool not in built:
+                entry, values, rejected = spec
+                built[draft.tool] = action_card(
+                    entry, values, pets, named, draft_pet, room_pet, rejected
+                )
+            found = built[draft.tool]
         if found is not None:
             merged.append(found)
     return merged
@@ -1561,7 +1719,7 @@ def action_summary(card: ActionCard) -> str:
     values = {name: value for name, value in card.values.items() if value is not None}
     clock = values.get(catalog.HR_INPUT) is not False
     parts = [
-        _input_text(param, values[name], clock)
+        _input_text(param, values[name], clock, _count_word(entry.name, name))
         for name, param in entry.params.items()
         if name in values and name not in entry.fixed and _summarized(name, param)
     ]
@@ -1590,37 +1748,91 @@ def action_ask_message(card: ActionCard | list[ActionCard]) -> str:
 def _missing_lines(cards: list[ActionCard]) -> list[str]:
     # 빈 칸 되물음 줄 : 카드 하나면 지금 문구, 여럿이면 빈 칸이 있는 카드마다 번호로
     if len(cards) == 1:
-        if not cards[0].missing:
+        if not _said_missing(cards[0]):
             return []
-        return [ACTION_ASK_MISSING.format(names=_names_subject(_missing_names(cards[0])))]
-    return [
-        ACTION_ASK_MISSING_NO.format(no=no, names=_names_subject(_missing_names(item)))
-        for no, item in enumerate(cards, start=1)
-        if item.missing
+        names = _missing_names(cards[0])
+        same = _same_pet_line(cards[0])
+        if same is None:
+            if not names:
+                return [ACTION_ASK_MISSING_UNNAMED]
+            return [ACTION_ASK_MISSING.format(names=_names_subject(names))]
+        # 같은 이름이라 못 정함 : 어느 아이인지 먼저, 나머지 빈 칸은 이어서 (추가-2)
+        rest = [name for name in names if name != PET_LABEL]
+        if not rest:
+            return [same]
+        return [same, ACTION_ASK_MISSING_REST.format(names=_names_subject(rest))]
+    lines: list[str] = []
+    for no, item in enumerate(cards, start=1):
+        if not _said_missing(item):
+            continue
+        names = _missing_names(item)
+        same = _same_pet_line(item)
+        if same is None:
+            if not names:
+                lines.append(ACTION_ASK_MISSING_UNNAMED_NO.format(no=no))
+                continue
+            lines.append(ACTION_ASK_MISSING_NO.format(no=no, names=_names_subject(names)))
+            continue
+        # 같은 이름이라 못 정함 : 카드 하나일 때처럼 어느 아이인지 먼저 (2026-11-23)
+        lines.append(ACTION_ASK_SAME_PET_NO.format(no=no, line=same))
+        rest = [name for name in names if name != PET_LABEL]
+        if rest:
+            lines.append(ACTION_ASK_MISSING_REST_NO.format(no=no, names=_names_subject(rest)))
+    return lines
+
+
+def _same_pet_line(card: ActionCard) -> str | None:
+    # 반려동물 칸이 비었고 칩이 모두 같은 이름일 때 : 무엇으로 구별할지 예시
+    if catalog.PET_SN not in card.missing:
+        return None
+    choices = card.pet_choices
+    if len(choices) < 2 or len({choice.pet_nm for choice in choices}) > 1:
+        return None
+    pet = choices[0].pet_nm
+    counts = {2: "둘이에요", 3: "셋이에요", 4: "넷이에요"}
+    count = counts.get(len(choices), f"{len(choices)}마리예요")
+    name = _names_subject([pet])
+    hints = [
+        [choice.pet_se_nm for choice in choices],
+        [choice.vrty_nm for choice in choices],
     ]
+    hint = next((h[0] for h in hints if all(h) and len(set(h)) == len(h)), None)
+    if hint is None:
+        return ACTION_ASK_SAME_PET_CHIP.format(name=name, count=count)
+    return ACTION_ASK_SAME_PET.format(name=name, count=count, hint=hint, pet=pet)
+
+
+def _said_missing(card: ActionCard) -> list[str]:
+    # 말로 물을 빈 칸 : 사진(file) 칸은 React가 카드에 붙이므로 빼고, 실행 판정에서도 세지 않음
+    # (카드 missing에는 그대로 둔다, 2026-11-24)
+    params = card.params
+    return [m for m in card.missing if m not in params or params[m].type != catalog.FILE]
 
 
 def _missing_names(card: ActionCard) -> list[str]:
-    # 빈 Java 칸 -> 도구 설명의 LLM 칸 설명 앞부분("기록 날짜"), 없으면 Java 칸 이름
+    # 빈 Java 칸 -> 도구 설명의 LLM 칸 설명 앞부분("기록 날짜"). 설명이 없으면 이름을 빼고
+    # Java 칸 이름은 보이지 않는다. date hook이 만드는 칸(hrInptYn)은 날짜 칸 이름으로 합침
     entry = tools.card_entry(card.tool)
     prompt = catalog.tool_prompts().get(card.tool)
     by_java = {java: name for name, java in entry.to_java_name.items()} if entry else {}
     roles = entry.hook_roles if entry else {}
     ymd = next((name for name, role in roles.items() if role == "date:ymd"), None)
     names: list[str] = []
-    for java in card.missing:
+    for java in _said_missing(card):
         if java == catalog.PET_SN:
-            names.append("반려동물")
+            names.append(PET_LABEL)
             continue
         key = re.sub(r"\[\d+\]", "[]", java)
         llm = by_java.get(key)
         param = entry.params.get(java) if entry else None
         if llm is None and param is not None and param.type == "datetime":
             llm = ymd
+        if llm is None and java in catalog.HOOKS["date"].makes:
+            llm = ymd
         desc = prompt.params[llm].description if prompt and llm in prompt.params else ""
         # "기록 날짜 YYYY-MM-DD. …" -> "기록 날짜" : 형식 표기(영문·숫자)와 괄호·마침표 뒤는 뗀다
-        name = re.split(r"[.(:,]|\s+(?=[A-Z0-9])", desc, maxsplit=1)[0].strip() or java
-        if name not in names:
+        name = re.split(r"[.(:,]|\s+(?=[A-Z0-9])", desc, maxsplit=1)[0].strip()
+        if name and name not in names:
             names.append(name)
     return names
 
@@ -1672,13 +1884,31 @@ def _uses_pets(entry: "catalog.CatalogEntry") -> bool:
 
 ACTION_FAILED_MESSAGE = "실패 — {label} · 저장하지 못했어요."
 ACTION_CANCELED_MESSAGE = "취소됨 — {label} · 저장하지 않았어요."
+# 배열 칸이 2줄 이상이면 펼치지 않고 줄 수로 (2026-11-24)
+ARRAY_COUNT = "{count}건"
 
 
-def _input_text(param: "catalog.CatalogItemParam", value: object, clock: bool = True) -> str:
+def _count_word(tool: str, name: str) -> str | None:
+    # 배열 칸 줄 수 말 : 검사 수치는 줄 수와 상관없이 "혈액검사 N항목"(checkup-card와 같은 말)
+    if (tool, name) == (INSPECTION_TOOL, INSPECTION_ROWS):
+        return CHECKUP_COUNT
+    return None
+
+
+def _input_text(
+    param: "catalog.CatalogItemParam",
+    value: object,
+    clock: bool = True,
+    count: str | None = None,
+) -> str:
     if param.type == catalog.ARRAY:
-        # 배열 : 항목마다 값(번호·uuid·petSn·참거짓 칸 빼고)을 " / "로, 항목끼리는 ", "로
+        # 배열 : 1줄이면 값(번호·uuid·petSn·참거짓 칸 빼고)을 " / "로 펼치고,
+        # 2줄 이상이거나 줄 수 말(count)이 있으면 줄 수만
+        items = value if isinstance(value, list) else []
+        if count is not None or len(items) > 1:
+            return (count or ARRAY_COUNT).format(count=len(items))
         rows = []
-        for row in value if isinstance(value, list) else []:
+        for row in items:
             parts = [
                 _input_text(rule, row[name])
                 for name, rule in (param.items or {}).items()
@@ -1702,8 +1932,14 @@ def _input_text(param: "catalog.CatalogItemParam", value: object, clock: bool = 
     return str(value)
 
 
-def action_result_message(request: ActionResultRequest) -> str:
+def action_result_message(request: ActionResultRequest, head: Sequence[str] = ()) -> str:
     # 확인 카드 결과 요약 : 도구 표시 이름 + input(번호 칸·참거짓 제외). 저장 글은 서버가 정함
+    entry, values = _result_values(request)
+    return _result_text(request.status, entry, values, head)
+
+
+def _result_values(request: ActionResultRequest) -> tuple["catalog.CatalogEntry", dict]:
+    # action-result 검사 : 모르는 도구·규칙 밖 값·DONE인데 필수 칸 빔이면 400
     entry = tools.card_entry(request.tool)
     if entry is None:
         raise AppError("INVALID_REQUEST", 400, "모르는 도구입니다.")
@@ -1716,21 +1952,30 @@ def action_result_message(request: ActionResultRequest) -> str:
     }
     if catalog.invalid_input(entry, values):
         raise AppError("INVALID_REQUEST", 400, "허용되지 않는 값이 있습니다.")
-    label = entry.label or entry.name
-    if request.status is ActionStatus.CANCELED:
-        return ACTION_CANCELED_MESSAGE.format(label=label)
-    if request.status is ActionStatus.FAILED:
-        return ACTION_FAILED_MESSAGE.format(label=label)
-    if catalog.missing(entry, values, files=False):
+    if request.status is ActionStatus.DONE and catalog.missing(entry, values, files=False):
         raise AppError("INVALID_REQUEST", 400, "확인 카드의 필수 칸이 비어 있습니다.")
+    return entry, values
+
+
+def _result_text(
+    status: ActionStatus, entry: "catalog.CatalogEntry", values: dict, head: Sequence[str]
+) -> str:
+    # DONE "✔ <label> — <요약>", CANCELED·FAILED "<말> — <label> · <요약> · <끝말>"
+    # (요약이 없으면 label만)
+    label = entry.label or entry.name
     clock = values.get(catalog.HR_INPUT) is not False
     texts = (
-        _input_text(param, values[name], clock)
+        _input_text(param, values[name], clock, _count_word(entry.name, name))
         for name, param in entry.params.items()
         if name in values and name not in entry.fixed and _summarized(name, param)
     )
-    parts = [text for text in texts if text]
-    return f"✔ {label}" + (f" — {' · '.join(parts)}" if parts else "")
+    parts = [*head, *(text for text in texts if text)]
+    summary = " · ".join(parts)
+    if status is ActionStatus.CANCELED:
+        return ACTION_CANCELED_MESSAGE.format(label=f"{label} · {summary}" if parts else label)
+    if status is ActionStatus.FAILED:
+        return ACTION_FAILED_MESSAGE.format(label=f"{label} · {summary}" if parts else label)
+    return f"✔ {label}" + (f" — {summary}" if parts else "")
 
 
 def _summarized(name: str, param: "catalog.CatalogItemParam") -> bool:
@@ -1744,10 +1989,51 @@ def _summarized(name: str, param: "catalog.CatalogItemParam") -> bool:
 
 
 async def save_action_result(
-    repo: ConversationRepository, room_sn: int, request: ActionResultRequest
+    repo: ConversationRepository,
+    reader: ToolReader,
+    contexts: RegisterContextRepository,
+    room_sn: int,
+    request: ActionResultRequest,
 ) -> ConversationMessage:
     # 실행(React -> Java 공개 API)·취소·실패의 결과를 AI 메시지로 저장
-    return await repo.add_message(room_sn, ROLE_AI, action_result_message(request))
+    # 검사 수치 저장은 반려동물 이름·검진기록(검진일 병원)을 앞에 붙인다(Java 읽기는 이 도구만)
+    entry, values = _result_values(request)
+    head = []
+    if entry.name == INSPECTION_TOOL:
+        head = await _inspection_head(reader, contexts, values)
+    text = _result_text(request.status, entry, values, head)
+    return await repo.add_message(room_sn, ROLE_AI, text)
+
+
+async def _inspection_head(
+    reader: ToolReader, contexts: RegisterContextRepository, values: dict
+) -> list[str]:
+    """검사 수치 저장 결과 글 앞부분 : ["탄이", "12-14(월) 검증병원D"]
+    - Java 저장은 이미 끝났으므로 읽기 실패·못 찾음이면 그 부분만 빼고 저장한다"""
+    pet_sn = values.get(catalog.PET_SN)
+    if not isinstance(pet_sn, int):
+        return []
+    head: list[str] = []
+    try:
+        pets = await contexts.get_pets()
+    except (AppError, BackendError) as exc:
+        logger.warning("검사 수치 결과 글: 반려동물 조회 실패: %s", exc)
+        pets = []
+    name = next((pet.pet_nm for pet in pets if pet.pet_sn == pet_sn), None)
+    if name:
+        head.append(name)
+    record_sn = values.get(CHECKUP_SN)
+    if not isinstance(record_sn, int):
+        return head
+    try:
+        records = await _checkup_records(reader, pet_sn) or []
+    except (AppError, BackendError) as exc:
+        logger.warning("검사 수치 결과 글: 검진기록 조회 실패: %s", exc)
+        records = []
+    record = next((r for r in records if r[CHECKUP_SN] == record_sn), None)
+    if record is not None:
+        head.append(_record_place(record))
+    return head
 
 
 # 이미지 축소 기준 : Anthropic 이미지 5MB 상한·토큰 절약
@@ -1773,7 +2059,12 @@ def _intent_jpeg(image: bytes) -> bytes:
 
 async def judge_image_intent(
     judge: ImageIntentJudge, image: bytes, file_name: str, text: str | None
-) -> ImageIntentKind:
+) -> ImageIntentJudgement:
+    if is_pdf_name(file_name):
+        # 대화창 PDF 첨부 (2026-11-23) : 검사결과지 분석으로, 판단 LLM 미호출(글과 무관)
+        # 검사결과지가 아닌 PDF는 lab-results가 422 NOT_LAB_RESULT로 가린다
+        validate_pdf(image, file_name)
+        return ImageIntentJudgement(kind=ImageIntentKind.CHECKUP_PDF)
     validate_upload(image, file_name)
     jpeg = _intent_jpeg(image)
     text = text.strip() if text and text.strip() else None
@@ -1781,18 +2072,31 @@ async def judge_image_intent(
         return await judge.judge(jpeg, text)
     except ImageIntentError:
         # 판단 실패 : 오류 대신 되물음(React 칩)
-        return ImageIntentKind.ASK
+        return ImageIntentJudgement(kind=ImageIntentKind.ASK)
 
 
 # 사진 턴 저장 (FN-AIM-013-02, 2026-11-13) : 사진 파일은 저장하지 않고 자리 표시 글만
 IMAGE_MARK = "[사진]"
 IMAGE_TITLE = "사진 대화"
+# PDF 첨부 턴 (2026-11-23) : 결과 요약은 checkup-card가 저장해 여기선 안내 없음
+PDF_MARK = "[PDF]"
+PDF_TITLE = "PDF 대화"
 # 용도별 고정 안내. 동물병원 영수증은 결과 요약을 receipt-result가 저장해 여기선 없음
 IMAGE_MESSAGES = {
-    ImageIntentKind.ASK: "이 사진으로 무엇을 할까요? 캐릭터 만들기나 영수증 분석을 골라 주세요.",
+    ImageIntentKind.ASK: (
+        "이 사진으로 무엇을 할까요? 캐릭터 만들기, 영수증 분석, 피부 분석, 눈 분석 중에 "
+        "골라 주세요."
+    ),
     ImageIntentKind.CHARACTER: "캐릭터 만들기로 이어 갈게요.",
     ImageIntentKind.EXPENSE_RECEIPT: "가계부 영수증은 본창 가계부에서 등록할 수 있어요.",
+    ImageIntentKind.SKIN: "피부 분석으로 이어 갈게요.",
+    ImageIntentKind.EYE: "눈 분석으로 이어 갈게요.",
 }
+# 글이 캐릭터를 원하지만 사진에 반려동물 얼굴·몸이 안 보여 ASK일 때 (2026-11-24)
+CHARACTER_PHOTO_UNFIT_MESSAGE = (
+    "캐릭터는 반려동물 얼굴이나 몸 전체가 보이는 사진으로 만들 수 있어요. "
+    "다른 사진을 올려 주시거나, 이 사진으로 할 일을 골라 주세요."
+)
 
 
 async def save_image_turn(
@@ -1802,14 +2106,18 @@ async def save_image_turn(
     pet_sn: int | None,
     text: str | None,
     kind: ImageIntentKind,
+    character_photo_unfit: bool = False,
 ) -> ImageIntentResult:
     """사진 턴을 대화방에 저장 : 사용자 "[사진] <글>" + 용도별 안내 AI 메시지
     - 방 번호가 없으면 방을 만듦(첫 메시지가 사진 메시지, 글이 없으면 제목 LLM 미호출)"""
     text = text.strip() if text and text.strip() else None
-    user_cn = f"{IMAGE_MARK} {text}" if text else IMAGE_MARK
+    pdf = kind is ImageIntentKind.CHECKUP_PDF
+    mark = PDF_MARK if pdf else IMAGE_MARK
+    user_cn = f"{mark} {text}" if text else mark
     saved: list[ConversationMessage] = []
     if room_sn is None:
-        title = _cut_title(await titles.generate(text)) if text else IMAGE_TITLE
+        empty_title = PDF_TITLE if pdf else IMAGE_TITLE
+        title = _cut_title(await titles.generate(text)) if text else empty_title
         room = await repo.create_room(pet_sn, title or DEFAULT_TITLE, user_cn)
         room_sn = room.ai_cnvrs_room_sn
         detail = await repo.get_room(room_sn)
@@ -1817,6 +2125,287 @@ async def save_image_turn(
     else:
         saved.append(await repo.add_message(room_sn, ROLE_USER, user_cn))
     guide = IMAGE_MESSAGES.get(kind)
+    if kind is ImageIntentKind.ASK and character_photo_unfit:
+        guide = CHARACTER_PHOTO_UNFIT_MESSAGE
     if guide is not None:
         saved.append(await repo.add_message(room_sn, ROLE_AI, guide))
     return ImageIntentResult(kind=kind, ai_cnvrs_room_sn=room_sn, messages=saved)
+
+
+# 대화창 검사결과지 PDF 분석 결과 카드 (SCR-AIM-013, 2026-11-23)
+# React가 lab-results 결과를 보내면 요약 글을 저장하고 검사 수치 저장 확인 카드(ACTION)를 준다
+INSPECTION_TOOL = "draft_inspection_values"
+CHECKUP_LIST_TOOL = "list_checkups"
+INSPECTION_ROWS = "values"
+CHECKUP_SN = "ckupRcdSn"
+CHECKUP_PREFIX = "검사결과지 분석 — "
+CHECKUP_MESSAGES = {
+    CheckupResult.NOT_LAB_RESULT: "검사결과지로 읽을 수 없는 PDF예요",
+    CheckupResult.ERROR: "일시적인 오류로 분석하지 못했어요",
+    CheckupResult.CANCELED: "취소했어요",
+}
+CHECKUP_COUNT = "혈액검사 {count}항목"
+CHECKUP_EMPTY = "읽은 혈액검사 항목이 없어요"
+CHECKUP_ASK = "{pet}검사 수치를 이렇게 저장할까요?"
+CHECKUP_MORE_ROWS = "외 {count}항목"
+CHECKUP_SKIPPED = (
+    "수치나 단위를 읽지 못한 {count}항목은 빼 두었어요. 검진상세에서 직접 입력해 주세요."
+)
+CHECKUP_EXCLUDED = "혈액검사가 아닌 항목({names})은 저장하지 않아요."
+CHECKUP_NO_TOOL = "검진상세의 [PDF 분석]에서 저장할 수 있어요."
+CHECKUP_NO_ROWS = "저장할 수 있는 수치가 없어요. 검진상세에서 직접 입력해 주세요."
+# 프론트가 이 글 아래에 [검진기록 등록하기]·[나중에]를 붙인다(noCardReason NO_CHECKUP)
+CHECKUP_NO_RECORD = (
+    "검진기록이 없어요. 검진기록을 먼저 등록할까요? "
+    "등록하면 {pet}검사 수치를 바로 저장할 수 있어요."
+)
+CHECKUP_ONE_RECORD = "저장할 검진기록: {record}"
+CHECKUP_PICK_RECORD = "어느 검진기록에 넣을까요? 날짜나 병원 이름으로 말해 주세요."
+CHECKUP_NO_DATE = "날짜 없음"
+CHECKUP_SHOW_ROWS = 12
+CHECKUP_SHOW_RECORDS = 3
+_ROW_FIELDS = (
+    "inspArtclCd",
+    "inspArtclDrctInptNm",
+    "rsltNvl",
+    "unitNm",
+    "refLlmtNvl",
+    "refUplmtNvl",
+)
+
+
+def _inspection_rows(
+    entry: "catalog.CatalogEntry", items: list[CheckupLabItem]
+) -> tuple[list[dict], int]:
+    """분석 항목 -> 카드 values 줄 : 수치·단위가 있고 Java 칸 규칙에 맞는 줄만, 뺀 줄 수"""
+    rows: list[dict] = []
+    skipped = 0
+    for item in items:
+        raw = item.model_dump(by_alias=True)
+        row = {name: raw[name] for name in _ROW_FIELDS if raw.get(name) is not None}
+        # 코드가 있으면 직접입력명은 뺀다(둘 다 보내면 Java 400)
+        if row.get("inspArtclCd"):
+            row.pop("inspArtclDrctInptNm", None)
+        named = row.get("inspArtclCd") or row.get("inspArtclDrctInptNm")
+        usable = named and row.get("rsltNvl") is not None and row.get("unitNm")
+        if not usable or catalog.invalid_input(entry, {INSPECTION_ROWS: [row]}):
+            skipped += 1
+            continue
+        rows.append(row)
+    return rows, skipped
+
+
+def _row_text(entry: "catalog.CatalogEntry", row: dict) -> str:
+    # "WBC 12.3 10^3/uL (참고 6~17)" : 코드는 이름으로
+    param = entry.params[INSPECTION_ROWS]
+    items = param.items or {}
+    name = row.get("inspArtclDrctInptNm") or row.get("inspArtclCd") or ""
+    code = items.get("inspArtclCd")
+    if row.get("inspArtclCd") and code is not None:
+        name = _input_text(code, row["inspArtclCd"])
+    text = f"{name} {row['rsltNvl']:g} {row['unitNm']}"
+    low, high = row.get("refLlmtNvl"), row.get("refUplmtNvl")
+    if low is not None and high is not None:
+        text += f" (참고 {low:g}~{high:g})"
+    return text
+
+
+def _record_place(record: dict) -> str:
+    # "10-20(화) 메이 동물병원" : 검진일이 없으면 "날짜 없음"
+    try:
+        day = _md(date.fromisoformat(str(record.get("ckupYmd"))))
+    except ValueError:
+        day = CHECKUP_NO_DATE
+    return f"{day} {record.get('hsptlNm') or ''}".strip()
+
+
+def _record_text(record: dict) -> str:
+    # "10-20(화) 메이 동물병원 · 정기검진" : 검진일이 없으면 "날짜 없음"
+    parts = [_record_place(record)]
+    if record.get("ckupTypeCdNm"):
+        parts.append(str(record["ckupTypeCdNm"]))
+    return " · ".join(parts)
+
+
+async def _checkup_records(reader: ToolReader, pet_sn: int) -> list[dict] | None:
+    """그 아이의 검진기록(list_checkups, Java 순서). 도구가 없으면 None"""
+    entry = tools.read_entry(CHECKUP_LIST_TOOL)
+    if entry is None:
+        return None
+    request = catalog.read_request(entry, {}, pet_sn)
+    if request is None:
+        return None
+    data = await reader.read(*request)
+    rows = data.get("content") if isinstance(data, dict) else data
+    if not isinstance(rows, list):
+        raise external_error()
+    return [row for row in rows if isinstance(row, dict) and isinstance(row.get(CHECKUP_SN), int)]
+
+
+async def save_checkup_card(
+    repo: ConversationRepository,
+    reader: ToolReader,
+    contexts: RegisterContextRepository,
+    room_sn: int,
+    request: CheckupCardRequest,
+) -> CheckupCardResult:
+    """검사결과지 분석 결과 요약 AI 메시지 + 검사 수치 저장 확인 카드(카드는 미저장)
+    - 검진기록 1건이면 카드에 채우고, 여럿이면 빈 칸으로 두고 최근 3건을 글로 보인다
+    - Java 읽기가 실패하면 저장 없이 오류(502)"""
+    if request.result is not CheckupResult.RECOGNIZED:
+        text = CHECKUP_PREFIX + CHECKUP_MESSAGES[request.result]
+        return CheckupCardResult(messages=[await repo.add_message(room_sn, ROLE_AI, text)])
+    count = len(request.items)
+    head = CHECKUP_PREFIX + (CHECKUP_COUNT.format(count=count) if count else CHECKUP_EMPTY)
+    excluded = [name.strip() for name in request.excluded_artcl_nms if name.strip()]
+    note = [CHECKUP_EXCLUDED.format(names=", ".join(excluded))] if excluded else []
+    entry = tools.card_entry(INSPECTION_TOOL)
+    card: ActionCard | None = None
+    reason: CheckupNoCardReason | None = None
+    lines = [head]
+    if not count:
+        lines += note
+    elif entry is None:
+        # Java 도구 목록에 저장 도구가 없음(백엔드 @AiTool 병합 전·스냅샷) : 본창으로 안내
+        logger.info("검사 수치 저장 도구 없음: 카드 없이 안내")
+        lines += [*note, CHECKUP_NO_TOOL]
+    else:
+        rows, skipped = _inspection_rows(entry, request.items)
+        skip_note = [CHECKUP_SKIPPED.format(count=skipped)] if skipped else []
+        records = await _checkup_records(reader, request.pet_sn) if rows else []
+        if not rows:
+            lines += [*note, CHECKUP_NO_ROWS]
+        elif records is None:
+            lines += [*note, CHECKUP_NO_TOOL]
+        elif not records:
+            pets = await contexts.get_pets()
+            name = next((p.pet_nm for p in pets if p.pet_sn == request.pet_sn), None)
+            pet = f"{name}의 " if name else ""
+            lines += [*note, CHECKUP_NO_RECORD.format(pet=pet)]
+            reason = CheckupNoCardReason.NO_CHECKUP
+        else:
+            values: dict = {INSPECTION_ROWS: rows}
+            if len(records) == 1:
+                values[CHECKUP_SN] = records[0][CHECKUP_SN]
+            pets = await contexts.get_pets()
+            card = action_card(entry, values, pets, [], request.pet_sn, request.pet_sn)
+            pet = f"{card.pet_nm}의 " if card.pet_nm else ""
+            shown = [f"- {_row_text(entry, row)}" for row in rows[:CHECKUP_SHOW_ROWS]]
+            if len(rows) > CHECKUP_SHOW_ROWS:
+                shown.append(CHECKUP_MORE_ROWS.format(count=len(rows) - CHECKUP_SHOW_ROWS))
+            lines += [CHECKUP_ASK.format(pet=pet), *shown, *skip_note, *note]
+            if len(records) == 1:
+                lines += [CHECKUP_ONE_RECORD.format(record=_record_text(records[0]))]
+                lines += _missing_lines([card]) or [ACTION_ASK_CONFIRM]
+            else:
+                picks = records[:CHECKUP_SHOW_RECORDS]
+                lines.append(CHECKUP_PICK_RECORD)
+                lines += [f"{no}. {_record_text(r)}" for no, r in enumerate(picks, start=1)]
+            logger.info("검사 수치 확인 카드: %d줄 검진기록 %d건", len(rows), len(records))
+    saved = await repo.add_message(room_sn, ROLE_AI, "\n".join(lines))
+    return CheckupCardResult(messages=[saved], action=card, no_card_reason=reason)
+
+
+# 대화창 피부·눈 분석 결과 카드 (SCR-AIM-013, 2026-11-24)
+# React가 skin-analyses·eye-analyses 결과를 보내면 요약 글 저장 + 지속 관찰 항목 확인 카드(ACTION)
+OBSERVATION_TOOL = "draft_observation_item"
+OBSERVATION_NAME = "obsrvArtclNm"
+OBSERVATION_REGION = "obsrvRegnCd"
+OBSERVATION_DT = "obsrvDt"
+OBSERVATION_MEMO = "memoCn"
+# 목록 파일(data/skin_lesions.yaml·eye_lesions.yaml)의 "이상 없음" 키 : 이것만이면 카드 없음
+LESION_NORMAL = "normal"
+# 눈 분석 : 부위 코드 이름(Java HLTG16), 2026-11-24 사람 결정으로 눈 코드 추가 없이 얼굴
+EYE_REGION_NAME = "얼굴"
+LESION_TITLES = {LesionKind.SKIN: "피부", LesionKind.EYE: "눈"}
+LESION_GRADES = {"OBSERVE": "지켜보기", "VISIT": "진료 권장", "URGENT": "빨리 진료"}
+LESION_CONFIDENCES = {"HIGH": "높음", "MEDIUM": "보통"}
+LESION_MESSAGES = {
+    LesionResult.NOT_PET_SKIN: "반려동물 {title} 사진이 아니에요",
+    LesionResult.NOT_PET_EYE: "반려동물 {title} 사진이 아니에요",
+    LesionResult.UNCLEAR: "사진으로 판단하기 어려워요",
+    LesionResult.ERROR: "일시적인 오류로 분석하지 못했어요",
+    LesionResult.CANCELED: "취소했어요",
+}
+LESION_ASK = "{pet}지속 관찰 항목으로 남길까요? 카드에 분석한 사진을 붙여 저장해요."
+LESION_EYE_REGION = "부위는 얼굴로 골라 두었어요. 왼쪽 눈인지 오른쪽 눈인지 말해 주시면 적을게요."
+LESION_NO_TOOL = "건강기록의 지속 관찰에서 직접 남길 수 있어요."
+
+
+def _lesion_memo(request: LesionCardRequest, title: str, limit: int | None) -> str:
+    # "피부 분석 참고: 탈모(높음)·비듬(보통), 진료 권장, 규칙 2026-11-24-draft"
+    found = "·".join(
+        f"{f.lesion_nm}({LESION_CONFIDENCES[f.cnfdnc]})"
+        for f in request.findings
+        if f.lesion_cd != LESION_NORMAL
+    )
+    parts = [f"{title} 분석 참고: {found}", LESION_GRADES[request.grade or "OBSERVE"]]
+    # ruleVersion은 회원 메모에 보이지 않게 로그에만 (2026-11-24)
+    memo = ", ".join(parts)
+    return memo[:limit] if limit else memo
+
+
+def _region_code(entry: "catalog.CatalogEntry", name: str) -> str | None:
+    # 부위 코드는 Java 도구 목록에서 이름으로(코드 값 하드코딩 없음)
+    param = entry.params.get(OBSERVATION_REGION)
+    codes = param.codes if param is not None else None
+    return next((c.cd for c in codes or [] if c.nm == name), None)
+
+
+async def save_lesion_card(
+    repo: ConversationRepository,
+    contexts: RegisterContextRepository,
+    room_sn: int,
+    request: LesionCardRequest,
+) -> LesionCardResult:
+    """피부·눈 분석 결과 요약 AI 메시지 + 지속 관찰 항목 확인 카드(카드는 미저장)"""
+    title = LESION_TITLES[request.kind]
+    prefix = f"{title} 분석 — "
+    if request.rslt is not LesionResult.ANALYZED:
+        lines = [prefix + LESION_MESSAGES[request.rslt].format(title=title)]
+        if request.rslt in (LesionResult.ERROR, LesionResult.CANCELED):
+            return LesionCardResult(messages=[await repo.add_message(room_sn, ROLE_AI, lines[0])])
+        lines += [*request.guide, *([request.notice] if request.notice else [])]
+        saved = await repo.add_message(room_sn, ROLE_AI, "\n".join(lines))
+        return LesionCardResult(messages=[saved])
+    lines = [prefix + LESION_GRADES[request.grade]]
+    lines += [f"- {f.lesion_nm} (확신도 {LESION_CONFIDENCES[f.cnfdnc]})" for f in request.findings]
+    lines += [*request.guide, *([request.notice] if request.notice else [])]
+    lesions = [f for f in request.findings if f.lesion_cd != LESION_NORMAL]
+    entry = tools.card_entry(OBSERVATION_TOOL)
+    card: ActionCard | None = None
+    if lesions and entry is None:
+        logger.info("관찰 항목 등록 도구 없음: 카드 없이 안내")
+        lines.append(LESION_NO_TOOL)
+    elif lesions:
+        params = entry.params
+        name_limit = params[OBSERVATION_NAME].max_length if OBSERVATION_NAME in params else None
+        memo_param = params.get(OBSERVATION_MEMO)
+        name = lesions[0].lesion_nm
+        values: dict = {
+            OBSERVATION_NAME: name[:name_limit] if name_limit else name,
+            OBSERVATION_DT: rules.now_kst()
+            .replace(second=0, microsecond=0, tzinfo=None)
+            .isoformat(),
+        }
+        if memo_param is not None:
+            values[OBSERVATION_MEMO] = _lesion_memo(request, title, memo_param.max_length)
+        region = _region_code(entry, EYE_REGION_NAME) if request.kind is LesionKind.EYE else None
+        if region is not None:
+            values[OBSERVATION_REGION] = region
+        pets = await contexts.get_pets()
+        card = action_card(entry, values, pets, [], request.pet_sn, request.pet_sn)
+        pet = f"{card.pet_nm}의 " if card.pet_nm else ""
+        lines.append(LESION_ASK.format(pet=pet))
+        if region is not None:
+            lines.append(LESION_EYE_REGION)
+        # 사진 칸 : 카드에서 분석한 사진을 붙이므로 말로 묻지 않음(_missing_lines가 뺌)
+        lines += _missing_lines([card]) or [ACTION_ASK_CONFIRM]
+        logger.info(
+            "관찰 항목 확인 카드: %s 병변 %d개 규칙 %s",
+            request.kind,
+            len(lesions),
+            request.rule_version,
+        )
+    saved = await repo.add_message(room_sn, ROLE_AI, "\n".join(lines))
+    return LesionCardResult(messages=[saved], action=card)

@@ -130,6 +130,9 @@ class PetInfo:
     pet_nm: str
     # FN-AIM-012-08 : 이 반려동물의 케어 항목 이름
     care_artcl_nms: tuple[str, ...] = ()
+    # FN-AIM-012-04 : 같은 이름 반려동물 구별(종 이름·품종 이름). LLM에 보내지 않음
+    pet_se_nm: str | None = None
+    vrty_nm: str | None = None
 
 
 class RegisterContextRepository(Protocol):
@@ -142,6 +145,9 @@ class RegisterContextItem(BaseModel):
     pet_sn: int = Field(alias="petSn")
     pet_nm: str = Field(alias="petNm")
     care_artcl_nms: list[str] = Field(default_factory=list, alias="careArtclNms")
+    # 백엔드 배포 전에는 없을 수 있음
+    pet_se_nm: str | None = Field(default=None, alias="petSeNm")
+    vrty_nm: str | None = Field(default=None, alias="vrtyNm")
 
 
 class JavaRegisterContextRepository:
@@ -160,7 +166,10 @@ class JavaRegisterContextRepository:
         if not isinstance(data, list):
             raise external_error()
         items = [_parse(RegisterContextItem, item) for item in data]
-        return [PetInfo(i.pet_sn, i.pet_nm, tuple(i.care_artcl_nms)) for i in items]
+        return [
+            PetInfo(i.pet_sn, i.pet_nm, tuple(i.care_artcl_nms), i.pet_se_nm, i.vrty_nm)
+            for i in items
+        ]
 
 
 def get_register_context_repository(

@@ -412,7 +412,7 @@ def _next_month_day(today: date, day: int) -> date | None:
 # 지금 시각을 뜻하는 말 : 날짜는 오늘, 시각을 말하지 않았으면 지금 (2026-11-13)
 _NOW_WORDS = r"방금|지금|아까|금방"
 
-_RELATIVE_DAYS = {"오늘": 0, "내일": 1, "모레": 2, "글피": 3, "어제": -1, "그제": -2}
+_RELATIVE_DAYS = {"오늘": 0, "내일": 1, "모레": 2, "글피": 3, "어제": -1, "그제": -2, "그저께": -2}
 
 # 순서대로 대조, 맞은 자리는 가림 (뒤 규칙의 재판독 방지). 띄어쓰기 허용
 _DATE_RULES = (
@@ -422,7 +422,10 @@ _DATE_RULES = (
     (r"(\d{1,2})\s*월\s*(\d{1,2})\s*일", lambda m, t: _ymd(t.year, int(m[1]), int(m[2]))),
     (r"(?<![\d/])(\d{1,2})/(\d{1,2})(?![\d/])", lambda m, t: _ymd(t.year, int(m[1]), int(m[2]))),
     (r"(\d{1,3})\s*일\s*(후|뒤)", lambda m, t: t + timedelta(days=int(m[1]))),
-    (r"오늘|내일|모레|글피|어제|그제", lambda m, t: t + timedelta(days=_RELATIVE_DAYS[m[0]])),
+    (
+        r"오늘|내일|모레|글피|어제|그저께|그제",
+        lambda m, t: t + timedelta(days=_RELATIVE_DAYS[m[0]]),
+    ),
     # '방금·지금·아까·금방' : 오늘 (시각은 mentions_now로 지금, 2026-11-13 추가 요청)
     (_NOW_WORDS, lambda m, t: t),
     (r"([월화수목금토일])요일", lambda m, t: _bare_weekday(t, m[1])),
@@ -490,6 +493,24 @@ def now_kst() -> datetime:
 def mentions_date(text: str) -> bool:
     """문장에 날짜 말("어제"·"10월 3일"·"다음 주 화요일" 등)이 있는지 (_DATE_RULES와 같은 규칙)"""
     return any(re.search(pattern, text) for pattern, _ in _DATE_RULES)
+
+
+def said_dates(text: str, today: date) -> list[date]:
+    """문장의 날짜 말을 날짜로 (_DATE_RULES 순서, 맞은 자리는 가림). 같은 날은 한 번, 나온 순서대로
+    - 쓰기 카드에서 LLM이 비운 날짜를 채울 때 씀(2026-11-23, '오늘 음수량 50ml'에 날짜 빔)"""
+    masked = text
+    found: list[tuple[int, date]] = []
+    for pattern, convert in _DATE_RULES:
+        for m in re.finditer(pattern, masked):
+            day = convert(m, today)
+            masked = _mask(masked, *m.span())
+            if day is not None:
+                found.append((m.start(), day))
+    days: list[date] = []
+    for _, day in sorted(found, key=lambda item: item[0]):
+        if day not in days:
+            days.append(day)
+    return days
 
 
 _HOSPITAL = re.compile(r"([가-힣A-Za-z0-9]+)\s?(동물병원|동물의료센터|메디컬센터|병원)")
