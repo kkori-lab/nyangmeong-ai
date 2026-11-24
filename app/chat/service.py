@@ -50,6 +50,7 @@ from app.chat.schemas import (
     ConversationDetail,
     ConversationMessage,
     ConversationSummary,
+    ImageIntentJudgement,
     ImageIntentKind,
     ImageIntentResult,
     Intent,
@@ -1961,12 +1962,12 @@ def _intent_jpeg(image: bytes) -> bytes:
 
 async def judge_image_intent(
     judge: ImageIntentJudge, image: bytes, file_name: str, text: str | None
-) -> ImageIntentKind:
+) -> ImageIntentJudgement:
     if is_pdf_name(file_name):
         # 대화창 PDF 첨부 (2026-11-23) : 검사결과지 분석으로, 판단 LLM 미호출(글과 무관)
         # 검사결과지가 아닌 PDF는 lab-results가 422 NOT_LAB_RESULT로 가린다
         validate_pdf(image, file_name)
-        return ImageIntentKind.CHECKUP_PDF
+        return ImageIntentJudgement(kind=ImageIntentKind.CHECKUP_PDF)
     validate_upload(image, file_name)
     jpeg = _intent_jpeg(image)
     text = text.strip() if text and text.strip() else None
@@ -1974,7 +1975,7 @@ async def judge_image_intent(
         return await judge.judge(jpeg, text)
     except ImageIntentError:
         # 판단 실패 : 오류 대신 되물음(React 칩)
-        return ImageIntentKind.ASK
+        return ImageIntentJudgement(kind=ImageIntentKind.ASK)
 
 
 # 사진 턴 저장 (FN-AIM-013-02, 2026-11-13) : 사진 파일은 저장하지 않고 자리 표시 글만
@@ -1985,10 +1986,18 @@ PDF_MARK = "[PDF]"
 PDF_TITLE = "PDF 대화"
 # 용도별 고정 안내. 동물병원 영수증은 결과 요약을 receipt-result가 저장해 여기선 없음
 IMAGE_MESSAGES = {
-    ImageIntentKind.ASK: "이 사진으로 무엇을 할까요? 캐릭터 만들기나 영수증 분석을 골라 주세요.",
+    ImageIntentKind.ASK: (
+        "이 사진으로 무엇을 할까요? 캐릭터 만들기, 영수증 분석, 피부 분석 중에 골라 주세요."
+    ),
     ImageIntentKind.CHARACTER: "캐릭터 만들기로 이어 갈게요.",
     ImageIntentKind.EXPENSE_RECEIPT: "가계부 영수증은 본창 가계부에서 등록할 수 있어요.",
+    ImageIntentKind.SKIN: "피부 분석으로 이어 갈게요.",
 }
+# 글이 캐릭터를 원하지만 사진에 반려동물 얼굴·몸이 안 보여 ASK일 때 (2026-11-24)
+CHARACTER_PHOTO_UNFIT_MESSAGE = (
+    "캐릭터는 반려동물 얼굴이나 몸 전체가 보이는 사진으로 만들 수 있어요. "
+    "다른 사진을 올려 주시거나, 이 사진으로 할 일을 골라 주세요."
+)
 
 
 async def save_image_turn(
@@ -1998,6 +2007,7 @@ async def save_image_turn(
     pet_sn: int | None,
     text: str | None,
     kind: ImageIntentKind,
+    character_photo_unfit: bool = False,
 ) -> ImageIntentResult:
     """사진 턴을 대화방에 저장 : 사용자 "[사진] <글>" + 용도별 안내 AI 메시지
     - 방 번호가 없으면 방을 만듦(첫 메시지가 사진 메시지, 글이 없으면 제목 LLM 미호출)"""
@@ -2016,6 +2026,8 @@ async def save_image_turn(
     else:
         saved.append(await repo.add_message(room_sn, ROLE_USER, user_cn))
     guide = IMAGE_MESSAGES.get(kind)
+    if kind is ImageIntentKind.ASK and character_photo_unfit:
+        guide = CHARACTER_PHOTO_UNFIT_MESSAGE
     if guide is not None:
         saved.append(await repo.add_message(room_sn, ROLE_AI, guide))
     return ImageIntentResult(kind=kind, ai_cnvrs_room_sn=room_sn, messages=saved)

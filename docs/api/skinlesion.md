@@ -1,6 +1,6 @@
 # 피부 병변 분석 API (초안)
 
-React(화면 ID 미정, 기능명세서 FN 행 작성 전)가 부른다. 담당 LJS. 반려동물 피부 사진 1장을 LLM(`LLM_MODEL`)이 정해진 병변 목록(`data/skin_lesions.yaml`) 안에서 판정하고, 등급은 규칙(`app/skinlesion/rules.py`, `ruleVersion`)이 정한다(2026-11-24 결정: YOLO는 그다음 검토). 결과는 저장하지 않는다(Java 저장·`petSn`은 다음 마일스톤). 참고용 분석이며 진단이 아니다.
+React(화면 ID 미정, 기능명세서 FN 행 작성 전)가 부른다. 대화창·메인 검색창에서는 사진 용도 판단(`/ai/image-intent`, `chat.md`)이 `SKIN`이면 React가 같은 사진으로 이 API를 부른다(2026-11-24). 담당 LJS. 반려동물 피부 사진 1장을 LLM(`LLM_MODEL`)이 정해진 병변 목록(`data/skin_lesions.yaml`) 안에서 판정하고, 등급은 규칙(`app/skinlesion/rules.py`, `ruleVersion`)이 정한다(2026-11-24 결정: YOLO는 그다음 검토). 결과는 저장하지 않는다(Java 저장·`petSn`은 다음 마일스톤). 참고용 분석이며 진단이 아니다.
 
 | 메서드 | 경로 | 설명 | 기능 ID | 담당 | 요청 DTO | 응답 DTO |
 | --- | --- | --- | --- | --- | --- | --- |

@@ -6,7 +6,7 @@ from PIL import Image
 
 from app.chat import clients
 from app.chat.clients import ImageIntentError
-from app.chat.schemas import ImageIntentKind
+from app.chat.schemas import ImageIntentJudgement, ImageIntentKind
 from tests.chat.conftest import AJAX, as_member
 from tests.chat.test_messages import MessageJava
 
@@ -23,13 +23,16 @@ class FakeImageIntentJudge:
     def __init__(self, kind: ImageIntentKind = ImageIntentKind.CHARACTER, fail: bool = False):
         self.kind = kind
         self.fail = fail
+        self.character_photo_unfit = False
         self.calls: list[tuple[bytes, str | None]] = []
 
-    async def judge(self, jpeg: bytes, text: str | None) -> ImageIntentKind:
+    async def judge(self, jpeg: bytes, text: str | None) -> ImageIntentJudgement:
         self.calls.append((jpeg, text))
         if self.fail:
             raise ImageIntentError("timeout")
-        return self.kind
+        return ImageIntentJudgement(
+            kind=self.kind, character_photo_unfit=self.character_photo_unfit
+        )
 
 
 @pytest.fixture
@@ -160,3 +163,46 @@ def test_image_intent_LLM_키_없음_502(client):
     res = post(client)
     assert res.status_code == 502
     assert res.json()["code"] == "EXTERNAL_API_ERROR"
+
+
+def test_image_intent_판단_지시문에_SKIN_용도가_있다():
+    from app.chat.clients import IMAGE_INTENT_SYSTEM
+
+    assert "- SKIN:" in IMAGE_INTENT_SYSTEM
+    assert "'피부 봐줘' -> SKIN" in IMAGE_INTENT_SYSTEM
+
+
+def test_image_intent_글이_피부를_말하면_SKIN_지시가_있다():
+    from app.chat.clients import IMAGE_INTENT_SYSTEM
+
+    assert "글이 피부·털·상처를 말하고 사진이 반려동물이면" in IMAGE_INTENT_SYSTEM
+
+
+def test_image_intent_얼굴이나_몸이_안_보이면_캐릭터_글이어도_ASK_지시가_있다():
+    from app.chat.clients import IMAGE_INTENT_SYSTEM
+
+    assert "사진에 반려동물 얼굴이나 몸 전체가 안 보이면 ASK" in IMAGE_INTENT_SYSTEM
+    assert "영수증 사진 + '캐릭터 만들어줘' -> ASK" in IMAGE_INTENT_SYSTEM
+    assert "'캐릭터 만들어줘' -> CHARACTER" not in IMAGE_INTENT_SYSTEM
+
+
+@pytest.mark.parametrize(
+    ("kind", "unfit", "expected"),
+    [
+        (ImageIntentKind.ASK, True, True),
+        (ImageIntentKind.ASK, False, False),
+        # ASK가 아니면 표시를 버린다
+        (ImageIntentKind.CHARACTER, True, False),
+    ],
+)
+def test_image_intent_캐릭터_사진_부적합은_ASK일_때만(kind, unfit, expected):
+    output = clients.ImageIntentOutput(kind=kind, character_photo_unfit=unfit)
+
+    judgement = clients.judgement_of(output)
+
+    assert judgement.kind is kind
+    assert judgement.character_photo_unfit is expected
+
+
+def test_image_intent_지시문에_캐릭터_사진_부적합_표시가_있다():
+    assert "character_photo_unfit을 true" in clients.IMAGE_INTENT_SYSTEM

@@ -74,8 +74,16 @@ async def judge_image_intent(
     # 10MB + 1바이트까지만 읽기 : 초과 판정용
     image = await file.read(MAX_IMAGE_BYTES + 1)
     # 형식·크기 400은 판단 전에 끝남 : 저장 없음
-    kind = await service.judge_image_intent(judge, image, file.filename or "", cnvrs_cn)
-    result = await service.save_image_turn(repo, titles, room_sn, pet_sn, cnvrs_cn, kind)
+    judgement = await service.judge_image_intent(judge, image, file.filename or "", cnvrs_cn)
+    result = await service.save_image_turn(
+        repo,
+        titles,
+        room_sn,
+        pet_sn,
+        cnvrs_cn,
+        judgement.kind,
+        character_photo_unfit=judgement.character_photo_unfit,
+    )
     return response.success(result.model_dump(by_alias=True, mode="json"))
 
 
