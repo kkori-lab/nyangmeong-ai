@@ -45,6 +45,7 @@ from app.chat.schemas import (
     CheckupCardRequest,
     CheckupCardResult,
     CheckupLabItem,
+    CheckupNoCardReason,
     CheckupResult,
     ConversationCreateRequest,
     ConversationDetail,
@@ -2050,12 +2051,16 @@ CHECKUP_EMPTY = "읽은 혈액검사 항목이 없어요"
 CHECKUP_ASK = "{pet}검사 수치를 이렇게 저장할까요?"
 CHECKUP_MORE_ROWS = "외 {count}항목"
 CHECKUP_SKIPPED = (
-    "수치나 단위를 읽지 못한 {count}항목은 빼 두었어요. 본창 검진상세에서 직접 입력해 주세요."
+    "수치나 단위를 읽지 못한 {count}항목은 빼 두었어요. 검진상세에서 직접 입력해 주세요."
 )
 CHECKUP_EXCLUDED = "혈액검사가 아닌 항목({names})은 저장하지 않아요."
-CHECKUP_NO_TOOL = "본창 검진상세의 [PDF 분석]에서 저장할 수 있어요."
-CHECKUP_NO_ROWS = "저장할 수 있는 수치가 없어요. 본창 검진상세에서 직접 입력해 주세요."
-CHECKUP_NO_RECORD = "검진기록이 없어요. 본창 건강 일지에서 검진기록을 먼저 등록해 주세요."
+CHECKUP_NO_TOOL = "검진상세의 [PDF 분석]에서 저장할 수 있어요."
+CHECKUP_NO_ROWS = "저장할 수 있는 수치가 없어요. 검진상세에서 직접 입력해 주세요."
+# 프론트가 이 글 아래에 [검진기록 등록하기]·[나중에]를 붙인다(noCardReason NO_CHECKUP)
+CHECKUP_NO_RECORD = (
+    "검진기록이 없어요. 검진기록을 먼저 등록할까요? "
+    "등록하면 {pet}검사 수치를 바로 저장할 수 있어요."
+)
 CHECKUP_ONE_RECORD = "저장할 검진기록: {record}"
 CHECKUP_PICK_RECORD = "어느 검진기록에 넣을까요? 날짜나 병원 이름으로 말해 주세요."
 CHECKUP_NO_DATE = "날짜 없음"
@@ -2080,6 +2085,9 @@ def _inspection_rows(
     for item in items:
         raw = item.model_dump(by_alias=True)
         row = {name: raw[name] for name in _ROW_FIELDS if raw.get(name) is not None}
+        # 코드가 있으면 직접입력명은 뺀다(둘 다 보내면 Java 400)
+        if row.get("inspArtclCd"):
+            row.pop("inspArtclDrctInptNm", None)
         named = row.get("inspArtclCd") or row.get("inspArtclDrctInptNm")
         usable = named and row.get("rsltNvl") is not None and row.get("unitNm")
         if not usable or catalog.invalid_input(entry, {INSPECTION_ROWS: [row]}):
@@ -2150,6 +2158,7 @@ async def save_checkup_card(
     note = [CHECKUP_EXCLUDED.format(names=", ".join(excluded))] if excluded else []
     entry = tools.card_entry(INSPECTION_TOOL)
     card: ActionCard | None = None
+    reason: CheckupNoCardReason | None = None
     lines = [head]
     if not count:
         lines += note
@@ -2166,7 +2175,11 @@ async def save_checkup_card(
         elif records is None:
             lines += [*note, CHECKUP_NO_TOOL]
         elif not records:
-            lines += [*note, CHECKUP_NO_RECORD]
+            pets = await contexts.get_pets()
+            name = next((p.pet_nm for p in pets if p.pet_sn == request.pet_sn), None)
+            pet = f"{name}의 " if name else ""
+            lines += [*note, CHECKUP_NO_RECORD.format(pet=pet)]
+            reason = CheckupNoCardReason.NO_CHECKUP
         else:
             values: dict = {INSPECTION_ROWS: rows}
             if len(records) == 1:
@@ -2187,4 +2200,4 @@ async def save_checkup_card(
                 lines += [f"{no}. {_record_text(r)}" for no, r in enumerate(picks, start=1)]
             logger.info("검사 수치 확인 카드: %d줄 검진기록 %d건", len(rows), len(records))
     saved = await repo.add_message(room_sn, ROLE_AI, "\n".join(lines))
-    return CheckupCardResult(messages=[saved], action=card)
+    return CheckupCardResult(messages=[saved], action=card, no_card_reason=reason)

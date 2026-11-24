@@ -1,11 +1,11 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-013 대화창 · 사진 용도 판단에 피부 분석 SKIN 추가 (메인 검색창 공통, 추가 요청) — 끝 (2026-11-24). `/ai/image-intent`에 `SKIN`(→ React가 `POST /ai/skin-analyses`), 글이 피부를 말하면 SKIN, 캐릭터는 얼굴·몸이 보일 때만(아니면 `ASK` + 이유 안내 문구, `kind`는 그대로). 검증 통과(추가-1~4 포함), 사람 확인
+SCR-AIM-013 대화창 · 검사 수치 카드 저장 글 "본창" 빼기·검진기록 없음 이유 칸 (SCR-HLT-005 공통, 추가 요청) — 끝 (2026-11-24). `checkup-card` 0건 글을 묻는 문장으로("검진기록이 없어요. 검진기록을 먼저 등록할까요? 등록하면 <반려동물>의 검사 수치를…", 추가-1), `noCardReason` `NO_CHECKUP`(계약 변경), 도구 없음·뺀 줄·수치 없음 글 "본창" 뺌, 카드 줄에 코드가 있으면 직접입력명 뺌. 검증 통과(1회차), 사람 확인
 
 ## 다음에 할 것
-- 연결 남음: SCR-AIM-013 image-intent `SKIN` 분기·ASK 칩에 피부 분석 (LJS 프론트, frontend 세션에 `docs/api/chat.md` 계약과 함께 알림). 피부 분석 결과를 대화방에 남기는 것은 아래 ③ 지속 관찰 카드와 함께. 로컬 DB: 검증 대화방 652~669·685(mbrSn 1) 정리
-- checkup-card 저장 글 "본창" 빼기 (LJS, 2026-11-24 frontend 세션 요청·사람 결정, `/start`로): ① 검진기록 0건 글을 "검진기록이 없어요. 검진기록을 먼저 등록하면 이 수치를 바로 저장할 수 있어요."처럼(프론트는 "검진기록이 없어요"로 판단 → 확인 말풍선 → 대화창 검진기록 추가 모달 → 같은 items로 checkup-card 다시 부름). 가능하면 CheckupCardResult에 이유 칸(예: `noCardReason: "NO_CHECKUP"`) 추가(계약 변경, 프론트에 알림) ② 도구 없음 글 "본창 검진상세의 [PDF 분석]에서…"도 "본창" 빼기 ③ 참고: `done.execute` 카드 values에 `inspArtclCd`와 `inspArtclDrctInptNm`이 같이 붙어 Java 400 난 적 있음(프론트가 막아 둠) — 카드 만들 때 코드가 있으면 직접입력명을 빼는지 확인
+- 연결 남음: SCR-AIM-013 checkup-card 검진기록 0건 (LJS 프론트): 프론트 PR #501은 글("검진기록이 없어요")로 판단 → AI 병합 뒤 `noCardReason === "NO_CHECKUP"`으로 바꿈(프론트 핸드오프에 있음, 2026-11-24 알림 보냄)
+- 연결 남음: SCR-AIM-013 image-intent `SKIN` 분기·ASK 칩에 피부 분석 (LJS 프론트, frontend 세션에 `docs/api/chat.md` 계약과 함께 알림). 피부 분석 결과를 대화방에 남기는 것은 아래 ③ 지속 관찰 카드와 함께. 로컬 DB: 검증 대화방 652~669·685·704(메시지 2411, petSn 1006)(mbrSn 1) 정리
 - 안구 질환 분석 (LJS, 2026-11-24 사람 결정: 피부 SKIN 뒤 별도 마일스톤): 피부 목록에 섞지 않고 `data/eye_lesions.yaml`(목록·위험군·안내문, 검수 필요)·같은 규칙/Haiku 판정기 구조·`POST /ai/eye-analyses`, 그 뒤 `image-intent`에 `EYE`
 - 피부 병변 분석 후속 (LJS, `milestones/LJS.md` 맨 끝 절): ① `data/skin_lesions.yaml` 병변 목록·위험군·안내 문장 검수(초안, `rule_version` 올림) ② 기능명세서 FN 행·화면 ID ③ 저장 (2026-11-24 백엔드 사람 결정: 전용 저장 API·새 테이블·멱등 키 없음 → 건강기록 "지속 관찰" 확인 카드). 백엔드가 `POST /api/pets/{petSn}/observation-items`에 `@AiTool` CARD `draft_observation_item`(multipart: `obsrvArtclNm`≤40·`obsrvRegnCd` HLTG16 회원이 고름·`obsrvRegnDtlNm`·`file` 판정 JPEG·`obsrvDt`·`obsrvSz`·`memoCn`≤200에 병변·확신도·등급·`ruleVersion` 글) 추가함(LJS 백엔드 PR #295, 2026-11-24 develop 병합, FN-HLT-002-20~25·32) → 병합 뒤 `GET /internal/ai/tools` 스냅샷 갱신, 같은 부위 관찰 중이면 `draft_observation_cycle`. Python M2는 `checkup-card`처럼 `skin-card`(결과 요약 메시지 + 지속 관찰 확인 카드). 이력은 React → Java 기존 observation API. 프론트에 정정 보냄 ④ 설명 LLM·지식 카드·동시 요청 429 ⑤ YOLO: AI Hub 피부질환·안구질환 데이터 약관 확인 → M3 Air(MPS)에서 일부 데이터로 한 바퀴 시간 측정 → Rust 캐릭터 서버(인스턴스 2)에 추론, 클래스는 yaml 목록과 맞춤
 - SDMA 코드 반영 (LJS): Java HLTG12에 SDMA `HLTC0078`이 생겼다(2026-11-23 도구 목록). `data/lab_items.yaml` SDMA에 `cd`를 넣고 5행 주석을 고친다 — 지금은 직접입력명으로 보내 Java가 `HLTC0035`(직접입력)로 저장. 아래 JAJ 요청 줄의 후속. 2026-11-24 미룸(사람 결정): 지금도 이름 "SDMA"로 빠짐없이 저장되고 리포트는 이름으로 읽어 영향 없음. 미룰수록 직접입력 SDMA 행이 쌓여 나중에 코드 넣으면 옛 행과 항목이 갈림(DB 정리 필요), 프론트 추이가 코드로 묶는지는 미확인

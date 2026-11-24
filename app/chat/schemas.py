@@ -358,7 +358,14 @@ class CheckupCardRequest(_Camel):
     excluded_artcl_nms: list[str] = Field(default_factory=list, max_length=100)
 
 
+class CheckupNoCardReason(StrEnum):
+    # 카드가 없는 이유 중 프론트가 다음 흐름을 여는 것 (2026-11-24)
+    NO_CHECKUP = "NO_CHECKUP"  # 그 아이 검진기록 0건 : 프론트가 검진기록 추가로 잇는다
+
+
 class CheckupCardResult(_Camel):
     # 저장한 AI 메시지와 확인 카드(없으면 null). 카드는 done.action과 같은 모양, 저장 안 함
     messages: list[ConversationMessage]
     action: ActionCard | None = None
+    # 카드가 없는 이유. 검진기록 0건일 때만 NO_CHECKUP, 그 밖은 null
+    no_card_reason: CheckupNoCardReason | None = None
