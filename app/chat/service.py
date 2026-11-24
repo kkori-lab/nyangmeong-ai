@@ -16,6 +16,7 @@ from app.chat.clients import (
     READ_LIMIT,
     AnswerError,
     ClassifyError,
+    ConversationSummarizer,
     ImageIntentError,
     ImageIntentJudge,
     ReadMore,
@@ -258,7 +259,10 @@ async def list_conversations(
 
 async def get_conversation(repo: ConversationRepository, room_sn: int) -> ConversationDetail:
     # FN-AIM-011-10 : 남의 방은 Java가 없는 방과 같은 404 응답
-    return await repo.get_room(room_sn)
+    # 요약 칸(내부용)은 React 응답에서 뺌 (2026-11-24)
+    room = await repo.get_room(room_sn)
+    inner = room.model_dump(exclude={"smry_cn", "smry_end_msg_seq"})
+    return ConversationDetail.model_validate(inner)
 
 
 async def delete_conversation(repo: ConversationRepository, room_sn: int) -> None:
@@ -960,6 +964,9 @@ class Turn:
     action: ActionDraft | None = None
     # 한 메시지 여러 명령 ② : React가 돌려보낸 확인 카드 목록. 있으면 action 대신
     actions: tuple[ActionDraft, ...] = ()
+    # 추가 요청(2026-11-24) : 방 요약과 경계선(이 msgSeq까지 요약됨)
+    summary: str | None = None
+    summary_end: int | None = None
 
     def priors(self) -> list[ActionDraft]:
         if self.actions:
@@ -989,23 +996,119 @@ async def prepare_turn(
     question = next((m for m in reversed(room.messages) if m.role_cd == ROLE_USER), None)
     if question is None:
         raise AppError("INVALID_REQUEST", 400, "답할 메시지가 없습니다.")
-    return Turn(room_sn, question, room.messages, room.pet_sn, draft, action, tuple(actions or ()))
+    return Turn(
+        room_sn,
+        question,
+        room.messages,
+        room.pet_sn,
+        draft,
+        action,
+        tuple(actions or ()),
+        getattr(room, "smry_cn", None),
+        getattr(room, "smry_end_msg_seq", None),
+    )
 
 
-def build_context(messages: list[ConversationMessage], question_seq: int, turns: int) -> list[dict]:
-    # FN-AIM-002-11·011-15 : 현재 대화의 답할 메시지까지, 미완료 답변 제외, 최근 turns턴(질문+답변)
-    usable = [m for m in messages if m.msg_seq <= question_seq and m.cmptn_yn]
-    recent = usable[-turns * 2 :]
+SUMMARY_PREFIX = "이전 대화 요약:\n"
+SUMMARY_SUFFIX = "\n\n이어지는 메시지:\n"
+
+
+def build_context(
+    messages: list[ConversationMessage],
+    question_seq: int,
+    turns: int,
+    summary: str | None = None,
+    summary_end: int | None = None,
+) -> list[dict]:
+    # FN-AIM-002-11·011-15 : 현재 대화의 답할 메시지까지, 미완료 답변 제외, 최근 turns턴
+    # 추가 요청(2026-11-24) : 요약 경계선 뒤만, 턴은 사용자 메시지로 셈
+    # (카드·실행 결과는 AI 메시지만 저장돼 메시지 수 ÷ 2가 턴 수가 아님)
+    usable = [
+        m
+        for m in messages
+        if m.msg_seq <= question_seq
+        and m.cmptn_yn
+        and (summary_end is None or m.msg_seq > summary_end)
+    ]
     # Messages API는 사용자 메시지로 시작 필수
-    while recent and recent[0].role_cd != ROLE_USER:
-        recent = recent[1:]
+    starts = [i for i, m in enumerate(usable) if m.role_cd == ROLE_USER]
+    recent = usable[starts[max(0, len(starts) - turns)] :] if starts else []
     # 저장된 답변의 고지는 떼고 넘김 : 모델이 따라 써 고지가 두 번 붙는 것 방지
-    return [
+    context = [
         {"role": "user", "content": m.cnvrs_cn}
         if m.role_cd == ROLE_USER
         else {"role": "assistant", "content": m.cnvrs_cn.removesuffix(DISCLAIMER)}
         for m in recent
     ]
+    if summary and context:
+        # 요약은 첫 사용자 메시지 앞 : system에 두면 도구 고르기·답변 호출 모양이 바뀜
+        first = context[0]["content"]
+        context[0] = {"role": "user", "content": SUMMARY_PREFIX + summary + SUMMARY_SUFFIX + first}
+    return context
+
+
+class _SavedMessages:
+    # 이번 턴에 저장한 메시지 기록 : 요약 경계선(방금 저장한 답변 msgSeq)용, 방 다시 조회 없음
+    def __init__(self, repo: ConversationRepository) -> None:
+        self._repo = repo
+        self.saved: list[ConversationMessage] = []
+
+    def __getattr__(self, name: str):
+        return getattr(self._repo, name)
+
+    async def add_message(
+        self, room_sn: int, role_cd: str, cn: str, cmptn_yn: bool = True
+    ) -> ConversationMessage:
+        message = await self._repo.add_message(room_sn, role_cd, cn, cmptn_yn=cmptn_yn)
+        self.saved.append(message)
+        return message
+
+
+def _transcript(messages: list[ConversationMessage]) -> str:
+    # 날짜를 붙여 요약에 남김 : 오래된 방의 지난 일을 지금 일로 읽지 않게
+    return "\n".join(
+        f"[{m.reg_dt.month}월 {m.reg_dt.day}일] "
+        f"{'회원' if m.role_cd == ROLE_USER else 'AI'}: {m.cnvrs_cn.removesuffix(DISCLAIMER)}"
+        for m in messages
+    )
+
+
+async def compact_summary(
+    turn: Turn,
+    saved: Sequence[ConversationMessage],
+    repo: ConversationRepository,
+    summarizer: ConversationSummarizer,
+    turns: int,
+) -> None:
+    """추가 요청(2026-11-24) : 경계선 뒤 사용자 메시지가 turns개 이상이면
+    이전 요약 + 경계선 뒤 전부를 새 요약으로 저장
+    - 앞선 요약이 실패했어도 빠지는 턴 없음
+    - 실패는 경고 로그만(답변과 무관)"""
+    try:
+        end = turn.summary_end or 0
+        earlier = [m for m in turn.messages if m.msg_seq <= turn.question.msg_seq]
+        after = sorted(
+            (m for m in [*earlier, *saved] if m.msg_seq > end and m.cmptn_yn),
+            key=lambda m: m.msg_seq,
+        )
+        if sum(m.role_cd == ROLE_USER for m in after) < turns:
+            return
+        if after[-1].role_cd == ROLE_USER:
+            # 답변 저장 전 실패한 턴 : 다음 턴에 다시
+            return
+        summary = await summarizer.summarize(turn.summary, _transcript(after))
+        if not summary:
+            return
+        await repo.save_summary(turn.room_sn, summary, after[-1].msg_seq)
+        logger.info(
+            "대화 요약 저장: room=%d 경계선 %d → %d (%d자)",
+            turn.room_sn,
+            end,
+            after[-1].msg_seq,
+            len(summary),
+        )
+    except Exception as error:
+        logger.warning("대화 요약 실패: room=%d (%s)", turn.room_sn, type(error).__name__)
 
 
 # 브라우저 연결이 끊겨도 답변 생성·저장을 끝까지 하도록 별도 작업으로 분리 (architecture.md)
@@ -1021,15 +1124,37 @@ async def answer_turn(
     register: "RegisterDeps | None" = None,
     titles: TitleGenerator | None = None,
     reader: ToolReader | None = None,
+    summarizer: ConversationSummarizer | None = None,
 ) -> AsyncIterator[Event]:
     queue: asyncio.Queue[Event | None] = asyncio.Queue()
     task = asyncio.create_task(
-        _run_turn(turn, repo, agent, ai, limits, queue.put_nowait, register, titles, reader)
+        _run_and_compact(
+            turn, repo, agent, ai, limits, queue.put_nowait, register, titles, reader, summarizer
+        )
     )
     _running.add(task)
     task.add_done_callback(_running.discard)
     while (event := await queue.get()) is not None:
         yield event
+
+
+async def _run_and_compact(
+    turn: Turn,
+    repo: ConversationRepository,
+    agent: ToolAgent,
+    ai: AiSettings,
+    limits: AnswerLimits,
+    emit: Callable[[Event | None], None],
+    register: "RegisterDeps | None",
+    titles: TitleGenerator | None,
+    reader: ToolReader | None,
+    summarizer: ConversationSummarizer | None,
+) -> None:
+    # 요약은 스트림을 닫은(done 뒤) 다음 : 회원이 요약 LLM을 기다리지 않음
+    saved = _SavedMessages(repo)
+    await _run_turn(turn, saved, agent, ai, limits, emit, register, titles, reader)  # type: ignore[arg-type]
+    if summarizer is not None:
+        await compact_summary(turn, saved.saved, repo, summarizer, ai.context_turns)
 
 
 async def _run_turn(
@@ -1062,7 +1187,13 @@ async def _run_turn(
             judged = Judged(Intent(kind=IntentKind.REGISTER))
         else:
             # 항상 이 흐름(2026-11-09) : 분류·목차 선택·등록 칸 추출을 도구 고르기 한 번으로
-            context = build_context(turn.messages, turn.question.msg_seq, ai.context_turns)
+            context = build_context(
+                turn.messages,
+                turn.question.msg_seq,
+                ai.context_turns,
+                turn.summary,
+                turn.summary_end,
+            )
             today = register.today if register is not None else rules.today_kst()
             now = datetime.combine(today, datetime.now(rules.KST).time())
             read = (
