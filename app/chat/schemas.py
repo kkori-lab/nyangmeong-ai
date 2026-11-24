@@ -309,6 +309,7 @@ class ImageIntentKind(StrEnum):
     MEDICAL_RECEIPT = "MEDICAL_RECEIPT"  # 동물병원 영수증 -> 영수증 분석
     EXPENSE_RECEIPT = "EXPENSE_RECEIPT"  # 그 밖의 영수증 -> 가계부
     SKIN = "SKIN"  # 반려동물 피부·털 문제 사진 -> 피부 병변 분석 (2026-11-24)
+    EYE = "EYE"  # 반려동물 눈 문제 사진 -> 안구 질환 분석 (2026-11-24)
     CHECKUP_PDF = "CHECKUP_PDF"  # PDF -> 검사결과지 분석 (판단 LLM 미호출, 2026-11-23)
     ASK = "ASK"  # 모름 -> React가 칩으로 되물음
 

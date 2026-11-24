@@ -178,6 +178,26 @@ def test_image_intent_글이_피부를_말하면_SKIN_지시가_있다():
     assert "글이 피부·털·상처를 말하고 사진이 반려동물이면" in IMAGE_INTENT_SYSTEM
 
 
+def test_image_intent_판단_지시문에_EYE_용도가_있다():
+    from app.chat.clients import IMAGE_INTENT_SYSTEM
+
+    assert "- EYE:" in IMAGE_INTENT_SYSTEM
+    assert "'눈 봐줘' -> EYE" in IMAGE_INTENT_SYSTEM
+    assert "눈과 눈 주변이 사진의 중심이면 SKIN이 아니라 EYE" in IMAGE_INTENT_SYSTEM
+
+
+def test_image_intent_글이_눈을_말하면_EYE_지시가_있다():
+    from app.chat.clients import IMAGE_INTENT_SYSTEM
+
+    assert "글이 눈을 말하고 사진이 반려동물이면" in IMAGE_INTENT_SYSTEM
+
+
+def test_image_intent_눈만_찍은_사진에_캐릭터_글이면_ASK_지시가_있다():
+    from app.chat.clients import IMAGE_INTENT_SYSTEM
+
+    assert "눈만 가까이 찍은 사진 + '캐릭터 만들어줘' -> ASK" in IMAGE_INTENT_SYSTEM
+
+
 def test_image_intent_얼굴이나_몸이_안_보이면_캐릭터_글이어도_ASK_지시가_있다():
     from app.chat.clients import IMAGE_INTENT_SYSTEM
 
