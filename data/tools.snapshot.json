@@ -1,6 +1,6 @@
 {
-  "version": "5d234ff1865f09e2be5f337390c8dbabe8c83e77c1fa2556985ec2da67fea859",
-  "structureVersion": "b419994cfbc598dc0b33da19d04a1af38a79d149dfc9e08115769c457d85da7c",
+  "version": "78946e7523f4d41762ac57a3c65d07ae9fea85be79822bff924f325c76ee9444",
+  "structureVersion": "0dbc59b3c5f4a0d565ef6c017590b0861c63ab546a26d26808a9bff3a5f705ca",
   "tools": [
     {
       "name": "draft_care_completion",
@@ -137,6 +137,23 @@
         "obsrvDt": {"in": "body", "type": "datetime", "required": true},
         "obsrvSz": {"in": "body", "type": "decimal", "precision": 7, "scale": 2},
         "obsrvChgCd": {"in": "body", "type": "code", "group": "HLTG17", "maxLength": 8},
+        "memoCn": {"in": "body", "type": "string", "maxLength": 200}
+      },
+      "rules": []
+    },
+    {
+      "name": "draft_observation_item",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "POST", "path": "/api/pets/{petSn}/observation-items", "contentType": "multipart/form-data"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "obsrvArtclNm": {"in": "body", "type": "string", "required": true, "maxLength": 40},
+        "obsrvRegnCd": {"in": "body", "type": "code", "group": "HLTG16", "required": true, "maxLength": 8},
+        "obsrvRegnDtlNm": {"in": "body", "type": "string", "maxLength": 40},
+        "file": {"in": "body", "type": "file", "required": true},
+        "obsrvDt": {"in": "body", "type": "datetime", "required": true},
+        "obsrvSz": {"in": "body", "type": "decimal", "precision": 7, "scale": 2},
         "memoCn": {"in": "body", "type": "string", "maxLength": 200}
       },
       "rules": []

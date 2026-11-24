@@ -279,6 +279,45 @@ draft_observation_cycle:
       java: memoCn
       description: 메모
 
+draft_observation_item:
+  label: 관찰 항목 등록
+  hooks: [pet, date]
+  description: |
+    새로 지켜볼 관찰 항목(혹·상처·피부·눈 등) 하나를 첫 관찰 기록과 함께 등록하는 확인 카드를 대화창에 띄운다.
+    회원이 카드에서 사진을 붙이고 대화로 확인 말을 하기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 새 부위를 지속 관찰 항목으로 등록해 달라는 말, 또는 피부·눈 분석 카드(대화 직전
+      "피부 분석 — …"·"눈 분석 — …" 글)의 빈 칸(부위 등)을 채우는 말.
+      예) "초코 배에 난 혹 관찰 항목으로 등록해 줘", "부위는 등이야", "왼쪽 눈이야"
+    쓰지 않을 때: 이미 관찰 중인 항목에 오늘 기록을 더하는 말은 draft_observation_cycle.
+      관찰 기록을 묻기만 하는 말은 list_observation_items·list_observation_cycles.
+    인자: 말하지 않은 칸은 비운다. 부위는 목록의 이름으로 고르고, 눈이면 얼굴과 부위 상세("왼쪽 눈")를 쓴다.
+      날짜는 시스템의 오늘 날짜 기준으로 계산한다. 크기는 단위 없이 숫자만(cm). 사진은 다루지 않는다.
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    obsrv_artcl_nm:
+      java: obsrvArtclNm
+      description: 관찰 항목 이름(예 "배 혹", "탈모")
+    obsrv_regn_cd:
+      java: obsrvRegnCd
+      description: 관찰 부위
+    obsrv_regn_dtl_nm:
+      java: obsrvRegnDtlNm
+      description: 부위 상세(예 "왼쪽 눈", "오른쪽 앞다리 안쪽")
+    obsrv_ymd:
+      hook: date:ymd
+      description: 관찰 날짜 YYYY-MM-DD. 날짜를 말하지 않았으면 오늘
+    obsrv_tm:
+      hook: date:tm
+      description: 관찰 시간 24시간 HH:MM. 말하지 않았으면 비운다
+    obsrv_sz:
+      java: obsrvSz
+      description: 크기(숫자만, cm)
+    memo_cn:
+      java: memoCn
+      description: 메모
+
 # 수정 확인 카드 (SCR-AIM-012 2단계 ②, PATCH) : 바꿀 칸만 채우고 바꾸지 않은 칸은 비운다
 # - target : 바꿀 대상을 찾지 못했을 때 안내 글의 대상 이름
 # 경로의 번호 칸(schdlSn·careArtclSn·expndSn)은 이 턴 READ 결과에 나온 값만. 못 정하면 카드 없이 안내 글
