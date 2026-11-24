@@ -308,8 +308,17 @@ class ImageIntentKind(StrEnum):
     CHARACTER = "CHARACTER"  # 반려동물 사진 -> 캐릭터 만들기
     MEDICAL_RECEIPT = "MEDICAL_RECEIPT"  # 동물병원 영수증 -> 영수증 분석
     EXPENSE_RECEIPT = "EXPENSE_RECEIPT"  # 그 밖의 영수증 -> 가계부
+    SKIN = "SKIN"  # 반려동물 피부·털 문제 사진 -> 피부 병변 분석 (2026-11-24)
     CHECKUP_PDF = "CHECKUP_PDF"  # PDF -> 검사결과지 분석 (판단 LLM 미호출, 2026-11-23)
     ASK = "ASK"  # 모름 -> React가 칩으로 되물음
+
+
+class ImageIntentJudgement(BaseModel):
+    """사진 용도 판단 결과 (내부용) : ASK 안내 문구를 이유별로 고르기 위함 (2026-11-24)
+    - character_photo_unfit : 글이 캐릭터를 원하지만 사진에 반려동물 얼굴·몸이 안 보여 ASK"""
+
+    kind: ImageIntentKind
+    character_photo_unfit: bool = False
 
 
 class ImageIntentResult(_Camel):
@@ -349,7 +358,14 @@ class CheckupCardRequest(_Camel):
     excluded_artcl_nms: list[str] = Field(default_factory=list, max_length=100)
 
 
+class CheckupNoCardReason(StrEnum):
+    # 카드가 없는 이유 중 프론트가 다음 흐름을 여는 것 (2026-11-24)
+    NO_CHECKUP = "NO_CHECKUP"  # 그 아이 검진기록 0건 : 프론트가 검진기록 추가로 잇는다
+
+
 class CheckupCardResult(_Camel):
     # 저장한 AI 메시지와 확인 카드(없으면 null). 카드는 done.action과 같은 모양, 저장 안 함
     messages: list[ConversationMessage]
     action: ActionCard | None = None
+    # 카드가 없는 이유. 검진기록 0건일 때만 NO_CHECKUP, 그 밖은 null
+    no_card_reason: CheckupNoCardReason | None = None

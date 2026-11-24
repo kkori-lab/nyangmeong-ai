@@ -45,11 +45,13 @@ from app.chat.schemas import (
     CheckupCardRequest,
     CheckupCardResult,
     CheckupLabItem,
+    CheckupNoCardReason,
     CheckupResult,
     ConversationCreateRequest,
     ConversationDetail,
     ConversationMessage,
     ConversationSummary,
+    ImageIntentJudgement,
     ImageIntentKind,
     ImageIntentResult,
     Intent,
@@ -1961,12 +1963,12 @@ def _intent_jpeg(image: bytes) -> bytes:
 
 async def judge_image_intent(
     judge: ImageIntentJudge, image: bytes, file_name: str, text: str | None
-) -> ImageIntentKind:
+) -> ImageIntentJudgement:
     if is_pdf_name(file_name):
         # 대화창 PDF 첨부 (2026-11-23) : 검사결과지 분석으로, 판단 LLM 미호출(글과 무관)
         # 검사결과지가 아닌 PDF는 lab-results가 422 NOT_LAB_RESULT로 가린다
         validate_pdf(image, file_name)
-        return ImageIntentKind.CHECKUP_PDF
+        return ImageIntentJudgement(kind=ImageIntentKind.CHECKUP_PDF)
     validate_upload(image, file_name)
     jpeg = _intent_jpeg(image)
     text = text.strip() if text and text.strip() else None
@@ -1974,7 +1976,7 @@ async def judge_image_intent(
         return await judge.judge(jpeg, text)
     except ImageIntentError:
         # 판단 실패 : 오류 대신 되물음(React 칩)
-        return ImageIntentKind.ASK
+        return ImageIntentJudgement(kind=ImageIntentKind.ASK)
 
 
 # 사진 턴 저장 (FN-AIM-013-02, 2026-11-13) : 사진 파일은 저장하지 않고 자리 표시 글만
@@ -1985,10 +1987,18 @@ PDF_MARK = "[PDF]"
 PDF_TITLE = "PDF 대화"
 # 용도별 고정 안내. 동물병원 영수증은 결과 요약을 receipt-result가 저장해 여기선 없음
 IMAGE_MESSAGES = {
-    ImageIntentKind.ASK: "이 사진으로 무엇을 할까요? 캐릭터 만들기나 영수증 분석을 골라 주세요.",
+    ImageIntentKind.ASK: (
+        "이 사진으로 무엇을 할까요? 캐릭터 만들기, 영수증 분석, 피부 분석 중에 골라 주세요."
+    ),
     ImageIntentKind.CHARACTER: "캐릭터 만들기로 이어 갈게요.",
     ImageIntentKind.EXPENSE_RECEIPT: "가계부 영수증은 본창 가계부에서 등록할 수 있어요.",
+    ImageIntentKind.SKIN: "피부 분석으로 이어 갈게요.",
 }
+# 글이 캐릭터를 원하지만 사진에 반려동물 얼굴·몸이 안 보여 ASK일 때 (2026-11-24)
+CHARACTER_PHOTO_UNFIT_MESSAGE = (
+    "캐릭터는 반려동물 얼굴이나 몸 전체가 보이는 사진으로 만들 수 있어요. "
+    "다른 사진을 올려 주시거나, 이 사진으로 할 일을 골라 주세요."
+)
 
 
 async def save_image_turn(
@@ -1998,6 +2008,7 @@ async def save_image_turn(
     pet_sn: int | None,
     text: str | None,
     kind: ImageIntentKind,
+    character_photo_unfit: bool = False,
 ) -> ImageIntentResult:
     """사진 턴을 대화방에 저장 : 사용자 "[사진] <글>" + 용도별 안내 AI 메시지
     - 방 번호가 없으면 방을 만듦(첫 메시지가 사진 메시지, 글이 없으면 제목 LLM 미호출)"""
@@ -2016,6 +2027,8 @@ async def save_image_turn(
     else:
         saved.append(await repo.add_message(room_sn, ROLE_USER, user_cn))
     guide = IMAGE_MESSAGES.get(kind)
+    if kind is ImageIntentKind.ASK and character_photo_unfit:
+        guide = CHARACTER_PHOTO_UNFIT_MESSAGE
     if guide is not None:
         saved.append(await repo.add_message(room_sn, ROLE_AI, guide))
     return ImageIntentResult(kind=kind, ai_cnvrs_room_sn=room_sn, messages=saved)
@@ -2038,12 +2051,16 @@ CHECKUP_EMPTY = "읽은 혈액검사 항목이 없어요"
 CHECKUP_ASK = "{pet}검사 수치를 이렇게 저장할까요?"
 CHECKUP_MORE_ROWS = "외 {count}항목"
 CHECKUP_SKIPPED = (
-    "수치나 단위를 읽지 못한 {count}항목은 빼 두었어요. 본창 검진상세에서 직접 입력해 주세요."
+    "수치나 단위를 읽지 못한 {count}항목은 빼 두었어요. 검진상세에서 직접 입력해 주세요."
 )
 CHECKUP_EXCLUDED = "혈액검사가 아닌 항목({names})은 저장하지 않아요."
-CHECKUP_NO_TOOL = "본창 검진상세의 [PDF 분석]에서 저장할 수 있어요."
-CHECKUP_NO_ROWS = "저장할 수 있는 수치가 없어요. 본창 검진상세에서 직접 입력해 주세요."
-CHECKUP_NO_RECORD = "검진기록이 없어요. 본창 건강 일지에서 검진기록을 먼저 등록해 주세요."
+CHECKUP_NO_TOOL = "검진상세의 [PDF 분석]에서 저장할 수 있어요."
+CHECKUP_NO_ROWS = "저장할 수 있는 수치가 없어요. 검진상세에서 직접 입력해 주세요."
+# 프론트가 이 글 아래에 [검진기록 등록하기]·[나중에]를 붙인다(noCardReason NO_CHECKUP)
+CHECKUP_NO_RECORD = (
+    "검진기록이 없어요. 검진기록을 먼저 등록할까요? "
+    "등록하면 {pet}검사 수치를 바로 저장할 수 있어요."
+)
 CHECKUP_ONE_RECORD = "저장할 검진기록: {record}"
 CHECKUP_PICK_RECORD = "어느 검진기록에 넣을까요? 날짜나 병원 이름으로 말해 주세요."
 CHECKUP_NO_DATE = "날짜 없음"
@@ -2068,6 +2085,9 @@ def _inspection_rows(
     for item in items:
         raw = item.model_dump(by_alias=True)
         row = {name: raw[name] for name in _ROW_FIELDS if raw.get(name) is not None}
+        # 코드가 있으면 직접입력명은 뺀다(둘 다 보내면 Java 400)
+        if row.get("inspArtclCd"):
+            row.pop("inspArtclDrctInptNm", None)
         named = row.get("inspArtclCd") or row.get("inspArtclDrctInptNm")
         usable = named and row.get("rsltNvl") is not None and row.get("unitNm")
         if not usable or catalog.invalid_input(entry, {INSPECTION_ROWS: [row]}):
@@ -2138,6 +2158,7 @@ async def save_checkup_card(
     note = [CHECKUP_EXCLUDED.format(names=", ".join(excluded))] if excluded else []
     entry = tools.card_entry(INSPECTION_TOOL)
     card: ActionCard | None = None
+    reason: CheckupNoCardReason | None = None
     lines = [head]
     if not count:
         lines += note
@@ -2154,7 +2175,11 @@ async def save_checkup_card(
         elif records is None:
             lines += [*note, CHECKUP_NO_TOOL]
         elif not records:
-            lines += [*note, CHECKUP_NO_RECORD]
+            pets = await contexts.get_pets()
+            name = next((p.pet_nm for p in pets if p.pet_sn == request.pet_sn), None)
+            pet = f"{name}의 " if name else ""
+            lines += [*note, CHECKUP_NO_RECORD.format(pet=pet)]
+            reason = CheckupNoCardReason.NO_CHECKUP
         else:
             values: dict = {INSPECTION_ROWS: rows}
             if len(records) == 1:
@@ -2175,4 +2200,4 @@ async def save_checkup_card(
                 lines += [f"{no}. {_record_text(r)}" for no, r in enumerate(picks, start=1)]
             logger.info("검사 수치 확인 카드: %d줄 검진기록 %d건", len(rows), len(records))
     saved = await repo.add_message(room_sn, ROLE_AI, "\n".join(lines))
-    return CheckupCardResult(messages=[saved], action=card)
+    return CheckupCardResult(messages=[saved], action=card, no_card_reason=reason)

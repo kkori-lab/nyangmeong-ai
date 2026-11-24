@@ -10,7 +10,6 @@ import pytest
 from app.chat import catalog, rules, tools
 from app.chat.schemas import ROLE_AI
 from app.chat.service import (
-    CHECKUP_NO_RECORD,
     CHECKUP_NO_ROWS,
     CHECKUP_NO_TOOL,
     CHECKUP_PICK_RECORD,
@@ -105,6 +104,7 @@ def test_검진기록이_1건이면_카드에_채우고_요약_글을_저장한�
         {"inspArtclDrctInptNm": "SDMA", "rsltNvl": 14, "unitNm": "ug/dL"},
     ]
     assert action["missing"] == []
+    assert data["noCardReason"] is None
     assert reader.calls == [(CHECKUPS, {})]
     text = data["messages"][0]["cnvrsCn"]
     assert text.startswith(
@@ -113,7 +113,8 @@ def test_검진기록이_1건이면_카드에_채우고_요약_글을_저장한�
     assert "- WBC 12.3 10^3/uL (참고 6~17)" in text
     assert "- SDMA 14 ug/dL" in text
     assert "T4" not in text
-    assert "수치나 단위를 읽지 못한 1항목은 빼 두었어요." in text
+    assert "수치나 단위를 읽지 못한 1항목은 빼 두었어요. 검진상세에서 직접 입력해 주세요." in text
+    assert "본창" not in text
     assert "혈액검사가 아닌 항목(요검사 pH)은 저장하지 않아요." in text
     assert f"저장할 검진기록: {_md(date(2026, 10, 20))} 메이 동물병원 · 정기검진" in text
     assert "등록해 줘" in text
@@ -133,6 +134,7 @@ def test_검진기록이_여럿이면_빈_칸으로_두고_최근_3건을_보인
     data = post(client, room, recognized()).json()["data"]
 
     assert data["action"]["missing"] == ["ckupRcdSn"]
+    assert data["noCardReason"] is None
     assert "ckupRcdSn" not in data["action"]["input"]
     text = data["messages"][0]["cnvrsCn"]
     assert CHECKUP_PICK_RECORD in text
@@ -149,7 +151,25 @@ def test_검진기록이_없으면_카드_없이_먼저_등록하라고_안내�
     data = post(client, room, recognized()).json()["data"]
 
     assert data["action"] is None
-    assert data["messages"][0]["cnvrsCn"].endswith(CHECKUP_NO_RECORD)
+    assert data["noCardReason"] == "NO_CHECKUP"
+    text = data["messages"][0]["cnvrsCn"]
+    assert text.endswith(
+        "검진기록이 없어요. 검진기록을 먼저 등록할까요? "
+        "등록하면 초코의 검사 수치를 바로 저장할 수 있어요."
+    )
+    assert "본창" not in text
+
+
+def test_검진기록이_없고_반려동물_이름을_모르면_이름_없이_묻는다(client, java):
+    use_reader(client, FakeToolReader(by_path={CHECKUPS: {"content": []}}))
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    data = post(client, room, recognized(petSn=9999)).json()["data"]
+
+    assert data["noCardReason"] == "NO_CHECKUP"
+    assert data["messages"][0]["cnvrsCn"].endswith(
+        "검진기록이 없어요. 검진기록을 먼저 등록할까요? 등록하면 검사 수치를 바로 저장할 수 있어요."
+    )
 
 
 def test_수치를_하나도_못_쓰면_검진기록을_읽지_않고_직접_입력을_안내한다(client, java):
@@ -160,7 +180,9 @@ def test_수치를_하나도_못_쓰면_검진기록을_읽지_않고_직접_입
     data = post(client, room, recognized(items=items)).json()["data"]
 
     assert data["action"] is None
+    assert data["noCardReason"] is None
     assert data["messages"][0]["cnvrsCn"] == f"검사결과지 분석 — 혈액검사 1항목\n{CHECKUP_NO_ROWS}"
+    assert CHECKUP_NO_ROWS == "저장할 수 있는 수치가 없어요. 검진상세에서 직접 입력해 주세요."
     assert reader.calls == []
 
 
@@ -190,12 +212,13 @@ def test_분석_실패는_카드_없이_요약만_저장한다(client, java, res
     res = post(client, room, {"result": result, "petSn": CHOCO, "items": ITEMS})
 
     assert res.status_code == 201
-    assert res.json()["data"] == {"messages": [res.json()["data"]["messages"][0]], "action": None}
+    data = res.json()["data"]
+    assert data == {"messages": [data["messages"][0]], "action": None, "noCardReason": None}
     assert saved(java, room) == [(ROLE_AI, text)]
     assert reader.calls == []
 
 
-def test_저장_도구가_도구_목록에_없으면_본창_PDF_분석으로_안내한다(client, java, without_tool):
+def test_저장_도구가_도구_목록에_없으면_검진상세_PDF_분석으로_안내한다(client, java, without_tool):
     # 백엔드 @AiTool 병합 전(Java 목록에 없음)
     reader = use_reader(client, FakeToolReader(by_path={CHECKUPS: {"content": [RECORD]}}))
     room = room_of(client, java, pet_sn=CHOCO)
@@ -203,8 +226,28 @@ def test_저장_도구가_도구_목록에_없으면_본창_PDF_분석으로_안
     data = post(client, room, recognized()).json()["data"]
 
     assert data["action"] is None
+    assert data["noCardReason"] is None
     assert data["messages"][0]["cnvrsCn"] == f"검사결과지 분석 — 혈액검사 3항목\n{CHECKUP_NO_TOOL}"
+    assert CHECKUP_NO_TOOL == "검진상세의 [PDF 분석]에서 저장할 수 있어요."
     assert reader.calls == []
+
+
+def test_코드와_직접입력명이_같이_오면_카드_줄에는_코드만_남긴다(client, java):
+    # 둘 다 보내면 Java 400 : React가 보낸 items를 그대로 믿지 않는다
+    use_reader(client, FakeToolReader(by_path={CHECKUPS: {"content": [RECORD]}}))
+    room = room_of(client, java, pet_sn=CHOCO)
+    items = [
+        {"inspArtclCd": WBC, "inspArtclDrctInptNm": "백혈구", "rsltNvl": 12.3, "unitNm": "10^3/uL"}
+    ]
+
+    data = post(client, room, recognized(items=items)).json()["data"]
+
+    assert data["action"]["input"]["values"] == [
+        {"inspArtclCd": WBC, "rsltNvl": 12.3, "unitNm": "10^3/uL"}
+    ]
+    text = data["messages"][0]["cnvrsCn"]
+    assert "- WBC 12.3 10^3/uL" in text
+    assert "백혈구" not in text
 
 
 def test_검진기록_읽기가_실패하면_저장하지_않고_502(client, java):
