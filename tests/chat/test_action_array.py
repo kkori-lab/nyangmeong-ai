@@ -424,3 +424,32 @@ def test_관찰_기록_결과는_사진_칸_없이도_저장하고_사진_값은
     assert res.status_code == again.status_code == canceled.status_code == 201
     assert res.json()["data"]["cnvrsCn"] == "✔ 관찰 기록 추가 — 09-29(화) 09:00 · 1.2"
     assert canceled.json()["data"]["cnvrsCn"] == "취소됨 — 관찰 기록 추가 · 저장하지 않았어요."
+
+
+def test_지출_줄이_2개_이상이면_펼치지_않고_줄_수로_요약해야_한다(client, java):
+    room = room_of(client, java)
+    lines = [
+        {"petSn": None, "expndAmt": 32000, "idmptDmndId": "3f1c0a9e-uuid"},
+        {"petSn": None, "expndAmt": 8000, "idmptDmndId": "3f1c0a9f-uuid"},
+    ]
+
+    res = action_result(client, room, "draft_expense", "DONE", EXPENSE_DONE | {"lines": lines})
+
+    assert res.status_code == 201
+    assert res.json()["data"]["cnvrsCn"] == "✔ 지출 등록 — 09-29(화) · 사료 · 2건"
+
+
+@pytest.mark.parametrize(
+    ("status", "message"),
+    [
+        ("CANCELED", "취소됨 — 지출 등록 · 09-29(화) · 사료 · 32,000 · 저장하지 않았어요."),
+        ("FAILED", "실패 — 지출 등록 · 09-29(화) · 사료 · 32,000 · 저장하지 못했어요."),
+    ],
+)
+def test_취소와_실패도_값이_있으면_요약을_넣어야_한다(client, java, status, message):
+    room = room_of(client, java)
+
+    res = action_result(client, room, "draft_expense", status, EXPENSE_DONE)
+
+    assert res.status_code == 201
+    assert [m["cnvrsCn"] for m in java.ai_messages(room)] == [message]

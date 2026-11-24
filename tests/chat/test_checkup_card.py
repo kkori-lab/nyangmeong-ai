@@ -17,7 +17,7 @@ from app.chat.service import (
 )
 from tests.chat.conftest import AJAX
 from tests.chat.fakes import INSPECTION_TOOL, FakeToolAgent, fake_catalog, fake_catalog_json
-from tests.chat.test_action import send
+from tests.chat.test_action import action_result, send
 from tests.chat.test_action_update_follow import ChainAgent
 from tests.chat.test_messages import MessageJava, events
 from tests.chat.test_read_tools import FakeToolReader, use_reader
@@ -332,3 +332,79 @@ def test_검진기록이_채워진_카드에_확인_말이면_실행_지시한�
     assert done["execute"] is True
     assert done["action"]["input"]["ckupRcdSn"] == 7
     assert agent.decides == []
+
+
+# 검사 수치 저장 결과(action-result, 2026-11-24) : 배열은 펼치지 않고 반려동물·검진기록·항목 수
+
+
+def inspection_done(count: int) -> dict:
+    row = {"inspArtclDrctInptNm": "SDMA", "rsltNvl": 14, "unitNm": "ug/dL"}
+    return {"petSn": CHOCO, "ckupRcdSn": 7, "values": [row] * count}
+
+
+def test_검사_수치_저장_결과는_반려동물_검진기록_항목_수로_요약한다(client, java):
+    reader = use_reader(client, FakeToolReader(by_path={CHECKUPS: {"content": [RECORD]}}))
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    res = action_result(client, room, INSPECTION_TOOL, "DONE", inspection_done(52))
+
+    day = _md(date(2026, 10, 20))
+    assert res.status_code == 201
+    assert res.json()["data"]["cnvrsCn"] == (
+        f"✔ 검사 수치 저장 — 초코 · {day} 메이 동물병원 · 혈액검사 52항목"
+    )
+    assert reader.calls == [(CHECKUPS, {})]
+
+
+@pytest.mark.parametrize(
+    ("status", "end"),
+    [
+        ("CANCELED", "취소됨 — {} · 저장하지 않았어요."),
+        ("FAILED", "실패 — {} · 저장하지 못했어요."),
+    ],
+)
+def test_검사_수치_취소와_실패도_같은_요약을_넣는다(client, java, status, end):
+    use_reader(client, FakeToolReader(by_path={CHECKUPS: {"content": [RECORD]}}))
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    res = action_result(client, room, INSPECTION_TOOL, status, inspection_done(2))
+
+    day = _md(date(2026, 10, 20))
+    summary = f"검사 수치 저장 · 초코 · {day} 메이 동물병원 · 혈액검사 2항목"
+    assert res.json()["data"]["cnvrsCn"] == end.format(summary)
+
+
+def test_검사_수치_결과는_검진기록_읽기가_실패해도_그_부분만_빼고_저장한다(client, java):
+    use_reader(client, FakeToolReader(fail_paths=(CHECKUPS,)))
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    res = action_result(client, room, INSPECTION_TOOL, "DONE", inspection_done(1))
+
+    assert res.status_code == 201
+    message = "✔ 검사 수치 저장 — 초코 · 혈액검사 1항목"
+    assert res.json()["data"]["cnvrsCn"] == message
+    assert saved(java, room) == [(ROLE_AI, message)]
+
+
+def test_검사_수치_결과는_검진기록이_목록에_없으면_빼고_저장한다(client, java):
+    other = RECORD | {"ckupRcdSn": 8}
+    use_reader(client, FakeToolReader(by_path={CHECKUPS: {"content": [other]}}))
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    res = action_result(client, room, INSPECTION_TOOL, "DONE", inspection_done(3))
+
+    assert res.json()["data"]["cnvrsCn"] == "✔ 검사 수치 저장 — 초코 · 혈액검사 3항목"
+
+
+def test_검사_수치_결과는_반려동물_조회가_실패해도_이름만_빼고_저장한다(client, java):
+    use_reader(client, FakeToolReader(by_path={CHECKUPS: {"content": [RECORD]}}))
+    room = room_of(client, java, pet_sn=CHOCO)
+    java.context_status = 500
+
+    res = action_result(client, room, INSPECTION_TOOL, "DONE", inspection_done(3))
+
+    day = _md(date(2026, 10, 20))
+    assert res.status_code == 201
+    assert (
+        res.json()["data"]["cnvrsCn"] == f"✔ 검사 수치 저장 — {day} 메이 동물병원 · 혈액검사 3항목"
+    )
