@@ -167,10 +167,13 @@ async def save_register_result(
 async def save_action_result(
     body: ActionResultRequest,
     repo: Repo,
+    reader: Annotated[ToolReader, Depends(get_tool_reader)],
+    contexts: Annotated[RegisterContextRepository, Depends(get_register_context_repository)],
     room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
 ) -> JSONResponse:
     # 2단계 쓰기 : 확인 카드의 결과(완료·취소·실패) 텍스트 요약 저장
-    result = await service.save_action_result(repo, room_sn, body)
+    # 검사 수치 저장은 반려동물·검진기록을 읽어 글에 붙인다(읽기 실패면 빼고 저장)
+    result = await service.save_action_result(repo, reader, contexts, room_sn, body)
     return response.success(result.model_dump(by_alias=True), http_code=201)
 
 

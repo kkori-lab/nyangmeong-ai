@@ -1712,7 +1712,7 @@ def action_summary(card: ActionCard) -> str:
     values = {name: value for name, value in card.values.items() if value is not None}
     clock = values.get(catalog.HR_INPUT) is not False
     parts = [
-        _input_text(param, values[name], clock)
+        _input_text(param, values[name], clock, _count_word(entry.name, name))
         for name, param in entry.params.items()
         if name in values and name not in entry.fixed and _summarized(name, param)
     ]
@@ -1862,13 +1862,31 @@ def _uses_pets(entry: "catalog.CatalogEntry") -> bool:
 
 ACTION_FAILED_MESSAGE = "실패 — {label} · 저장하지 못했어요."
 ACTION_CANCELED_MESSAGE = "취소됨 — {label} · 저장하지 않았어요."
+# 배열 칸이 2줄 이상이면 펼치지 않고 줄 수로 (2026-11-24)
+ARRAY_COUNT = "{count}건"
 
 
-def _input_text(param: "catalog.CatalogItemParam", value: object, clock: bool = True) -> str:
+def _count_word(tool: str, name: str) -> str | None:
+    # 배열 칸 줄 수 말 : 검사 수치는 줄 수와 상관없이 "혈액검사 N항목"(checkup-card와 같은 말)
+    if (tool, name) == (INSPECTION_TOOL, INSPECTION_ROWS):
+        return CHECKUP_COUNT
+    return None
+
+
+def _input_text(
+    param: "catalog.CatalogItemParam",
+    value: object,
+    clock: bool = True,
+    count: str | None = None,
+) -> str:
     if param.type == catalog.ARRAY:
-        # 배열 : 항목마다 값(번호·uuid·petSn·참거짓 칸 빼고)을 " / "로, 항목끼리는 ", "로
+        # 배열 : 1줄이면 값(번호·uuid·petSn·참거짓 칸 빼고)을 " / "로 펼치고,
+        # 2줄 이상이거나 줄 수 말(count)이 있으면 줄 수만
+        items = value if isinstance(value, list) else []
+        if count is not None or len(items) > 1:
+            return (count or ARRAY_COUNT).format(count=len(items))
         rows = []
-        for row in value if isinstance(value, list) else []:
+        for row in items:
             parts = [
                 _input_text(rule, row[name])
                 for name, rule in (param.items or {}).items()
@@ -1892,8 +1910,14 @@ def _input_text(param: "catalog.CatalogItemParam", value: object, clock: bool = 
     return str(value)
 
 
-def action_result_message(request: ActionResultRequest) -> str:
+def action_result_message(request: ActionResultRequest, head: Sequence[str] = ()) -> str:
     # 확인 카드 결과 요약 : 도구 표시 이름 + input(번호 칸·참거짓 제외). 저장 글은 서버가 정함
+    entry, values = _result_values(request)
+    return _result_text(request.status, entry, values, head)
+
+
+def _result_values(request: ActionResultRequest) -> tuple["catalog.CatalogEntry", dict]:
+    # action-result 검사 : 모르는 도구·규칙 밖 값·DONE인데 필수 칸 빔이면 400
     entry = tools.card_entry(request.tool)
     if entry is None:
         raise AppError("INVALID_REQUEST", 400, "모르는 도구입니다.")
@@ -1906,21 +1930,30 @@ def action_result_message(request: ActionResultRequest) -> str:
     }
     if catalog.invalid_input(entry, values):
         raise AppError("INVALID_REQUEST", 400, "허용되지 않는 값이 있습니다.")
-    label = entry.label or entry.name
-    if request.status is ActionStatus.CANCELED:
-        return ACTION_CANCELED_MESSAGE.format(label=label)
-    if request.status is ActionStatus.FAILED:
-        return ACTION_FAILED_MESSAGE.format(label=label)
-    if catalog.missing(entry, values, files=False):
+    if request.status is ActionStatus.DONE and catalog.missing(entry, values, files=False):
         raise AppError("INVALID_REQUEST", 400, "확인 카드의 필수 칸이 비어 있습니다.")
+    return entry, values
+
+
+def _result_text(
+    status: ActionStatus, entry: "catalog.CatalogEntry", values: dict, head: Sequence[str]
+) -> str:
+    # DONE "✔ <label> — <요약>", CANCELED·FAILED "<말> — <label> · <요약> · <끝말>"
+    # (요약이 없으면 label만)
+    label = entry.label or entry.name
     clock = values.get(catalog.HR_INPUT) is not False
     texts = (
-        _input_text(param, values[name], clock)
+        _input_text(param, values[name], clock, _count_word(entry.name, name))
         for name, param in entry.params.items()
         if name in values and name not in entry.fixed and _summarized(name, param)
     )
-    parts = [text for text in texts if text]
-    return f"✔ {label}" + (f" — {' · '.join(parts)}" if parts else "")
+    parts = [*head, *(text for text in texts if text)]
+    summary = " · ".join(parts)
+    if status is ActionStatus.CANCELED:
+        return ACTION_CANCELED_MESSAGE.format(label=f"{label} · {summary}" if parts else label)
+    if status is ActionStatus.FAILED:
+        return ACTION_FAILED_MESSAGE.format(label=f"{label} · {summary}" if parts else label)
+    return f"✔ {label}" + (f" — {summary}" if parts else "")
 
 
 def _summarized(name: str, param: "catalog.CatalogItemParam") -> bool:
@@ -1934,10 +1967,51 @@ def _summarized(name: str, param: "catalog.CatalogItemParam") -> bool:
 
 
 async def save_action_result(
-    repo: ConversationRepository, room_sn: int, request: ActionResultRequest
+    repo: ConversationRepository,
+    reader: ToolReader,
+    contexts: RegisterContextRepository,
+    room_sn: int,
+    request: ActionResultRequest,
 ) -> ConversationMessage:
     # 실행(React -> Java 공개 API)·취소·실패의 결과를 AI 메시지로 저장
-    return await repo.add_message(room_sn, ROLE_AI, action_result_message(request))
+    # 검사 수치 저장은 반려동물 이름·검진기록(검진일 병원)을 앞에 붙인다(Java 읽기는 이 도구만)
+    entry, values = _result_values(request)
+    head = []
+    if entry.name == INSPECTION_TOOL:
+        head = await _inspection_head(reader, contexts, values)
+    text = _result_text(request.status, entry, values, head)
+    return await repo.add_message(room_sn, ROLE_AI, text)
+
+
+async def _inspection_head(
+    reader: ToolReader, contexts: RegisterContextRepository, values: dict
+) -> list[str]:
+    """검사 수치 저장 결과 글 앞부분 : ["탄이", "12-14(월) 검증병원D"]
+    - Java 저장은 이미 끝났으므로 읽기 실패·못 찾음이면 그 부분만 빼고 저장한다"""
+    pet_sn = values.get(catalog.PET_SN)
+    if not isinstance(pet_sn, int):
+        return []
+    head: list[str] = []
+    try:
+        pets = await contexts.get_pets()
+    except (AppError, BackendError) as exc:
+        logger.warning("검사 수치 결과 글: 반려동물 조회 실패: %s", exc)
+        pets = []
+    name = next((pet.pet_nm for pet in pets if pet.pet_sn == pet_sn), None)
+    if name:
+        head.append(name)
+    record_sn = values.get(CHECKUP_SN)
+    if not isinstance(record_sn, int):
+        return head
+    try:
+        records = await _checkup_records(reader, pet_sn) or []
+    except (AppError, BackendError) as exc:
+        logger.warning("검사 수치 결과 글: 검진기록 조회 실패: %s", exc)
+        records = []
+    record = next((r for r in records if r[CHECKUP_SN] == record_sn), None)
+    if record is not None:
+        head.append(_record_place(record))
+    return head
 
 
 # 이미지 축소 기준 : Anthropic 이미지 5MB 상한·토큰 절약
@@ -2112,13 +2186,18 @@ def _row_text(entry: "catalog.CatalogEntry", row: dict) -> str:
     return text
 
 
-def _record_text(record: dict) -> str:
-    # "10-20(화) 메이 동물병원 · 정기검진" : 검진일이 없으면 "날짜 없음"
+def _record_place(record: dict) -> str:
+    # "10-20(화) 메이 동물병원" : 검진일이 없으면 "날짜 없음"
     try:
         day = _md(date.fromisoformat(str(record.get("ckupYmd"))))
     except ValueError:
         day = CHECKUP_NO_DATE
-    parts = [f"{day} {record.get('hsptlNm') or ''}".strip()]
+    return f"{day} {record.get('hsptlNm') or ''}".strip()
+
+
+def _record_text(record: dict) -> str:
+    # "10-20(화) 메이 동물병원 · 정기검진" : 검진일이 없으면 "날짜 없음"
+    parts = [_record_place(record)]
     if record.get("ckupTypeCdNm"):
         parts.append(str(record["ckupTypeCdNm"]))
     return " · ".join(parts)
