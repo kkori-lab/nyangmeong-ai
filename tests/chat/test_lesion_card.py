@@ -82,9 +82,7 @@ def test_피부_판정이면_요약을_저장하고_부위를_비운_관찰_항�
     assert action["input"]["petSn"] == CHOCO
     assert action["input"]["obsrvArtclNm"] == "탈모"
     assert action["input"]["obsrvDt"] == "2026-11-24T13:50:00"
-    assert action["input"]["memoCn"] == (
-        "피부 분석 참고: 탈모(높음)·비듬(보통), 진료 권장, 규칙 2026-11-24-draft"
-    )
+    assert action["input"]["memoCn"] == "피부 분석 참고: 탈모(높음)·비듬(보통), 진료 권장"
     assert "obsrvRegnCd" not in action["input"]
     assert action["missing"] == ["obsrvRegnCd", "file"]
     assert "file" in action["params"]

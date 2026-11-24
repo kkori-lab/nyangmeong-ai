@@ -158,6 +158,9 @@ ACTION_ASK_MISSING = "아직 {names} 비어 있어요. 말로 알려 주세요."
 ACTION_ASK_SAME_PET = "{name} {count}. 칩에서 고르거나 '{hint} {pet}'처럼 알려 주세요."
 ACTION_ASK_SAME_PET_CHIP = "{name} {count}. 칩에서 골라 주세요."
 ACTION_ASK_MISSING_REST = "아직 {names} 비어 있어요."
+# 빈 칸에 표시 이름(LLM 칸 설명)이 하나도 없을 때 : Java 칸 이름을 보이지 않는다 (2026-11-24)
+ACTION_ASK_MISSING_UNNAMED = "카드에 빈 칸이 있어요. 말로 알려 주세요."
+ACTION_ASK_MISSING_UNNAMED_NO = "{no}번 카드에 빈 칸이 있어요. 말로 알려 주세요."
 # 빈 반려동물 칸의 이름(되물음 글)
 PET_LABEL = "반려동물"
 ACTION_ASK_CONFIRM = "맞으면 '등록해 줘'라고 말해 주세요. 바꿀 내용은 말로 알려 주시면 고칠게요."
@@ -1745,11 +1748,13 @@ def action_ask_message(card: ActionCard | list[ActionCard]) -> str:
 def _missing_lines(cards: list[ActionCard]) -> list[str]:
     # 빈 칸 되물음 줄 : 카드 하나면 지금 문구, 여럿이면 빈 칸이 있는 카드마다 번호로
     if len(cards) == 1:
-        if not cards[0].missing:
+        if not _said_missing(cards[0]):
             return []
         names = _missing_names(cards[0])
         same = _same_pet_line(cards[0])
         if same is None:
+            if not names:
+                return [ACTION_ASK_MISSING_UNNAMED]
             return [ACTION_ASK_MISSING.format(names=_names_subject(names))]
         # 같은 이름이라 못 정함 : 어느 아이인지 먼저, 나머지 빈 칸은 이어서 (추가-2)
         rest = [name for name in names if name != PET_LABEL]
@@ -1758,11 +1763,14 @@ def _missing_lines(cards: list[ActionCard]) -> list[str]:
         return [same, ACTION_ASK_MISSING_REST.format(names=_names_subject(rest))]
     lines: list[str] = []
     for no, item in enumerate(cards, start=1):
-        if not item.missing:
+        if not _said_missing(item):
             continue
         names = _missing_names(item)
         same = _same_pet_line(item)
         if same is None:
+            if not names:
+                lines.append(ACTION_ASK_MISSING_UNNAMED_NO.format(no=no))
+                continue
             lines.append(ACTION_ASK_MISSING_NO.format(no=no, names=_names_subject(names)))
             continue
         # 같은 이름이라 못 정함 : 카드 하나일 때처럼 어느 아이인지 먼저 (2026-11-23)
@@ -1794,15 +1802,23 @@ def _same_pet_line(card: ActionCard) -> str | None:
     return ACTION_ASK_SAME_PET.format(name=name, count=count, hint=hint, pet=pet)
 
 
+def _said_missing(card: ActionCard) -> list[str]:
+    # 말로 물을 빈 칸 : 사진(file) 칸은 React가 카드에 붙이므로 빼고, 실행 판정에서도 세지 않음
+    # (카드 missing에는 그대로 둔다, 2026-11-24)
+    params = card.params
+    return [m for m in card.missing if m not in params or params[m].type != catalog.FILE]
+
+
 def _missing_names(card: ActionCard) -> list[str]:
-    # 빈 Java 칸 -> 도구 설명의 LLM 칸 설명 앞부분("기록 날짜"), 없으면 Java 칸 이름
+    # 빈 Java 칸 -> 도구 설명의 LLM 칸 설명 앞부분("기록 날짜"). 설명이 없으면 이름을 빼고
+    # Java 칸 이름은 보이지 않는다. date hook이 만드는 칸(hrInptYn)은 날짜 칸 이름으로 합침
     entry = tools.card_entry(card.tool)
     prompt = catalog.tool_prompts().get(card.tool)
     by_java = {java: name for name, java in entry.to_java_name.items()} if entry else {}
     roles = entry.hook_roles if entry else {}
     ymd = next((name for name, role in roles.items() if role == "date:ymd"), None)
     names: list[str] = []
-    for java in card.missing:
+    for java in _said_missing(card):
         if java == catalog.PET_SN:
             names.append(PET_LABEL)
             continue
@@ -1811,10 +1827,12 @@ def _missing_names(card: ActionCard) -> list[str]:
         param = entry.params.get(java) if entry else None
         if llm is None and param is not None and param.type == "datetime":
             llm = ymd
+        if llm is None and java in catalog.HOOKS["date"].makes:
+            llm = ymd
         desc = prompt.params[llm].description if prompt and llm in prompt.params else ""
         # "기록 날짜 YYYY-MM-DD. …" -> "기록 날짜" : 형식 표기(영문·숫자)와 괄호·마침표 뒤는 뗀다
-        name = re.split(r"[.(:,]|\s+(?=[A-Z0-9])", desc, maxsplit=1)[0].strip() or java
-        if name not in names:
+        name = re.split(r"[.(:,]|\s+(?=[A-Z0-9])", desc, maxsplit=1)[0].strip()
+        if name and name not in names:
             names.append(name)
     return names
 
@@ -2322,8 +2340,7 @@ def _lesion_memo(request: LesionCardRequest, title: str, limit: int | None) -> s
         if f.lesion_cd != LESION_NORMAL
     )
     parts = [f"{title} 분석 참고: {found}", LESION_GRADES[request.grade or "OBSERVE"]]
-    if request.rule_version:
-        parts.append(f"규칙 {request.rule_version}")
+    # ruleVersion은 회원 메모에 보이지 않게 로그에만 (2026-11-24)
     memo = ", ".join(parts)
     return memo[:limit] if limit else memo
 
@@ -2382,9 +2399,13 @@ async def save_lesion_card(
         lines.append(LESION_ASK.format(pet=pet))
         if region is not None:
             lines.append(LESION_EYE_REGION)
-        # 사진 칸 : 카드에서 분석한 사진을 붙이므로 말로 묻지 않음
-        said = [m for m in card.missing if m not in params or params[m].type != catalog.FILE]
-        lines += _missing_lines([card.model_copy(update={"missing": said})]) or [ACTION_ASK_CONFIRM]
-        logger.info("관찰 항목 확인 카드: %s 병변 %d개", request.kind, len(lesions))
+        # 사진 칸 : 카드에서 분석한 사진을 붙이므로 말로 묻지 않음(_missing_lines가 뺌)
+        lines += _missing_lines([card]) or [ACTION_ASK_CONFIRM]
+        logger.info(
+            "관찰 항목 확인 카드: %s 병변 %d개 규칙 %s",
+            request.kind,
+            len(lesions),
+            request.rule_version,
+        )
     saved = await repo.add_message(room_sn, ROLE_AI, "\n".join(lines))
     return LesionCardResult(messages=[saved], action=card)
