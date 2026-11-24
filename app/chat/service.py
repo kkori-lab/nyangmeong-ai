@@ -2062,11 +2062,13 @@ PDF_TITLE = "PDF 대화"
 # 용도별 고정 안내. 동물병원 영수증은 결과 요약을 receipt-result가 저장해 여기선 없음
 IMAGE_MESSAGES = {
     ImageIntentKind.ASK: (
-        "이 사진으로 무엇을 할까요? 캐릭터 만들기, 영수증 분석, 피부 분석 중에 골라 주세요."
+        "이 사진으로 무엇을 할까요? 캐릭터 만들기, 영수증 분석, 피부 분석, 눈 분석 중에 "
+        "골라 주세요."
     ),
     ImageIntentKind.CHARACTER: "캐릭터 만들기로 이어 갈게요.",
     ImageIntentKind.EXPENSE_RECEIPT: "가계부 영수증은 본창 가계부에서 등록할 수 있어요.",
     ImageIntentKind.SKIN: "피부 분석으로 이어 갈게요.",
+    ImageIntentKind.EYE: "눈 분석으로 이어 갈게요.",
 }
 # 글이 캐릭터를 원하지만 사진에 반려동물 얼굴·몸이 안 보여 ASK일 때 (2026-11-24)
 CHARACTER_PHOTO_UNFIT_MESSAGE = (

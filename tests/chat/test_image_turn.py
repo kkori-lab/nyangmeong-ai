@@ -222,6 +222,30 @@ def test_되물음_안내에_피부_분석이_있다():
     assert "피부 분석" in IMAGE_MESSAGES[ImageIntentKind.ASK]
 
 
+def test_눈_사진은_사진_메시지와_눈_분석_안내를_저장한다(client, java, judge, titles):
+    judge.kind = ImageIntentKind.EYE
+    room = java.add_room(1, "제목", cn="안녕")
+
+    data = post(client, {"cnvrsCn": "눈 봐줘", "aiCnvrsRoomSn": str(room)}).json()["data"]
+
+    assert data["kind"] == "EYE"
+    assert saved(java, room)[-2:] == [
+        (ROLE_USER, "[사진] 눈 봐줘"),
+        (ROLE_AI, "눈 분석으로 이어 갈게요."),
+    ]
+    assert [m["cnvrsCn"] for m in data["messages"]] == [
+        "[사진] 눈 봐줘",
+        "눈 분석으로 이어 갈게요.",
+    ]
+
+
+def test_되물음_안내에_눈_분석이_있다():
+    assert IMAGE_MESSAGES[ImageIntentKind.ASK] == (
+        "이 사진으로 무엇을 할까요? "
+        "캐릭터 만들기, 영수증 분석, 피부 분석, 눈 분석 중에 골라 주세요."
+    )
+
+
 def test_캐릭터를_원하지만_사진이_안_맞으면_이유를_안내한다(client, java, judge, titles):
     judge.kind = ImageIntentKind.ASK
     judge.character_photo_unfit = True
