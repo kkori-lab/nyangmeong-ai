@@ -56,7 +56,7 @@ class JavaConversationRepository:
     def __init__(self, client: httpx2.AsyncClient, settings: Settings, cookie: str | None) -> None:
         self._client = client
         self._settings = settings
-        # Java RequestedWithFilter가 /internal/**의 POST·DELETE에도 적용
+        # Java RequestedWithFilter가 /internal/**의 POST·PUT·PATCH·DELETE에도 적용
         self._headers = {REQUESTED_WITH_HEADER: REQUESTED_WITH}
         if cookie:
             self._headers["Cookie"] = cookie

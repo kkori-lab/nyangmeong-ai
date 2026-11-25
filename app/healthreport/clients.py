@@ -4,6 +4,7 @@ from typing import Annotated, Protocol
 
 import anthropic
 from anthropic import AsyncAnthropic
+from anthropic.types import Message
 from fastapi import Depends
 from pydantic import BaseModel, ValidationError
 
@@ -13,7 +14,10 @@ from app.healthreport.schemas import HealthReportInput
 
 logger = logging.getLogger(__name__)
 
-LLM_MAX_TOKENS = 1024
+# effort low : thinking 토큰도 max_tokens에 포함 (1024에서 JSON이 잘린 사례, handoff 참고)
+LLM_EFFORT = "low"
+LLM_MAX_TOKENS = 2048
+LOG_TEXT_CHARS = 80  # 실패 로그의 응답 앞부분 : 잘린 곳은 보이고 기록 값은 거의 안 섞이는 길이
 
 
 class HealthReportApiError(Exception):
@@ -53,8 +57,12 @@ GENERATE_SYSTEM = (
 )
 
 
+class _BadOutput(Exception):
+    """잘림·모양 오류 : 한 번만 다시 요청한다"""
+
+
 class ClaudeReportGenerator:
-    # 로그에는 건수·소요 시간만 (기록 값 제외)
+    # 로그에는 건수·소요 시간, 실패 때만 응답 앞 LOG_TEXT_CHARS자
     def __init__(self, llm: AsyncAnthropic, model: str, timeout_sec: float) -> None:
         self._llm = llm
         self._model = model
@@ -64,13 +72,29 @@ class ClaudeReportGenerator:
         started = time.monotonic()
         body = data.model_dump_json(by_alias=True, exclude_none=True)
         try:
+            output = await self._request(body, started)
+        except _BadOutput:
+            # 시간 제한은 service의 wait_for 하나가 두 번을 함께 감싼다
+            logger.warning("LLM 건강분석 리포트 다시 요청 (%.0fms)", _elapsed(started))
+            try:
+                output = await self._request(body, started)
+            except _BadOutput:
+                raise HealthReportApiError("llm") from None
+        logger.info("LLM 건강분석 리포트: 팁 %d개 (%.0fms)", len(output.tips), _elapsed(started))
+        return output
+
+    async def _request(self, body: str, started: float) -> ReportOutput:
+        try:
             llm = self._llm.with_options(timeout=self._timeout_sec, max_retries=0)
-            response = await llm.messages.parse(
+            response = await llm.messages.create(
                 model=self._model,
                 max_tokens=LLM_MAX_TOKENS,
                 system=GENERATE_SYSTEM,
                 messages=[{"role": "user", "content": body}],
-                output_format=ReportOutput,
+                output_config={
+                    "effort": LLM_EFFORT,
+                    "format": {"type": "json_schema", "schema": REPORT_SCHEMA},
+                },
             )
         except anthropic.APITimeoutError:
             logger.warning("LLM 건강분석 리포트 시간 초과 (%.0fms)", _elapsed(started))
@@ -78,15 +102,37 @@ class ClaudeReportGenerator:
         except anthropic.APIError:
             logger.warning("LLM 건강분석 리포트 실패 (%.0fms)", _elapsed(started))
             raise HealthReportApiError("llm") from None
-        except ValidationError:
-            logger.warning("LLM 건강분석 리포트 모양 오류 (%.0fms)", _elapsed(started))
-            raise HealthReportApiError("llm") from None
-        output = response.parsed_output
-        if response.stop_reason == "refusal" or output is None or not output.title.strip():
-            logger.warning("LLM 건강분석 리포트 결과 없음: %s", response.stop_reason or "no_output")
+        text = "".join(block.text for block in response.content if block.type == "text")
+        reason = response.stop_reason or "no_output"
+        if response.stop_reason == "refusal":
+            _log_failure("결과 없음", reason, response, text)
             raise HealthReportApiError("llm")
-        logger.info("LLM 건강분석 리포트: 팁 %d개 (%.0fms)", len(output.tips), _elapsed(started))
+        if response.stop_reason == "max_tokens":
+            _log_failure("결과 없음", reason, response, text)
+            raise _BadOutput
+        try:
+            output = ReportOutput.model_validate_json(text)
+        except ValidationError:
+            _log_failure("모양 오류", reason, response, text)
+            raise _BadOutput from None
+        if not output.title.strip():
+            _log_failure("결과 없음", reason, response, text)
+            raise _BadOutput
         return output
+
+
+REPORT_SCHEMA = anthropic.transform_schema(ReportOutput)
+
+
+def _log_failure(kind: str, reason: str, response: Message, text: str) -> None:
+    logger.warning(
+        "LLM 건강분석 리포트 %s: stop_reason=%s output_tokens=%s 글 %d자 앞부분=%r",
+        kind,
+        reason,
+        response.usage.output_tokens if response.usage else None,
+        len(text),
+        text[:LOG_TEXT_CHARS],
+    )
 
 
 def _elapsed(started: float) -> float:
