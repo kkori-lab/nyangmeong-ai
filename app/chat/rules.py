@@ -766,19 +766,68 @@ def _with_weekday(text: str) -> str:
     return f"{match.group()} ({WEEKDAYS[day.weekday()]}){text[match.end() :]}"
 
 
-def _drop_free_text(value: object) -> object:
-    # 내용(…Cn) 칸 : 메모·자유 입력 글이라 외부 AI API로 보내지 않음
+def _with_weekdays(value: object) -> object:
+    # 날짜에 요일을 붙임. 내용(…Cn) 칸(알레르기·메모 등)도 그대로 넘김(2026-11-25 결정)
     if isinstance(value, dict):
-        return {k: _drop_free_text(v) for k, v in value.items() if not k.endswith("Cn")}
+        return {k: _with_weekdays(v) for k, v in value.items()}
     if isinstance(value, list):
-        return [_drop_free_text(item) for item in value]
+        return [_with_weekdays(item) for item in value]
     if isinstance(value, str):
         return _with_weekday(value)
     return value
 
 
 def read_result_text(data: object, max_chars: int = READ_RESULT_MAX_CHARS) -> str:
-    text = json.dumps(_drop_free_text(data), ensure_ascii=False, default=str)
+    text = json.dumps(_with_weekdays(data), ensure_ascii=False, default=str)
     if len(text) <= max_chars:
         return text
     return text[:max_chars] + READ_TRUNCATED
+
+
+# 반려동물 수정 카드의 목록 칸(알레르기·질환·특징) 합치기 (2026-11-25)
+# Java PATCH는 칸 전체를 바꾸므로, 말한 항목을 지금 값에 더하거나 빼서 카드에 싣는다
+LIST_ADD = "add"
+LIST_REMOVE = "remove"
+LIST_REPLACE = "replace"
+_LIST_REMOVE_WORDS = re.compile(r"빼|삭제|지워|지우|제거|없애|없어졌|나았")
+_LIST_ADD_WORDS = re.compile(r"추가|넣어|넣고|더해|생겼|도\s*있")
+_LIST_REPLACE_WORDS = re.compile(r"바꿔|바꾸|변경|고쳐|수정|만\s*(남|있)")
+
+
+def list_edit_mode(text: str) -> str:
+    """빼는 말 > 더하는 말 > 바꾸는 말. 아무것도 없으면 더하기(지금 값을 잃지 않음)"""
+    if _LIST_REMOVE_WORDS.search(text):
+        return LIST_REMOVE
+    if _LIST_ADD_WORDS.search(text):
+        return LIST_ADD
+    if _LIST_REPLACE_WORDS.search(text):
+        return LIST_REPLACE
+    return LIST_ADD
+
+
+def _list_items(value: object) -> list[str]:
+    if not isinstance(value, str):
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _list_key(item: str) -> str:
+    return re.sub(r"\s+", "", item)
+
+
+def merge_list(current: object, said: object, mode: str) -> str:
+    """쉼표 목록 합치기 : 같은 항목은 띄어쓰기만 달라도 하나로. 다 빼면 빈 글(Java가 비움)"""
+    new = _list_items(said)
+    if mode == LIST_REPLACE:
+        return ",".join(new)
+    old = _list_items(current)
+    if mode == LIST_REMOVE:
+        gone = {_list_key(item) for item in new}
+        return ",".join(item for item in old if _list_key(item) not in gone)
+    keys = {_list_key(item) for item in old}
+    added = []
+    for item in new:
+        if _list_key(item) not in keys:
+            keys.add(_list_key(item))
+            added.append(item)
+    return ",".join(old + added)

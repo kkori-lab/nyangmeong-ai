@@ -1303,6 +1303,8 @@ async def _run_turn(
             await _register_reply(repo, turn.room_sn, card, emit)
         elif kind is IntentKind.ACTION and register is not None:
             cards = await _action_reply(text, turn, judged, register)
+            if reader is not None:
+                cards = [await merge_pet_lists(card, text, reader) for card in cards]
             # 카드 요약을 글로 저장 : 모달 대신 채팅으로 확인, 다음 턴 맥락에도 남음 (2026-11-13)
             saved = await _save(repo, turn.room_sn, action_ask_message(cards, text), True)
             emit(("done", AnswerDone(message=saved, action=cards[0], actions=cards)))
@@ -1799,6 +1801,31 @@ def action_card(
             "targetText": target_text if is_delete(entry) else None,
         }
     )
+
+
+# 반려동물 수정 카드의 목록 칸 : Java PATCH는 칸 전체를 바꿔 기존 항목이 지워진다 (2026-11-25)
+DRAFT_PET_UPDATE = "draft_pet_update"
+PET_LIST_FIELDS = ("algyCn", "dssCn", "chrcCn")
+
+
+async def merge_pet_lists(card: ActionCard, text: str, reader: ToolReader) -> ActionCard:
+    """알레르기·질환·특징을 말했으면 지금 값(GET /api/pets/{petSn})을 읽어 더하기·빼기·바꾸기로 합침
+    - 읽기 실패면 카드 그대로(말한 값만) : 로그만 남김"""
+    said = {name: card.values[name] for name in PET_LIST_FIELDS if card.values.get(name)}
+    pet_sn = card.values.get(catalog.PET_SN)
+    if card.tool != DRAFT_PET_UPDATE or not said or pet_sn is None:
+        return card
+    mode = rules.list_edit_mode(text)
+    current: object = {}
+    if mode != rules.LIST_REPLACE:
+        try:
+            current = await reader.read(f"/api/pets/{pet_sn}", {})
+        except (AppError, BackendError) as error:
+            logger.info("반려동물 목록 칸 합치기 읽기 실패: %s", type(error).__name__)
+            return card
+    now = current if isinstance(current, dict) else {}
+    merged = {name: rules.merge_list(now.get(name), value, mode) for name, value in said.items()}
+    return card.model_copy(update={"values": card.values | merged})
 
 
 async def _action_reply(
