@@ -21,6 +21,28 @@ from tests.chat.test_tools import room_of, use_agent
 
 BUILTIN = {"navigate", "search_guide", "decline"}
 REGISTER = {"draft_schedule", "draft_care_item"}
+# 수정·삭제 도구 (SCR-AIM-012, 2026-11-25)
+SECOND_UPDATES = {
+    "draft_daily_health_record_update",
+    "draft_checkup_update",
+    "draft_prescription_update",
+    "draft_etc_inspection_update",
+    "draft_inspection_value_update",
+    "draft_observation_cycle_update",
+}
+DELETES = {
+    "delete_schedule",
+    "delete_care_item",
+    "cancel_care_completion",
+    "delete_daily_health_record",
+    "delete_checkup",
+    "delete_prescription",
+    "delete_etc_inspection",
+    "delete_observation_cycle",
+    "delete_repeat_prevention",
+    "delete_expense",
+    "delete_place_bookmark",
+}
 # 2단계 쓰기 확인 카드(ACTION)
 ACTION = {
     "draft_care_completion",
@@ -38,9 +60,18 @@ ACTION = {
     "draft_inspection_values",
     # 관찰 항목 등록(SCR-AIM-013 피부·눈 카드, 2026-11-24) : 부위 코드 칸, 스냅샷만이면 안 실림
     "draft_observation_item",
+    # 수정·삭제 도구(SCR-AIM-012, 2026-11-25) : 수정 6개, 삭제 11개
+    *SECOND_UPDATES,
+    *DELETES,
 }
 # 스냅샷(코드 값 없음)으로도 싣는 ACTION : 코드 칸 없음
-ACTION_WITHOUT_CODES = {"draft_care_completion", "draft_expense_limit"}
+ACTION_WITHOUT_CODES = {
+    "draft_care_completion",
+    "draft_expense_limit",
+    "draft_etc_inspection_update",
+    "draft_inspection_value_update",
+    *DELETES,
+}
 READ = {
     "get_checkup",
     "get_health_indicators",
@@ -160,15 +191,18 @@ def test_설명의_hook_이름과_역할은_Python에_있어야_한다():
 
 
 def test_navigate만_쓰는_API는_스냅샷에_없어야_한다():
-    # ③ 설계 2-3절 : 반려동물 등록·모든 삭제·회원정보·공동양육·관리자·인증·내부 API
+    # ③ 설계 2-3절 : 반려동물 등록·삭제·회원정보·공동양육·관리자·인증·내부 API
+    # 삭제는 2026-11-25부터 확인 카드(DELETES 11개)만. 반려동물 삭제·지출 전체 삭제는 navigate
     navigate_only = (
         ("POST", "/api/pets"),
         ("PUT", "/api/members/me"),
         ("PATCH", "/api/members/me"),
+        ("DELETE", "/api/pets/{petSn}"),
+        ("DELETE", "/api/expenses"),
     )
     for tool in catalog.read_snapshot().tools:
         call = tool.call
-        assert call.method != "DELETE"
+        assert call.method != "DELETE" or tool.name in DELETES
         assert (call.method, call.path) not in navigate_only
         assert not call.path.startswith(("/api/admin", "/api/auth", "/internal"))
         # 공동양육자·보낸 초대 목록 읽기는 2-1절 READ 후보, 초대·수락·해제(쓰기)만 navigate

@@ -187,7 +187,7 @@ ACTION_DROP_MESSAGE = "등록하지 않았어요."
 ACTION_MAX_CARDS = 3
 # 쓰기 카드 뒤 이어 주는 말이 있을 때 남은 쓰기 도구를 이어 고르는 tool_result
 ACTION_CHAINED = (
-    "확인 카드를 만듦(아직 저장 안 됨). 이 메시지에 다른 쓰기 요청(기록·등록·수정)이 남았으면 "
+    "확인 카드를 만듦(아직 저장 안 됨). 이 메시지에 다른 쓰기 요청(기록·등록·수정·삭제)이 남았으면 "
     "그 쓰기 도구를 부르고, 남은 것이 없으면 아무 글도 쓰지 않고 끝낸다."
 )
 # 카드가 둘 이상일 때 : 번호 붙은 요약 줄, 빈 칸은 카드 번호로
@@ -216,14 +216,41 @@ READ_EMPTY_MESSAGE = "요청을 처리하지 못했어요. 이름이나 날짜�
 ACTION_VERB_ADD = "등록"
 ACTION_VERB_UPDATE = "수정"
 ACTION_VERB_MIXED = "진행"
+# 삭제 도구 (2026-11-25 LJS 결정, 삭제도 확인 카드로) : 카드가 모두 DELETE면 "삭제"
+ACTION_VERB_DELETE = "삭제"
+DELETE = "DELETE"
+# 삭제 카드는 고칠 칸이 없어 확인 말 안내만
+ACTION_ASK_DELETE = "맞으면 '삭제해 줘'라고 말해 주세요."
+# 삭제 카드에 "응"·"네"만 : 실행하지 않고 다시 안내 (삭제 동사가 든 말만 실행)
+ACTION_DELETE_CONFIRM = "지우려면 '삭제해 줘'라고 말해 주세요."
+ACTION_DELETE_TARGET_MISSING = (
+    "지울 대상을 이 턴 읽기 결과에서 찾지 못해 카드를 띄우지 않음. "
+    "어떤 것을 지울지 이름이나 날짜를 넣어 다시 말해 달라고 한두 문장으로 안내한다."
+)
+DELETE_TARGET_MISSING_MESSAGE = (
+    "지울 {target}을 찾지 못했어요. 이름이나 날짜를 넣어 다시 말해 주세요."
+)
+
+
+def _method_verb(method: str) -> str:
+    upper = method.upper()
+    if upper == "PATCH":
+        return ACTION_VERB_UPDATE
+    if upper == DELETE:
+        return ACTION_VERB_DELETE
+    return ACTION_VERB_ADD
 
 
 def action_verb(methods: Sequence[str]) -> str:
-    """카드 call.method 목록 -> 확인 문구 동사(등록·수정·진행)"""
-    kinds = {method.upper() == "PATCH" for method in methods}
-    if kinds == {True}:
-        return ACTION_VERB_UPDATE
+    """카드 call.method 목록 -> 확인 문구 동사(등록·수정·삭제·진행)"""
+    kinds = {_method_verb(method) for method in methods}
+    if len(kinds) == 1:
+        return next(iter(kinds))
     return ACTION_VERB_MIXED if len(kinds) > 1 else ACTION_VERB_ADD
+
+
+def is_delete(card: "ActionCard | catalog.CatalogEntry") -> bool:
+    return card.call.method.upper() == DELETE
 
 
 def _worded(message: str, cards: Sequence[ActionCard]) -> str:
@@ -238,6 +265,8 @@ async def _fixed(text: str) -> AsyncIterator[str]:
 
 def _target_missing(entry: "catalog.CatalogEntry") -> str:
     target = entry.target or entry.label or "대상"
+    if is_delete(entry):
+        return DELETE_TARGET_MISSING_MESSAGE.format(target=target)
     if entry.call.method == "PATCH":
         return TARGET_MISSING_MESSAGE.format(target=target)
     return ADD_TARGET_MISSING_MESSAGE.format(target=target)
@@ -245,6 +274,8 @@ def _target_missing(entry: "catalog.CatalogEntry") -> str:
 
 def _target_missing_note(entry: "catalog.CatalogEntry") -> str:
     # 읽기 결과를 본 LLM에 주는 tool_result 글
+    if is_delete(entry):
+        return ACTION_DELETE_TARGET_MISSING
     return ACTION_TARGET_MISSING if entry.call.method == "PATCH" else ACTION_ADD_TARGET_MISSING
 
 
@@ -894,7 +925,10 @@ class _Follow:
             named = self.pets.named(found)
             rejected = _rejected(card, raw, values)
             draft_pet = base.get(catalog.PET_SN) if base else None
-            shown = action_card(card, values, found, named, draft_pet, self.read.room_pet, rejected)
+            target = delete_target_text(card, values, self.rows) if is_delete(card) else None
+            shown = action_card(
+                card, values, found, named, draft_pet, self.read.room_pet, rejected, target
+            )
             self.cards.append(shown)
             return _worded(ACTION_SHOWN, [shown]).format(summary=action_summary(shown))
         if call.name in (tools.NAVIGATE, tools.SEARCH_GUIDE) and call.args is not None:
@@ -1194,6 +1228,11 @@ async def _run_turn(
             # 돌려받은 확인 카드 + 확인·취소 말 : LLM 없이 실행 지시·취소 (2026-11-13)
             # 여러 명령 ② : 카드가 여럿이면 확인 말 한 번에 모두, 취소 말이면 모두 버림
             reply = rules.action_reply_kind(text)
+            if reply == rules.ACTION_CONFIRM and rules.says_delete(text):
+                # "삭제해 줘"는 삭제 카드가 있을 때만 확인 말 : 등록·수정 카드는 실행 안 함
+                methods = [e.call.method for d in priors if (e := tools.card_entry(d.tool))]
+                if DELETE not in {method.upper() for method in methods}:
+                    reply = None
             if reply is not None:
                 await _action_answer(reply, turn, priors, repo, register, emit)
                 return
@@ -1713,8 +1752,10 @@ def action_card(
     draft_pet: int | None,
     room_pet: int | None,
     rejected: Sequence[str] = (),
+    target_text: str | None = None,
 ) -> ActionCard:
-    """확인 카드(2단계 쓰기) : Java 칸 그대로 + 검증한 input + 빈 필수 칸"""
+    """확인 카드(2단계 쓰기) : Java 칸 그대로 + 검증한 input + 빈 필수 칸
+    - target_text : 삭제 카드의 대상 글(READ 행 또는 돌려받은 카드). 삭제 카드가 아니면 버림"""
     values = dict(values)
     pet = None
     choices: list[PetChoice] = []
@@ -1755,6 +1796,7 @@ def action_card(
             "petChoices": choices,
             "petNm": pet.pet_nm if pet else None,
             "notice": notice,
+            "targetText": target_text if is_delete(entry) else None,
         }
     )
 
@@ -1790,8 +1832,11 @@ async def _action_reply(
     for (item, values, rejected), group in zip(picked, groups, strict=True):
         prior = next((draft for draft in priors if draft.tool == item.name), None)
         draft_pet = prior.values.get(catalog.PET_SN) if prior is not None else None
+        target = prior.target_text if prior is not None else None
         for pets_of in group or [named]:
-            cards.append(action_card(item, values, pets, pets_of, draft_pet, turn.pet_sn, rejected))
+            cards.append(
+                action_card(item, values, pets, pets_of, draft_pet, turn.pet_sn, rejected, target)
+            )
     if len(cards) > len(picked):
         logger.info("반려동물별 쓰기 카드 %d장", len(cards))
     return cards
@@ -1837,12 +1882,14 @@ def _kept_cards(
             values, rejected = per_prior[no]
             # 이름으로 고른 카드면 그 이름, 아니면 카드의 반려동물 그대로
             own = [pet for pet in named if pet.pet_sn == draft_pet] if named_sns else []
-            found = action_card(spec[0], values, pets, own, draft_pet, room_pet, rejected)
+            found = action_card(
+                spec[0], values, pets, own, draft_pet, room_pet, rejected, draft.target_text
+            )
         else:
             if draft.tool not in built:
                 entry, values, rejected = spec
                 built[draft.tool] = action_card(
-                    entry, values, pets, named, draft_pet, room_pet, rejected
+                    entry, values, pets, named, draft_pet, room_pet, rejected, draft.target_text
                 )
             found = built[draft.tool]
         if found is not None:
@@ -1856,7 +1903,8 @@ def _prior_card(draft: ActionDraft, pets: list[PetInfo], room_pet: int | None) -
     if entry is None:
         return None
     values = catalog.card_input(entry, {}, None, {}, draft.values)
-    return action_card(entry, values, pets, [], draft.values.get(catalog.PET_SN), room_pet)
+    pet_sn = draft.values.get(catalog.PET_SN)
+    return action_card(entry, values, pets, [], pet_sn, room_pet, (), draft.target_text)
 
 
 def action_summary(card: ActionCard) -> str:
@@ -1867,8 +1915,85 @@ def action_summary(card: ActionCard) -> str:
         return label
     values = {name: value for name, value in card.values.items() if value is not None}
     parts = _value_parts(entry, values)
+    if card.target_text:
+        # 삭제 카드 : 본문 칸이 없어 대상 글로
+        parts = [card.target_text, *parts]
     head = f"{card.pet_nm} " if card.pet_nm else ""
     return f"{head}{label}" + (f" — {' · '.join(parts)}" if parts else "")
+
+
+def delete_target_text(
+    entry: "catalog.CatalogEntry", values: dict, rows: "catalog.Rows"
+) -> str | None:
+    """삭제 카드의 대상 글 : 경로 번호(petSn 빼고)의 이 턴 READ 행에서 target_fields 칸 (2026-11-25)
+    - "칸:단위"는 값 뒤 단위, "번호칸>칸"은 그 번호의 다른 READ 행에서 칸을 읽음
+    - 코드 칸은 이름(행의 …Nm 칸, 없으면 도구 목록 코드). 이름을 모르면 그 칸은 뺀다
+    - 일지 수치(rcdNvl)는 같은 행 항목 이름의 단위(체중 kg 등)"""
+    ids = [
+        name
+        for name, param in entry.params.items()
+        if param.loc == "path" and catalog.is_id(name) and name != catalog.PET_SN
+    ]
+    row = rows.get((ids[0], values.get(ids[0]))) if ids else None
+    if row is None:
+        return None
+    parts: list[str] = []
+    indicator = None
+    for spec in entry.target_fields:
+        field, _, unit = spec.partition(":")
+        source: dict | None = row
+        if ">" in field:
+            sn_name, _, field = field.partition(">")
+            source = rows.get((sn_name, row.get(sn_name)))
+        if source is None:
+            continue
+        text = _row_value(source, field)
+        if text is None:
+            continue
+        if field == "dailyRcdIdctCd":
+            indicator = text
+        if field == "rcdNvl" and indicator in VALUE_UNITS:
+            unit = VALUE_UNITS[indicator]
+        parts.append(f"{text}{unit}")
+    return " · ".join(parts) or None
+
+
+def _row_value(row: dict, field: str) -> str | None:
+    # READ 행의 값 하나를 글로 : 날짜는 "11-24(월)", 일시는 시간까지(hrInptYn false면 날짜만)
+    value = row.get(field)
+    if value is None or value == "" or isinstance(value, bool):
+        return None
+    if field.endswith("Cd"):
+        return row.get(f"{field}Nm") or _code_name(field, str(value))
+    if isinstance(value, int):
+        return f"{value:,}"
+    if isinstance(value, float):
+        return f"{value:g}"
+    text = str(value)
+    try:
+        if "T" in text:
+            moment = datetime.fromisoformat(text)
+            if row.get(catalog.HR_INPUT) is False:
+                return _md(moment.date())
+            return f"{_md(moment.date())} {moment:%H:%M}"
+        if len(text) == 10:
+            return _md(date.fromisoformat(text))
+    except ValueError:
+        pass
+    return text
+
+
+def _code_name(field: str, value: str) -> str | None:
+    # 도구 목록에서 같은 Java 칸 이름의 코드 값 이름(삭제 도구는 코드 칸이 없어 다른 도구에서 찾음)
+    active = tools.active_catalog()
+    for entry in active.entries.values() if active is not None else ():
+        param = entry.params.get(field)
+        if param is None or not param.codes:
+            continue
+        name = next((code.nm for code in param.codes if code.cd == value), None)
+        if name is not None:
+            return name
+    return None
 
 
 def _value_parts(entry: "catalog.CatalogEntry", values: dict) -> list[str]:
@@ -1973,8 +2098,15 @@ def action_ask_message(card: ActionCard | list[ActionCard], said: str = "") -> s
     lines += _rounded_lines(cards, said)
     lines += _photo_lines(cards)
     missing = _missing_lines(cards)
-    lines.extend(missing or [_worded(ACTION_ASK_CONFIRM, cards)])
+    lines.extend(missing or [_confirm_line(cards)])
     return "\n".join(lines)
+
+
+def _confirm_line(cards: Sequence[ActionCard]) -> str:
+    # 확인 말 안내 : 모두 삭제 카드면 고칠 칸이 없어 "삭제해 줘"만
+    if cards and all(is_delete(card) for card in cards):
+        return ACTION_ASK_DELETE
+    return _worded(ACTION_ASK_CONFIRM, cards)
 
 
 def _missing_lines(cards: list[ActionCard]) -> list[str]:
@@ -2115,6 +2247,11 @@ async def _action_answer(
         saved = await _save(repo, turn.room_sn, "\n".join(missing), True)
         emit(("done", AnswerDone(message=saved, action=cards[0], actions=cards)))
         return
+    if not _delete_confirmed(cards, turn.question.cnvrs_cn):
+        # 삭제 카드는 "응"·"네"만으로 지우지 않음 : 삭제 동사(섞이면 "진행"도)가 든 말만
+        saved = await _save(repo, turn.room_sn, ACTION_DELETE_CONFIRM, True)
+        emit(("done", AnswerDone(message=saved, action=cards[0], actions=cards)))
+        return
     logger.info("확인 카드 실행 지시: %s", ", ".join(card.tool for card in cards))
     photo = any(_photo_missing(card) for card in cards)
     execute = (ACTION_EXECUTE_PHOTO_MESSAGE if photo else ACTION_EXECUTE_MESSAGE).replace(
@@ -2125,6 +2262,15 @@ async def _action_answer(
     emit(("done", done))
 
 
+def _delete_confirmed(cards: Sequence[ActionCard], text: str) -> bool:
+    # 삭제 카드가 없으면 늘 참. 모두 삭제면 삭제 동사, 섞이면 삭제 동사 또는 "진행"
+    if not any(is_delete(card) for card in cards):
+        return True
+    if rules.says_delete(text):
+        return True
+    return not all(is_delete(card) for card in cards) and rules.says_proceed(text)
+
+
 def _uses_pets(entry: "catalog.CatalogEntry") -> bool:
     # 반려동물 목록이 필요한 카드 : 카드의 petSn(pet) 또는 배열 줄의 petSn(line_pet)
     return "pet" in entry.hooks or "line_pet" in entry.hooks
@@ -2132,6 +2278,8 @@ def _uses_pets(entry: "catalog.CatalogEntry") -> bool:
 
 ACTION_FAILED_MESSAGE = "실패 — {label} · 저장하지 못했어요."
 ACTION_CANCELED_MESSAGE = "취소됨 — {label} · 저장하지 않았어요."
+ACTION_FAILED_DELETE_MESSAGE = "실패 — {label} · 삭제하지 못했어요."
+ACTION_CANCELED_DELETE_MESSAGE = "취소됨 — {label} · 삭제하지 않았어요."
 # 배열 칸이 2줄 이상이면 펼치지 않고 줄 수로 (2026-11-24)
 ARRAY_COUNT = "{count}건"
 
@@ -2183,7 +2331,9 @@ def _input_text(
 def action_result_message(request: ActionResultRequest, head: Sequence[str] = ()) -> str:
     # 확인 카드 결과 요약 : 도구 표시 이름 + input(번호 칸·참거짓 제외). 저장 글은 서버가 정함
     entry, values = _result_values(request)
-    return _result_text(request.status, entry, values, head, _error_fields(request))
+    return _result_text(
+        request.status, entry, values, head, _error_fields(request), request.target_text
+    )
 
 
 def _error_fields(request: ActionResultRequest) -> list[str]:
@@ -2218,16 +2368,24 @@ def _result_text(
     values: dict,
     head: Sequence[str],
     errors: Sequence[str] = (),
+    target_text: str | None = None,
 ) -> str:
     # DONE "✔ <label> — <요약>", CANCELED·FAILED "<말> — <label> · <요약> · <끝말>"
     # (요약이 없으면 label만)
+    # 삭제 카드 : 요약은 대상 글, 끝말은 "삭제하지 않았어요"·"삭제하지 못했어요"(실패는 label만)
     label = entry.label or entry.name
-    parts = [*head, *_value_parts(entry, values)]
+    deleting = is_delete(entry)
+    target = [target_text] if deleting and target_text else []
+    parts = [*head, *target, *_value_parts(entry, values)]
     summary = " · ".join(parts)
     if status is ActionStatus.CANCELED:
-        return ACTION_CANCELED_MESSAGE.format(label=f"{label} · {summary}" if parts else label)
+        canceled = ACTION_CANCELED_DELETE_MESSAGE if deleting else ACTION_CANCELED_MESSAGE
+        return canceled.format(label=f"{label} · {summary}" if parts else label)
     if status is ActionStatus.FAILED:
-        failed = ACTION_FAILED_MESSAGE.format(label=f"{label} · {summary}" if parts else label)
+        if deleting:
+            failed = ACTION_FAILED_DELETE_MESSAGE.format(label=label)
+        else:
+            failed = ACTION_FAILED_MESSAGE.format(label=f"{label} · {summary}" if parts else label)
         if not errors:
             return failed
         names = _field_names(entry.name, errors)
@@ -2259,7 +2417,8 @@ async def save_action_result(
     head = []
     if entry.name == INSPECTION_TOOL:
         head = await _inspection_head(reader, contexts, values)
-    text = _result_text(request.status, entry, values, head, _error_fields(request))
+    errors = _error_fields(request)
+    text = _result_text(request.status, entry, values, head, errors, request.target_text)
     return await repo.add_message(room_sn, ROLE_AI, text)
 
 

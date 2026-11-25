@@ -1,7 +1,126 @@
 {
-  "version": "78946e7523f4d41762ac57a3c65d07ae9fea85be79822bff924f325c76ee9444",
-  "structureVersion": "0dbc59b3c5f4a0d565ef6c017590b0861c63ab546a26d26808a9bff3a5f705ca",
+  "version": "d405763064b89e7acf7240dca13de0c63132f8f9cc88ae064203638e35a672cc",
+  "structureVersion": "73bfdd32c14db073bc4b1f01d61a2e71ff95c80781f081698dc57070d3cb4e13",
   "tools": [
+    {
+      "name": "cancel_care_completion",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/pets/{petSn}/care-completions/{careCmptnHstrySn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "careCmptnHstrySn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "delete_care_item",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/pets/{petSn}/care-items/{careArtclSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "careArtclSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "delete_checkup",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/pets/{petSn}/checkups/{ckupRcdSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "ckupRcdSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "delete_daily_health_record",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/pets/{petSn}/daily-health-records/{dailyHlthRcdSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "dailyHlthRcdSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "delete_etc_inspection",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/pets/{petSn}/etc-inspections/{etcInspSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "etcInspSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "delete_expense",
+      "domain": "expense",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/expenses/{expndSn}"},
+      "params": {
+        "expndSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "delete_observation_cycle",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/pets/{petSn}/observation-cycles/{obsrvCyclSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "obsrvCyclSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "delete_place_bookmark",
+      "domain": "place",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/place-bookmarks/{plcBkmkSn}"},
+      "params": {
+        "plcBkmkSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "delete_prescription",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/pets/{petSn}/prescriptions/{prscSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "prscSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "delete_repeat_prevention",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/pets/{petSn}/repeat-preventions/{reptPrvntMngSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "reptPrvntMngSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "delete_schedule",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/pets/{petSn}/care-schedules/{schdlSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "schdlSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
     {
       "name": "draft_care_completion",
       "domain": "health",
@@ -51,6 +170,21 @@
       ]
     },
     {
+      "name": "draft_checkup_update",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "PATCH", "path": "/api/pets/{petSn}/checkups/{ckupRcdSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "ckupRcdSn": {"in": "path", "type": "long", "required": true},
+        "hsptlNm": {"in": "body", "type": "string", "maxLength": 80},
+        "ckupTypeCd": {"in": "body", "type": "code", "group": "HLTG01"},
+        "ckupCn": {"in": "body", "type": "string", "maxLength": 500},
+        "ckupMemoCn": {"in": "body", "type": "string", "maxLength": 200}
+      },
+      "rules": []
+    },
+    {
       "name": "draft_daily_health_record",
       "domain": "health",
       "kind": "CARD",
@@ -69,6 +203,34 @@
         {"requiredIf": {"field": "rcdNvl", "when": "dailyRcdIdctCd", "equals": "HLTC0016"}},
         {"requiredIf": {"field": "rcdNvl", "when": "dailyRcdIdctCd", "equals": "HLTC0018"}}
       ]
+    },
+    {
+      "name": "draft_daily_health_record_update",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "PATCH", "path": "/api/pets/{petSn}/daily-health-records/{dailyHlthRcdSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "dailyHlthRcdSn": {"in": "path", "type": "long", "required": true},
+        "rcdDt": {"in": "body", "type": "datetime"},
+        "rcdNvl": {"in": "body", "type": "decimal", "precision": 7, "scale": 2},
+        "crsdSttsCd": {"in": "body", "type": "code", "group": "HLTG10", "maxLength": 8}
+      },
+      "rules": []
+    },
+    {
+      "name": "draft_etc_inspection_update",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "PATCH", "path": "/api/pets/{petSn}/etc-inspections/{etcInspSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "etcInspSn": {"in": "path", "type": "long", "required": true},
+        "inspNm": {"in": "body", "type": "string", "maxLength": 100},
+        "inspRsltCn": {"in": "body", "type": "string", "maxLength": 500},
+        "memoCn": {"in": "body", "type": "string", "maxLength": 200}
+      },
+      "rules": []
     },
     {
       "name": "draft_expense",
@@ -114,6 +276,20 @@
       "rules": []
     },
     {
+      "name": "draft_inspection_value_update",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "PATCH", "path": "/api/pets/{petSn}/inspection-values/{inspNvlSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "inspNvlSn": {"in": "path", "type": "long", "required": true},
+        "rsltNvl": {"in": "body", "type": "decimal", "precision": 9, "scale": 2},
+        "unitNm": {"in": "body", "type": "string", "maxLength": 20},
+        "memoCn": {"in": "body", "type": "string", "maxLength": 200}
+      },
+      "rules": []
+    },
+    {
       "name": "draft_inspection_values",
       "domain": "health",
       "kind": "CARD",
@@ -135,6 +311,22 @@
         "obsrvArtclSn": {"in": "body", "type": "long", "required": true},
         "file": {"in": "body", "type": "file", "required": true},
         "obsrvDt": {"in": "body", "type": "datetime", "required": true},
+        "obsrvSz": {"in": "body", "type": "decimal", "precision": 7, "scale": 2},
+        "obsrvChgCd": {"in": "body", "type": "code", "group": "HLTG17", "maxLength": 8},
+        "memoCn": {"in": "body", "type": "string", "maxLength": 200}
+      },
+      "rules": []
+    },
+    {
+      "name": "draft_observation_cycle_update",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "PATCH", "path": "/api/pets/{petSn}/observation-cycles/{obsrvCyclSn}", "contentType": "multipart/form-data"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "obsrvCyclSn": {"in": "path", "type": "long", "required": true},
+        "file": {"in": "body", "type": "file"},
+        "obsrvDt": {"in": "body", "type": "datetime"},
         "obsrvSz": {"in": "body", "type": "decimal", "precision": 7, "scale": 2},
         "obsrvChgCd": {"in": "body", "type": "code", "group": "HLTG17", "maxLength": 8},
         "memoCn": {"in": "body", "type": "string", "maxLength": 200}
@@ -184,6 +376,23 @@
         "algyCn": {"in": "body", "type": "string", "maxLength": 1000},
         "dssCn": {"in": "body", "type": "string", "maxLength": 1000},
         "goalBdwgReset": {"in": "body", "type": "boolean"}
+      },
+      "rules": []
+    },
+    {
+      "name": "draft_prescription_update",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "PATCH", "path": "/api/pets/{petSn}/prescriptions/{prscSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "prscSn": {"in": "path", "type": "long", "required": true},
+        "mdcnNm": {"in": "body", "type": "string", "maxLength": 40},
+        "mdcnBgngYmd": {"in": "body", "type": "date"},
+        "mdcnEndYmd": {"in": "body", "type": "date"},
+        "dayMdcnNmtm": {"in": "body", "type": "int", "min": 1, "max": 9999},
+        "prscSttsCd": {"in": "body", "type": "code", "group": "HLTG06"},
+        "careRfltYn": {"in": "body", "type": "boolean"}
       },
       "rules": []
     },

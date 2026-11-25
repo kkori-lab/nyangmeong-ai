@@ -172,6 +172,9 @@ class ToolPrompt(BaseModel):
     result_drop: list[str] = []
     # READ : fromYmd·toYmd가 둘 다 비면 오늘 포함 최근 N일(2026-11-19, 일지가 6000자에서 잘림)
     default_days: int | None = None
+    # 삭제 카드 : 대상 글(targetText)에 쓸 READ 결과 행의 Java 칸 (2026-11-25)
+    # "칸:단위"는 값 뒤 단위, "번호칸>칸"은 그 번호의 다른 READ 행에서 칸을 읽음
+    target_fields: list[str] = []
 
     @model_validator(mode="after")
     def _needs_description(self) -> "ToolPrompt":
@@ -244,6 +247,7 @@ class CatalogEntry:
     notice: bool = False
     result_drop: tuple[str, ...] = ()
     default_days: int | None = None
+    target_fields: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -410,6 +414,7 @@ def _entry(tool: CatalogTool, prompt: ToolPrompt) -> CatalogEntry:
         notice=prompt.notice,
         result_drop=tuple(prompt.result_drop),
         default_days=prompt.default_days,
+        target_fields=tuple(prompt.target_fields),
     )
 
 
