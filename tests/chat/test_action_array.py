@@ -422,7 +422,7 @@ def test_관찰_기록_결과는_사진_칸_없이도_저장하고_사진_값은
     canceled = action_result(client, room, "draft_observation_cycle", "CANCELED", {})
 
     assert res.status_code == again.status_code == canceled.status_code == 201
-    assert res.json()["data"]["cnvrsCn"] == "✔ 관찰 기록 추가 — 09-29(화) 09:00 · 1.2"
+    assert res.json()["data"]["cnvrsCn"] == "✔ 관찰 기록 추가 — 09-29(화) 09:00 · 1.2cm"
     assert canceled.json()["data"]["cnvrsCn"] == "취소됨 — 관찰 기록 추가 · 저장하지 않았어요."
 
 

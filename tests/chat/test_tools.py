@@ -585,3 +585,17 @@ def test_도구_system에는_채팅_확인_규칙이_들어가고_확인_버튼_
     assert clients.CHAT_CONFIRM_RULE in system
     assert "'수정해 줘'" in clients.CHAT_CONFIRM_RULE
     assert "[확인]을 누르" not in system
+
+
+# 사람 확인 피드백 2차 (2026-11-25) : 대표 용어·뜻 없는 글자가 섞인 포인트
+def test_반려동물_캐릭터_도구_설명에는_대표_반려동물_용어_규칙이_들어간다():
+    defs = {d["name"]: d["description"] for d in tools.tool_definitions()}
+    for name in ("list_pets", "get_pet", "list_pixel_characters", "list_shop_items"):
+        assert "'대표 캐릭터'라고 하지 않는다" in defs[name], name
+    assert "[픽셀 캐릭터 관리] 화면에서 바꾼다" in defs["list_pets"]
+
+
+def test_포인트_한_마디와_뜻_없는_글자_예시가_도구_설명에_있다():
+    defs = {d["name"]: d["description"] for d in tools.tool_definitions()}
+    assert '"ㄹㄹ 포인트"' in defs["get_points"]
+    assert '"ㄹㄹ 포인트"는 get_points' in defs["decline"]

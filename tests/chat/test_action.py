@@ -302,7 +302,7 @@ def test_키워드에_걸린_문장은_도구_고르기가_실패하면_그_행�
                 "rcdDt": "2026-09-29T08:30:00",
                 "rcdNvl": 4.2,
             },
-            "✔ 건강 일지 기록 — 체중 · 09-29(화) 08:30 · 4.2",
+            "✔ 건강 일지 기록 — 체중 · 09-29(화) 08:30 · 4.2kg",
         ),
         ("draft_expense_limit", {"mmExpndLimAmt": 300000}, "✔ 월 지출 한도 설정 — 300,000"),
         ("draft_care_completion", {"petSn": CHOCO, "careArtclSn": 7}, "✔ 케어 완료 체크"),

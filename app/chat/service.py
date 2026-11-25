@@ -6,6 +6,7 @@ import time
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime
+from decimal import ROUND_HALF_UP, Decimal
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel
@@ -166,6 +167,21 @@ ACTION_ASK_MISSING_UNNAMED_NO = "{no}번 카드에 빈 칸이 있어요. 말로 
 PET_LABEL = "반려동물"
 ACTION_ASK_CONFIRM = "맞으면 '등록해 줘'라고 말해 주세요. 바꿀 내용은 말로 알려 주시면 고칠게요."
 ACTION_EXECUTE_MESSAGE = "등록할게요."
+# 사진(file) 칸만 빈 카드의 확인 말 (2026-11-24 LJS 결정) : 버튼을 말하지 않고 사진은 카드에서
+# lesion-card(React가 분석한 사진을 붙임)와 대화로 만든 관찰 카드(회원이 올림)에 같이 맞는 글
+ACTION_EXECUTE_PHOTO_MESSAGE = "사진과 함께 등록할게요. 사진이 없으면 카드에서 올려 주세요."
+# 카드 턴 : 사진 칸이 빈 카드의 안내 줄(카드 여럿이면 번호)
+ACTION_ASK_PHOTO = "사진은 카드에서 올려 주세요."
+ACTION_ASK_PHOTO_NO = "{no}번 사진은 카드에서 올려 주세요."
+# 카드 턴 : 회원이 말한 수가 Java 소수 자리보다 길어 반올림했을 때 (2026-11-25 SJM 피드백)
+ACTION_ROUNDED = "소수 {place} 자리까지라 {value}로 적을게요."
+DECIMAL_PLACES = {1: "첫째", 2: "둘째", 3: "셋째"}
+# 카드 요약의 수치 단위 : 같은 카드의 코드 칸 이름으로(코드 값은 쓰지 않음)
+# tool_prompts.yaml 답변 단위와 같음
+VALUE_UNITS = {"체중": "kg", "식사량": "g", "음수량": "ml", "산책": "분"}
+# 실행 실패(Java 400 칸 오류) : Java 칸 이름·Java 문구 대신 칸 표시 이름으로 (2026-11-25)
+ACTION_FAILED_FIX = "{names} 다시 확인해 주세요."
+ACTION_FAILED_FIX_UNNAMED = "입력값을 다시 확인해 주세요."
 ACTION_DROP_MESSAGE = "등록하지 않았어요."
 # 한 메시지 여러 명령 ② (2026-11-19) : 한 메시지 확인 카드 최대 수(READ 상한과 같음)
 ACTION_MAX_CARDS = 3
@@ -447,10 +463,12 @@ def _tool_judged(
     call = decision.call
     if call is None:
         if decision.text is not None:
-            # FN-AIM-002-03 : 인사·잡담에 대한 바로 답은 고지 없음(추가 요청 2026-11-09)
-            notice = not rules.is_small_talk(text)
+            # FN-AIM-002-03 : 인사·잡담에 대한 바로 답은 고지 없음(추가 요청 2026-11-09),
+            # 건강 말이 없는 바로 답("오늘 날씨 어때?")도 고지 없음(2026-11-25)
+            talk = rules.is_small_talk(text)
+            notice = not talk and rules.is_health_topic(text)
             # FN-AIM-002-04 : 질문 글이 룰 키워드에 걸리면 그 행을 바로가기로, 인사·잡담 제외
-            shortcut = _keyword_shortcut(text) if notice else None
+            shortcut = _keyword_shortcut(text) if not talk else None
             return Judged(
                 Intent(kind=IntentKind.SEARCH), shortcut, stream=decision.text, notice=notice
             )
@@ -1247,7 +1265,7 @@ async def _run_turn(
         elif kind is IntentKind.ACTION and register is not None:
             cards = await _action_reply(text, turn, judged, register)
             # 카드 요약을 글로 저장 : 모달 대신 채팅으로 확인, 다음 턴 맥락에도 남음 (2026-11-13)
-            saved = await _save(repo, turn.room_sn, action_ask_message(cards), True)
+            saved = await _save(repo, turn.room_sn, action_ask_message(cards, text), True)
             emit(("done", AnswerDone(message=saved, action=cards[0], actions=cards)))
         else:
             # RECEIPT는 SCR-AIM-013에서 잇는다
@@ -1848,20 +1866,101 @@ def action_summary(card: ActionCard) -> str:
     if entry is None:
         return label
     values = {name: value for name, value in card.values.items() if value is not None}
-    clock = values.get(catalog.HR_INPUT) is not False
-    parts = [
-        _input_text(param, values[name], clock, _count_word(entry.name, name))
-        for name, param in entry.params.items()
-        if name in values and name not in entry.fixed and _summarized(name, param)
-    ]
-    parts = [part for part in parts if part]
+    parts = _value_parts(entry, values)
     head = f"{card.pet_nm} " if card.pet_nm else ""
     return f"{head}{label}" + (f" — {' · '.join(parts)}" if parts else "")
 
 
-def action_ask_message(card: ActionCard | list[ActionCard]) -> str:
-    """확인 카드 턴의 저장 글 : 요약 + 빈 칸 안내 또는 확인 말 안내
-    - 카드가 둘 이상이면 번호 붙은 요약 줄, 빈 칸은 카드 번호로 (여러 명령 ②)"""
+def _value_parts(entry: "catalog.CatalogEntry", values: dict) -> list[str]:
+    # 카드·결과 요약의 값 글 : 번호·petSn·참거짓·파일·고정 칸 빼고, 수치(decimal)에는 단위
+    clock = values.get(catalog.HR_INPUT) is not False
+    unit = _value_unit(entry, values)
+    parts: list[str] = []
+    for name, param in entry.params.items():
+        if name not in values or name in entry.fixed or not _summarized(name, param):
+            continue
+        text = _input_text(param, values[name], clock, _count_word(entry.name, name))
+        if text and param.type == "decimal":
+            text += unit or _param_unit(entry, name)
+        if text:
+            parts.append(text)
+    return parts
+
+
+def _value_unit(entry: "catalog.CatalogEntry", values: dict) -> str:
+    # 같은 카드의 코드 칸 이름(체중·식사량 등) -> 수치 단위, 모르면 빈 글
+    for name, param in entry.params.items():
+        if param.type != "code" or values.get(name) is None:
+            continue
+        nm = next((code.nm for code in param.codes or () if code.cd == values[name]), None)
+        if nm in VALUE_UNITS:
+            return VALUE_UNITS[nm]
+    return ""
+
+
+_PARAM_UNIT = re.compile(r"(?<![A-Za-z])(kg|ml|cm)(?![A-Za-z])")
+
+
+def _param_unit(entry: "catalog.CatalogEntry", java: str) -> str:
+    # 코드 칸이 없는 수치 칸(등록 몸무게 petBdwg 등) : LLM 칸 설명의 단위("kg 숫자만")
+    prompt = catalog.tool_prompts().get(entry.name)
+    llm = next((name for name, to in entry.to_java_name.items() if to == java), None)
+    if prompt is None or llm is None or llm not in prompt.params:
+        return ""
+    found = _PARAM_UNIT.search(prompt.params[llm].description)
+    return found.group(1) if found else ""
+
+
+def _photo_missing(card: ActionCard) -> bool:
+    # 사진(file) 칸이 빈 카드 : React가 카드에 붙일 칸
+    return any(m in card.params and card.params[m].type == catalog.FILE for m in card.missing)
+
+
+def _photo_lines(cards: list[ActionCard]) -> list[str]:
+    if len(cards) == 1:
+        return [ACTION_ASK_PHOTO] if _photo_missing(cards[0]) else []
+    return [
+        ACTION_ASK_PHOTO_NO.format(no=no)
+        for no, item in enumerate(cards, start=1)
+        if _photo_missing(item)
+    ]
+
+
+_SAID_DECIMAL = re.compile(r"\d+\.\d+")
+
+
+def _rounded_lines(cards: list[ActionCard], said: str) -> list[str]:
+    # 회원이 말한 수(4.567)가 Java 소수 자리(scale)보다 길어 카드 값(4.57)으로 반올림됐으면 알림
+    numbers = [Decimal(n) for n in _SAID_DECIMAL.findall(said)]
+    lines: list[str] = []
+    for card in cards:
+        entry = tools.card_entry(card.tool)
+        if entry is None:
+            continue
+        unit = _value_unit(entry, card.values)
+        for name, param in entry.params.items():
+            value = card.values.get(name)
+            scale = param.scale
+            if param.type != "decimal" or scale is None or not isinstance(value, (int, float)):
+                continue
+            step = Decimal(1).scaleb(-scale)
+            rounded = any(
+                -n.as_tuple().exponent > scale
+                and n.quantize(step, rounding=ROUND_HALF_UP) == Decimal(str(value))
+                for n in numbers
+            )
+            if rounded and scale in DECIMAL_PLACES:
+                shown = f"{value:g}{unit or _param_unit(entry, name)}"
+                line = ACTION_ROUNDED.format(place=DECIMAL_PLACES[scale], value=shown)
+                if line not in lines:
+                    lines.append(line)
+    return lines
+
+
+def action_ask_message(card: ActionCard | list[ActionCard], said: str = "") -> str:
+    """확인 카드 턴의 저장 글 : 요약 + 반올림·사진 안내 + 빈 칸 안내 또는 확인 말 안내
+    - 카드가 둘 이상이면 번호 붙은 요약 줄, 빈 칸은 카드 번호로 (여러 명령 ②)
+    - said : 회원이 이 턴에 한 말(반올림 알림용)"""
     cards = card if isinstance(card, list) else [card]
     if len(cards) == 1:
         summary = action_summary(cards[0])
@@ -1871,6 +1970,8 @@ def action_ask_message(card: ActionCard | list[ActionCard]) -> str:
             for no, item in enumerate(cards, start=1)
         )
     lines = [ACTION_ASK_TEMPLATE.format(summary=summary)]
+    lines += _rounded_lines(cards, said)
+    lines += _photo_lines(cards)
     missing = _missing_lines(cards)
     lines.extend(missing or [_worded(ACTION_ASK_CONFIRM, cards)])
     return "\n".join(lines)
@@ -1941,15 +2042,19 @@ def _said_missing(card: ActionCard) -> list[str]:
 
 
 def _missing_names(card: ActionCard) -> list[str]:
-    # 빈 Java 칸 -> 도구 설명의 LLM 칸 설명 앞부분("기록 날짜"). 설명이 없으면 이름을 빼고
+    return _field_names(card.tool, _said_missing(card))
+
+
+def _field_names(tool: str, fields: Sequence[str]) -> list[str]:
+    # Java 칸 -> 도구 설명의 LLM 칸 설명 앞부분("기록 날짜"). 설명이 없으면 이름을 빼고
     # Java 칸 이름은 보이지 않는다. date hook이 만드는 칸(hrInptYn)은 날짜 칸 이름으로 합침
-    entry = tools.card_entry(card.tool)
-    prompt = catalog.tool_prompts().get(card.tool)
+    entry = tools.card_entry(tool)
+    prompt = catalog.tool_prompts().get(tool)
     by_java = {java: name for name, java in entry.to_java_name.items()} if entry else {}
     roles = entry.hook_roles if entry else {}
     ymd = next((name for name, role in roles.items() if role == "date:ymd"), None)
     names: list[str] = []
-    for java in _said_missing(card):
+    for java in fields:
         if java == catalog.PET_SN:
             names.append(PET_LABEL)
             continue
@@ -1971,9 +2076,18 @@ def _missing_names(card: ActionCard) -> list[str]:
 def _names_subject(names: list[str]) -> str:
     # "기록 날짜, 반려동물" + 이/가 (마지막 글자 받침 기준)
     joined = ", ".join(names)
-    last = joined[-1] if joined else ""
-    batchim = "가" <= last <= "힣" and (ord(last) - ord("가")) % 28 != 0
-    return joined + ("이" if batchim else "가")
+    return joined + ("이" if _batchim(joined) else "가")
+
+
+def _names_object(names: list[str]) -> str:
+    # "수치" + 을/를
+    joined = ", ".join(names)
+    return joined + ("을" if _batchim(joined) else "를")
+
+
+def _batchim(text: str) -> bool:
+    last = text[-1] if text else ""
+    return "가" <= last <= "힣" and (ord(last) - ord("가")) % 28 != 0
 
 
 async def _action_answer(
@@ -2002,7 +2116,10 @@ async def _action_answer(
         emit(("done", AnswerDone(message=saved, action=cards[0], actions=cards)))
         return
     logger.info("확인 카드 실행 지시: %s", ", ".join(card.tool for card in cards))
-    execute = ACTION_EXECUTE_MESSAGE.replace(ACTION_VERB_ADD, verb)
+    photo = any(_photo_missing(card) for card in cards)
+    execute = (ACTION_EXECUTE_PHOTO_MESSAGE if photo else ACTION_EXECUTE_MESSAGE).replace(
+        ACTION_VERB_ADD, verb
+    )
     saved = await _save(repo, turn.room_sn, execute, True)
     done = AnswerDone(message=saved, action=cards[0], actions=cards, execute=True)
     emit(("done", done))
@@ -2066,7 +2183,14 @@ def _input_text(
 def action_result_message(request: ActionResultRequest, head: Sequence[str] = ()) -> str:
     # 확인 카드 결과 요약 : 도구 표시 이름 + input(번호 칸·참거짓 제외). 저장 글은 서버가 정함
     entry, values = _result_values(request)
-    return _result_text(request.status, entry, values, head)
+    return _result_text(request.status, entry, values, head, _error_fields(request))
+
+
+def _error_fields(request: ActionResultRequest) -> list[str]:
+    # FAILED의 Java 400 칸 오류(React가 data를 그대로) : 칸 이름만 쓰고 Java 문구는 버림
+    if request.status is not ActionStatus.FAILED:
+        return []
+    return [error.field for error in request.errors]
 
 
 def _result_values(request: ActionResultRequest) -> tuple["catalog.CatalogEntry", dict]:
@@ -2089,23 +2213,26 @@ def _result_values(request: ActionResultRequest) -> tuple["catalog.CatalogEntry"
 
 
 def _result_text(
-    status: ActionStatus, entry: "catalog.CatalogEntry", values: dict, head: Sequence[str]
+    status: ActionStatus,
+    entry: "catalog.CatalogEntry",
+    values: dict,
+    head: Sequence[str],
+    errors: Sequence[str] = (),
 ) -> str:
     # DONE "✔ <label> — <요약>", CANCELED·FAILED "<말> — <label> · <요약> · <끝말>"
     # (요약이 없으면 label만)
     label = entry.label or entry.name
-    clock = values.get(catalog.HR_INPUT) is not False
-    texts = (
-        _input_text(param, values[name], clock, _count_word(entry.name, name))
-        for name, param in entry.params.items()
-        if name in values and name not in entry.fixed and _summarized(name, param)
-    )
-    parts = [*head, *(text for text in texts if text)]
+    parts = [*head, *_value_parts(entry, values)]
     summary = " · ".join(parts)
     if status is ActionStatus.CANCELED:
         return ACTION_CANCELED_MESSAGE.format(label=f"{label} · {summary}" if parts else label)
     if status is ActionStatus.FAILED:
-        return ACTION_FAILED_MESSAGE.format(label=f"{label} · {summary}" if parts else label)
+        failed = ACTION_FAILED_MESSAGE.format(label=f"{label} · {summary}" if parts else label)
+        if not errors:
+            return failed
+        names = _field_names(entry.name, errors)
+        fix = ACTION_FAILED_FIX.format(names=_names_object(names)) if names else None
+        return f"{failed} {fix or ACTION_FAILED_FIX_UNNAMED}"
     return f"✔ {label}" + (f" — {summary}" if parts else "")
 
 
@@ -2132,7 +2259,7 @@ async def save_action_result(
     head = []
     if entry.name == INSPECTION_TOOL:
         head = await _inspection_head(reader, contexts, values)
-    text = _result_text(request.status, entry, values, head)
+    text = _result_text(request.status, entry, values, head, _error_fields(request))
     return await repo.add_message(room_sn, ROLE_AI, text)
 
 
