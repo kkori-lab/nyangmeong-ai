@@ -278,11 +278,19 @@ class ActionStatus(StrEnum):
     FAILED = "FAILED"  # Java 실행 실패
 
 
+class ActionFieldError(_Camel):
+    # Java 400 data의 한 줄 {field, message} : Python은 field만 쓴다(message는 Java 문구라 안 보임)
+    field: str = Field(min_length=1, max_length=200)
+    message: str | None = Field(default=None, max_length=1000)
+
+
 class ActionResultRequest(_Camel):
     # 확인 카드 결과 텍스트 요약 저장 : 요약 글은 Python이 도구 표시 이름과 input으로 만듦
     tool: str = Field(min_length=1, max_length=64)
     status: ActionStatus
     values: dict[str, Any] = Field(default_factory=dict, alias="input")
+    # FAILED 때 Java 400 칸 오류(선택, 2026-11-25) : 저장 글에 칸 표시 이름으로 "다시 확인"
+    errors: list[ActionFieldError] = Field(default_factory=list, max_length=50)
 
 
 class ReceiptResult(StrEnum):

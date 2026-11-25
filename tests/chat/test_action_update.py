@@ -268,7 +268,7 @@ def test_숫자_12자리나_15자리_인식칩_번호는_카드에_싣고_결과
             {"expndSn": 501, "expndAmt": 32000, "expndClsfCd": FOOD},
             "✔ 지출 수정 — 사료 · 32,000",
         ),
-        ("draft_pet_update", {"petSn": CHOCO, "goalBdwg": 4.0}, "✔ 반려동물 정보 수정 — 4"),
+        ("draft_pet_update", {"petSn": CHOCO, "goalBdwg": 4.0}, "✔ 반려동물 정보 수정 — 4kg"),
         # 바꾼 칸이 없으면 이름만
         ("draft_schedule_update", {"petSn": CHOCO, "schdlSn": 31}, "✔ 일정 수정"),
     ],
