@@ -1237,3 +1237,435 @@ decline:
   params:
     unclear:
       description: 뜻을 알 수 없는 입력이면 true, 범위 밖 질문이면 false
+
+# 수정·삭제 도구 (SCR-AIM-012 2단계, 2026-11-25 LJS 결정 : 삭제도 확인 카드로)
+# - target_fields : 삭제 카드의 대상 글(targetText)에 쓸 READ 결과 행의 Java 칸. "칸:단위"는 값 뒤 단위,
+#   "번호칸>칸"은 그 번호의 다른 READ 행에서 칸을 읽음. 코드 칸은 이름(…Nm 칸 또는 도구 목록 코드)으로
+
+draft_daily_health_record_update:
+  label: 건강 일지 수정
+  target: 건강 일지 기록
+  hooks: [pet, date]
+  description: |
+    이미 있는 건강 일지 기록(체중·식사량·음수량·배변상태·산책) 하나를 고치는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 이미 적은 일지 기록의 수치·상태·시간을 바꿔 달라는 말.
+      예) "어제 체중 4.57로 바꿔줘", "오늘 아침 산책 기록 40분으로 고쳐 줘", "배변 기록 정상으로 바꿔 줘"
+    쓰지 않을 때: 새 기록을 넣는 말은 draft_daily_health_record. 반려동물 정보의 등록 몸무게를 바꾸는 말
+      ("탄이 몸무게 정보 바꿔 줘")은 draft_pet_update. 기록을 지우는 말은 delete_daily_health_record.
+    인자: daily_hlth_rcd_sn은 이 턴에 받은 list_daily_health_records 결과의 dailyHlthRcdSn만 쓴다. 결과가 없으면
+      list_daily_health_records를 먼저 부른다. 바꾸지 않는 칸은 비운다(말한 칸만 채운다).
+      수치는 단위 없이 숫자만 쓴다. 날짜만 바꾸면 시간은 읽기 결과의 원래 시간을 쓴다.
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    daily_hlth_rcd_sn:
+      java: dailyHlthRcdSn
+      description: 고칠 건강 일지 기록 번호. 이 턴 list_daily_health_records 결과의 dailyHlthRcdSn만, 모르면 비운다
+    rcd_ymd:
+      hook: date:ymd
+      description: 바꿀 기록 날짜 YYYY-MM-DD. 날짜·시간을 바꾸지 않으면 비운다
+    rcd_tm:
+      hook: date:tm
+      description: 바꿀 기록 시간 24시간 HH:MM. 말하지 않았으면 비운다
+    rcd_nvl:
+      java: rcdNvl
+      description: 바꿀 체중·식사량·음수량·산책의 수치(숫자만, 체중은 kg)
+    crsd_stts_cd:
+      java: crsdSttsCd
+      description: 바꿀 배변상태
+
+draft_checkup_update:
+  label: 검진기록 수정
+  target: 검진기록
+  hooks: [pet]
+  description: |
+    이미 있는 검진기록 하나를 고치는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 검진기록의 병원 이름·검진유형·진료 내용·메모를 바꿔 달라는 말.
+      예) "지난 검진 병원 이름 메이 동물병원으로 고쳐 줘", "어제 진료 내용에 귀 염증 적어 줘"
+    쓰지 않을 때: 검진 날짜를 바꾸는 말은 연결된 일정을 고치는 draft_schedule_update(검진기록에서는 날짜를 못 바꾼다).
+      검진기록을 지우는 말은 delete_checkup.
+    인자: ckup_rcd_sn은 이 턴에 받은 list_checkups 결과의 ckupRcdSn만 쓴다. 결과가 없으면
+      list_checkups를 먼저 부른다. 바꾸지 않는 칸은 비운다(말한 칸만 채운다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    ckup_rcd_sn:
+      java: ckupRcdSn
+      description: 고칠 검진기록 번호. 이 턴 list_checkups 결과의 ckupRcdSn만, 모르면 비운다
+    hsptl_nm:
+      java: hsptlNm
+      description: 바꿀 병원 이름
+    ckup_type_cd:
+      java: ckupTypeCd
+      description: 바꿀 검진유형
+    ckup_cn:
+      java: ckupCn
+      description: 바꿀 진료 내용
+    ckup_memo_cn:
+      java: ckupMemoCn
+      description: 바꿀 메모
+
+draft_prescription_update:
+  label: 처방약 수정
+  target: 처방약
+  hooks: [pet]
+  description: |
+    이미 있는 처방약 하나를 고치는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 처방약의 이름·복용 기간·하루 횟수·복용 상태를 바꿔 달라는 말.
+      예) "항생제 이틀 더 먹이게 종료일 바꿔 줘", "심장약 하루 두 번으로 고쳐 줘", "그 약 다 먹였어 복용 끝으로 바꿔 줘"
+    쓰지 않을 때: 약을 묻기만 하는 말은 list_prescriptions. 처방약을 지우는 말은 delete_prescription.
+    인자: prsc_sn은 이 턴에 받은 list_prescriptions 결과의 prscSn만 쓴다. 결과가 없으면
+      list_prescriptions를 먼저 부른다. 바꾸지 않는 칸은 비운다(말한 칸만 채운다).
+      날짜는 시스템의 오늘 날짜 기준으로 계산한다.
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    prsc_sn:
+      java: prscSn
+      description: 고칠 처방약 번호. 이 턴 list_prescriptions 결과의 prscSn만, 모르면 비운다
+    mdcn_nm:
+      java: mdcnNm
+      description: 바꿀 약 이름
+    mdcn_bgng_ymd:
+      java: mdcnBgngYmd
+      description: 바꿀 복용 시작일 YYYY-MM-DD
+    mdcn_end_ymd:
+      java: mdcnEndYmd
+      description: 바꿀 복용 종료일 YYYY-MM-DD
+    day_mdcn_nmtm:
+      java: dayMdcnNmtm
+      description: 바꿀 하루 복용 횟수(숫자만)
+    prsc_stts_cd:
+      java: prscSttsCd
+      description: 바꿀 복용 상태
+
+draft_etc_inspection_update:
+  label: 기타검사 수정
+  target: 기타검사
+  hooks: [pet]
+  description: |
+    이미 있는 기타검사 기록(영상·소변 등 수치 아닌 검사) 하나를 고치는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 기타검사의 검사 이름·결과·메모를 바꿔 달라는 말.
+      예) "엑스레이 결과 이상 없음으로 고쳐 줘", "소변검사 메모 지워진 거 다시 적어 줘"
+    쓰지 않을 때: 혈액검사 수치를 바꾸는 말은 draft_inspection_value_update. 기타검사를 지우는 말은 delete_etc_inspection.
+    인자: etc_insp_sn은 이 턴에 받은 list_etc_inspections 결과의 etcInspSn만 쓴다. 결과가 없으면
+      list_etc_inspections를 먼저 부른다. 바꾸지 않는 칸은 비운다(말한 칸만 채운다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    etc_insp_sn:
+      java: etcInspSn
+      description: 고칠 기타검사 번호. 이 턴 list_etc_inspections 결과의 etcInspSn만, 모르면 비운다
+    insp_nm:
+      java: inspNm
+      description: 바꿀 검사 이름
+    insp_rslt_cn:
+      java: inspRsltCn
+      description: 바꿀 검사 결과
+    memo_cn:
+      java: memoCn
+      description: 바꿀 메모
+
+draft_inspection_value_update:
+  label: 검사 수치 수정
+  target: 검사 수치
+  hooks: [pet]
+  description: |
+    이미 있는 혈액검사 수치 한 항목 하나를 고치는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 저장된 검사 수치 한 항목의 결과 값·단위·메모를 바꿔 달라는 말.
+      예) "지난 검사 BUN 수치 25로 고쳐 줘", "크레아티닌 단위 mg/dL로 바꿔 줘"
+    쓰지 않을 때: 수치를 묻기만 하는 말은 list_inspection_values. 참고범위는 바꾸지 못한다(검진 상세 화면에서).
+    인자: insp_nvl_sn은 이 턴에 받은 list_inspection_values 결과의 inspNvlSn만 쓴다. 결과가 없으면
+      list_inspection_values를 먼저 부른다. 바꾸지 않는 칸은 비운다(말한 칸만 채운다).
+      수치는 단위 없이 숫자만 쓴다.
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    insp_nvl_sn:
+      java: inspNvlSn
+      description: 고칠 검사 수치 번호. 이 턴 list_inspection_values 결과의 inspNvlSn만, 모르면 비운다
+    rslt_nvl:
+      java: rsltNvl
+      description: 바꿀 결과 수치(숫자만)
+    unit_nm:
+      java: unitNm
+      description: 바꿀 단위
+    memo_cn:
+      java: memoCn
+      description: 바꿀 메모
+
+draft_observation_cycle_update:
+  label: 관찰 기록 수정
+  target: 관찰 기록
+  hooks: [pet, date]
+  description: |
+    이미 있는 관찰 기록(관찰 항목의 한 회차) 하나를 고치는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 관찰 기록의 크기·변화·메모·시간을 바꿔 달라는 말.
+      예) "어제 관찰 기록 크기 1.5cm로 고쳐 줘", "그 관찰 기록 변화 없음으로 바꿔 줘"
+    쓰지 않을 때: 새 관찰 기록을 더하는 말은 draft_observation_cycle. 관찰 기록을 지우는 말은 delete_observation_cycle.
+    인자: obsrv_cycl_sn은 이 턴에 받은 list_observation_cycles 결과의 obsrvCyclSn만 쓴다. 결과가 없으면
+      list_observation_cycles를 먼저 부른다. 바꾸지 않는 칸은 비운다(말한 칸만 채운다).
+      크기는 단위 없이 숫자만(cm). 사진은 다루지 않는다(회원이 카드에서 바꾼다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    obsrv_cycl_sn:
+      java: obsrvCyclSn
+      description: 고칠 관찰 기록 번호. 이 턴 list_observation_cycles 결과의 obsrvCyclSn만, 모르면 비운다
+    obsrv_ymd:
+      hook: date:ymd
+      description: 바꿀 관찰 날짜 YYYY-MM-DD. 날짜·시간을 바꾸지 않으면 비운다
+    obsrv_tm:
+      hook: date:tm
+      description: 바꿀 관찰 시간 24시간 HH:MM. 말하지 않았으면 비운다
+    obsrv_sz:
+      java: obsrvSz
+      description: 바꿀 크기(숫자만, cm)
+    obsrv_chg_cd:
+      java: obsrvChgCd
+      description: 바꿀 크기 변화
+    memo_cn:
+      java: memoCn
+      description: 바꿀 메모
+
+delete_schedule:
+  label: 일정 삭제
+  target: 일정
+  hooks: [pet]
+  target_fields: [schdlDt, schdlKndCd, schdlNm, hsptlNm]
+  description: |
+    이미 있는 캘린더 일정 하나를 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 일정을 지우거나 없애 달라는 말, 예약을 취소했으니 일정을 빼 달라는 말.
+      예) "다음 주 미용 일정 지워 줘", "병원 예약 취소됐어 일정 삭제해 줘"
+    쓰지 않을 때: 날짜를 미루거나 바꾸는 말은 draft_schedule_update. 일정을 묻기만 하는 말은 list_my_care_schedules.
+    인자: schdl_sn은 이 턴에 받은 list_my_care_schedules 결과의 schdlSn만 쓴다. 결과가 없으면
+      list_my_care_schedules를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    schdl_sn:
+      java: schdlSn
+      description: 지울 일정 번호. 이 턴 list_my_care_schedules 결과의 schdlSn만, 모르면 비운다
+
+delete_care_item:
+  label: 케어 항목 삭제
+  target: 케어 항목
+  hooks: [pet]
+  target_fields: [careArtclNm, careCycleCd]
+  description: |
+    이미 있는 반복 케어 항목 하나를 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 케어 항목을 목록에서 지우거나 더 안 한다고 빼 달라는 말.
+      예) "발톱 깎기 항목 삭제해 줘", "양치 케어 항목 이제 없애 줘"
+    쓰지 않을 때: 주기·이름을 바꾸는 말은 draft_care_item_update. 오늘 체크한 것을 되돌리는 말은 cancel_care_completion.
+    인자: care_artcl_sn은 이 턴에 받은 list_care_items 결과의 careArtclSn만 쓴다. 결과가 없으면
+      list_care_items를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    care_artcl_sn:
+      java: careArtclSn
+      description: 지울 케어 항목 번호. 이 턴 list_care_items 결과의 careArtclSn만, 모르면 비운다
+
+cancel_care_completion:
+  label: 케어 완료 취소
+  target: 케어 완료 기록
+  hooks: [pet]
+  target_fields: [careArtclSn>careArtclNm, cmptnYmd]
+  description: |
+    이미 있는 케어 완료 체크 기록 하나를 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 잘못 체크한 케어 완료를 되돌려 달라는 말.
+      예) "오늘 산책 완료 체크 취소해 줘", "어제 양치 했다고 잘못 눌렀어 지워 줘"
+    쓰지 않을 때: 케어 항목 자체를 없애는 말은 delete_care_item. 했다고 체크하는 말은 draft_care_completion.
+    인자: care_cmptn_hstry_sn은 이 턴에 받은 list_care_completions 결과의 careCmptnHstrySn만 쓴다. 결과가 없으면
+      list_care_completions를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    care_cmptn_hstry_sn:
+      java: careCmptnHstrySn
+      description: 지울 케어 완료 기록 번호. 이 턴 list_care_completions 결과의 careCmptnHstrySn만, 모르면 비운다
+
+delete_daily_health_record:
+  label: 건강 일지 삭제
+  target: 건강 일지 기록
+  hooks: [pet]
+  target_fields: [rcdDt, dailyRcdIdctCd, rcdNvl, crsdSttsCd]
+  description: |
+    이미 있는 건강 일지 기록 하나를 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 잘못 적은 체중·식사량·음수량·배변·산책 기록을 지워 달라는 말.
+      예) "어제 체중 기록 지워 줘", "오늘 산책 기록 잘못 넣었어 삭제해 줘"
+    쓰지 않을 때: 값을 고치는 말은 draft_daily_health_record_update. 기록을 묻기만 하는 말은 list_daily_health_records.
+    인자: daily_hlth_rcd_sn은 이 턴에 받은 list_daily_health_records 결과의 dailyHlthRcdSn만 쓴다. 결과가 없으면
+      list_daily_health_records를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    daily_hlth_rcd_sn:
+      java: dailyHlthRcdSn
+      description: 지울 건강 일지 기록 번호. 이 턴 list_daily_health_records 결과의 dailyHlthRcdSn만, 모르면 비운다
+
+delete_checkup:
+  label: 검진기록 삭제
+  target: 검진기록
+  hooks: [pet]
+  target_fields: [ckupYmd, hsptlNm, ckupTypeCd]
+  description: |
+    이미 있는 검진기록 하나를 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 검진기록을 지워 달라는 말.
+      예) "지난달 검진기록 잘못 만들었어 지워 줘", "메이 동물병원 검진기록 삭제해 줘"
+    쓰지 않을 때: 병원·내용을 고치는 말은 draft_checkup_update. 검진기록을 묻기만 하는 말은 list_checkups.
+    인자: ckup_rcd_sn은 이 턴에 받은 list_checkups 결과의 ckupRcdSn만 쓴다. 결과가 없으면
+      list_checkups를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    ckup_rcd_sn:
+      java: ckupRcdSn
+      description: 지울 검진기록 번호. 이 턴 list_checkups 결과의 ckupRcdSn만, 모르면 비운다
+
+delete_prescription:
+  label: 처방약 삭제
+  target: 처방약
+  hooks: [pet]
+  target_fields: [mdcnNm, mdcnBgngYmd, mdcnEndYmd]
+  description: |
+    이미 있는 처방약 기록 하나를 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 처방약 기록을 지워 달라는 말.
+      예) "항생제 기록 삭제해 줘", "잘못 넣은 약 지워 줘"
+    쓰지 않을 때: 복용 기간·상태를 고치는 말은 draft_prescription_update. 약을 묻기만 하는 말은 list_prescriptions.
+    인자: prsc_sn은 이 턴에 받은 list_prescriptions 결과의 prscSn만 쓴다. 결과가 없으면
+      list_prescriptions를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    prsc_sn:
+      java: prscSn
+      description: 지울 처방약 번호. 이 턴 list_prescriptions 결과의 prscSn만, 모르면 비운다
+
+delete_etc_inspection:
+  label: 기타검사 삭제
+  target: 기타검사
+  hooks: [pet]
+  target_fields: [inspNm, inspRsltCn]
+  description: |
+    이미 있는 기타검사 기록 하나를 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 기타검사 기록을 지워 달라는 말.
+      예) "지난 검진 엑스레이 기록 삭제해 줘"
+    쓰지 않을 때: 결과·메모를 고치는 말은 draft_etc_inspection_update.
+    인자: etc_insp_sn은 이 턴에 받은 list_etc_inspections 결과의 etcInspSn만 쓴다. 결과가 없으면
+      list_etc_inspections를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    etc_insp_sn:
+      java: etcInspSn
+      description: 지울 기타검사 번호. 이 턴 list_etc_inspections 결과의 etcInspSn만, 모르면 비운다
+
+delete_observation_cycle:
+  label: 관찰 기록 삭제
+  target: 관찰 기록
+  hooks: [pet]
+  target_fields: [obsrvDt, obsrvSz:cm, obsrvChgCd]
+  description: |
+    이미 있는 관찰 기록(관찰 항목의 한 회차) 하나를 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 관찰 기록 한 회차를 지워 달라는 말.
+      예) "어제 남긴 혹 관찰 기록 지워 줘"
+    쓰지 않을 때: 크기·변화를 고치는 말은 draft_observation_cycle_update. 관찰 기록을 묻기만 하는 말은 list_observation_cycles.
+    인자: obsrv_cycl_sn은 이 턴에 받은 list_observation_cycles 결과의 obsrvCyclSn만 쓴다. 결과가 없으면
+      list_observation_cycles를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    obsrv_cycl_sn:
+      java: obsrvCyclSn
+      description: 지울 관찰 기록 번호. 이 턴 list_observation_cycles 결과의 obsrvCyclSn만, 모르면 비운다
+
+delete_repeat_prevention:
+  label: 반복 예방 삭제
+  target: 반복 예방 항목
+  hooks: [pet]
+  target_fields: [reptPrvntArtclCd, bgngYmd]
+  description: |
+    이미 있는 반복 예방(접종·구충 등) 관리 항목 하나를 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 반복 예방 관리 항목을 지워 달라는 말.
+      예) "심장사상충 반복 예방 항목 삭제해 줘"
+    쓰지 않을 때: 반복 예방을 묻기만 하는 말은 list_repeat_preventions.
+    인자: rept_prvnt_mng_sn은 이 턴에 받은 list_repeat_preventions 결과의 reptPrvntMngSn만 쓴다. 결과가 없으면
+      list_repeat_preventions를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    rept_prvnt_mng_sn:
+      java: reptPrvntMngSn
+      description: 지울 반복 예방 항목 번호. 이 턴 list_repeat_preventions 결과의 reptPrvntMngSn만, 모르면 비운다
+
+delete_expense:
+  label: 지출 삭제
+  target: 지출 기록
+  target_fields: [expndYmd, expndClsfCd, expndAmt:원, expndPlcusNm]
+  description: |
+    이미 있는 가계부 지출 기록 하나를 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 가계부 지출 하나를 지워 달라는 말.
+      예) "어제 사료 산 지출 지워 줘", "중복으로 들어간 병원비 지출 삭제해 줘"
+    쓰지 않을 때: 금액·카테고리를 고치는 말은 draft_expense_update. 지출을 묻기만 하는 말은 list_expenses.
+      여러 지출을 한 번에 지우는 말은 하나씩 고르게 안내한다(한 번에 하나만 지운다).
+    인자: expnd_sn은 이 턴에 받은 list_expenses 결과의 expndSn만 쓴다. 결과가 없으면
+      list_expenses를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    expnd_sn:
+      java: expndSn
+      description: 지울 지출 기록 번호. 이 턴 list_expenses 결과의 expndSn만, 모르면 비운다
+
+delete_place_bookmark:
+  label: 즐겨찾기 삭제
+  target: 즐겨찾기 장소
+  target_fields: [plcConm, plcAddr]
+  description: |
+    이미 있는 장소 즐겨찾기 하나를 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 즐겨찾기한 장소를 빼 달라는 말.
+      예) "메이 동물병원 즐겨찾기 해제해 줘", "그 카페 즐겨찾기에서 지워 줘"
+    쓰지 않을 때: 즐겨찾기를 묻기만 하는 말은 list_place_bookmarks.
+    인자: plc_bkmk_sn은 이 턴에 받은 list_place_bookmarks 결과의 plcBkmkSn만 쓴다. 결과가 없으면
+      list_place_bookmarks를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    plc_bkmk_sn:
+      java: plcBkmkSn
+      description: 지울 즐겨찾기 장소 번호. 이 턴 list_place_bookmarks 결과의 plcBkmkSn만, 모르면 비운다

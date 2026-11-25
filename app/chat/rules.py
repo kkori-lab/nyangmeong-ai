@@ -482,13 +482,34 @@ _DO = (
     r"(등록|수정|변경|저장|추가|기록|체크|완료|진행|그대로)"
     r"(해|해줘|해주세요|해줄래|해요|하자|해주라|ㄱ)?"
 )
-_CONFIRM = re.compile(rf"^(?:{_YES}(?:{_DO})?|{_DO})$")
+# 삭제 카드의 확인 말 (2026-11-25) : 삭제 카드가 없으면 service.py가 확인 말로 보지 않음
+_DEL = (
+    r"(삭제(해|해줘|해주세요|해줄래|해요|하자|ㄱ)?|지워(줘|주세요|줄래|요)?"
+    r"|없애(줘|주세요|줄래)?)"
+)
+_CONFIRM = re.compile(rf"^(?:{_YES}(?:{_DO}|{_DEL})?|{_DO}|{_DEL})$")
+_DELETE_WORD = re.compile(r"삭제|지워|지우|없애")
+_PROCEED_WORD = re.compile(r"진행")
 _NO = r"(아니|아니요|아뇨|아니야)"
 _STOP = (
     r"(취소|취소해|취소해줘|취소해주세요|됐어|됐어요|그만|그만해"
-    r"|하지마|하지마요|안할래|등록하지마|저장하지마|등록안해|안해)"
+    r"|하지마|하지마요|안할래|등록하지마|저장하지마|등록안해|안해|삭제하지마|지우지마|삭제안해)"
 )
 _CANCEL = re.compile(rf"^(?:{_NO}{_STOP}?|{_STOP})$")
+
+
+def _compact_reply(text: str) -> str:
+    return re.sub(r"[\s.!~?ㅎㅋ^]+", "", text)
+
+
+def says_delete(text: str) -> bool:
+    """삭제 동사(삭제·지워·없애)가 든 말 : 삭제 카드는 이 말이어야 실행 (2026-11-25)"""
+    return bool(_DELETE_WORD.search(_compact_reply(text)))
+
+
+def says_proceed(text: str) -> bool:
+    """'진행' 말 : 등록·삭제가 섞인 카드의 확인 말"""
+    return bool(_PROCEED_WORD.search(_compact_reply(text)))
 
 
 def action_reply_kind(text: str) -> str | None:

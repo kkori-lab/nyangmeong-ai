@@ -88,6 +88,8 @@ class ActionDraft(_Camel):
     # 2단계 쓰기 : React가 돌려보낸 가장 최근 확인 카드의 도구와 input(Java 칸 이름)
     tool: str = Field(min_length=1, max_length=64)
     values: dict[str, Any] = Field(default_factory=dict, alias="input")
+    # 삭제 카드의 대상 글(ActionCard.targetText 그대로, 2026-11-25)
+    target_text: str | None = Field(default=None, max_length=200)
 
 
 class MessageSendRequest(_Camel):
@@ -238,6 +240,9 @@ class ActionCard(_Camel):
     pet_nm: str | None = None
     # FN-AIM-012-08 : 같은 이름 케어 항목 안내 문구(케어 항목 등록), 없으면 null
     notice: str | None = None
+    # 삭제 카드(call.method DELETE)의 대상 글 : 이 턴 READ 결과 행으로 Python이 만듦 (2026-11-25)
+    # React는 보여 주고 다음 메시지·action-result에 그대로 돌려보낸다. 없으면 null
+    target_text: str | None = None
 
 
 class AnswerDone(_Camel):
@@ -291,6 +296,8 @@ class ActionResultRequest(_Camel):
     values: dict[str, Any] = Field(default_factory=dict, alias="input")
     # FAILED 때 Java 400 칸 오류(선택, 2026-11-25) : 저장 글에 칸 표시 이름으로 "다시 확인"
     errors: list[ActionFieldError] = Field(default_factory=list, max_length=50)
+    # 삭제 카드의 대상 글(ActionCard.targetText 그대로, 2026-11-25) : 결과 요약에 씀
+    target_text: str | None = Field(default=None, max_length=200)
 
 
 class ReceiptResult(StrEnum):

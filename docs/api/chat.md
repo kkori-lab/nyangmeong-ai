@@ -71,8 +71,8 @@ React가 부르는 `/ai/**` API다. 공통 규칙은 `docs/api/README.md`에 있
 | --- | --- | --- | --- | --- |
 | cnvrsCn | String | N | 보낼 메시지. 공백만 불가, 1~1,000자. 생략·null이면 저장 없이 방의 마지막 사용자 메시지에 답한다 | AIM-011 입력창, AIM-002-07 |
 | draft | RegisterDraft | N | 가장 최근 등록 카드(되물음 포함). React가 `done.card`를 그대로 돌려보낸다(출력 전용 필드는 무시). Python은 초안을 저장하지 않는다 | AIM-012-05·10 |
-| action | `{tool: String, input: Object}` | N | 가장 최근 확인 카드(ACTION)의 `tool`과 `input`(회원이 카드에서 고친 값 포함). `draft`와 따로 둔다(등록 카드 계약 그대로). Python은 카드를 저장하지 않는다. 같은 도구를 다시 고르면 이 `input`이 바탕(Java 규칙 밖 값·목록 밖 칸은 버림) | AIM-012(2단계 쓰기) |
-| actions | `[{tool: String, input: Object}]` | N | 가장 최근 확인 카드 목록(`done.actions` 그대로, 최대 3개, 넘으면 400 `INVALID_REQUEST`). 있으면 `action` 대신 쓴다. 프론트가 옮긴 뒤 `action`은 지운다(2026-11-19 한 메시지 여러 명령 ②) | AIM-012(2단계 쓰기) |
+| action | `{tool: String, input: Object, targetText?: String}` | N | 삭제 카드는 `targetText`도 그대로 돌려보낸다(2026-11-25). 가장 최근 확인 카드(ACTION)의 `tool`과 `input`(회원이 카드에서 고친 값 포함). `draft`와 따로 둔다(등록 카드 계약 그대로). Python은 카드를 저장하지 않는다. 같은 도구를 다시 고르면 이 `input`이 바탕(Java 규칙 밖 값·목록 밖 칸은 버림) | AIM-012(2단계 쓰기) |
+| actions | `[{tool: String, input: Object, targetText?: String}]` | N | 가장 최근 확인 카드 목록(`done.actions` 그대로, 최대 3개, 넘으면 400 `INVALID_REQUEST`). 있으면 `action` 대신 쓴다. 프론트가 옮긴 뒤 `action`은 지운다(2026-11-19 한 메시지 여러 명령 ②) | AIM-012(2단계 쓰기) |
 
 ### MessageEvent
 쓰는 API: POST /ai/conversations/{aiCnvrsRoomSn}/messages (응답 본문)
@@ -129,10 +129,10 @@ RegisterDraft의 필드에 아래가 더해진다. 필수 칸이 모두 찬 경�
 ### ActionCard
 쓰는 API: POST /ai/conversations/{aiCnvrsRoomSn}/messages(`done.action`)
 
-범용 확인 카드(`docs/design/tool-catalog.md` 5절). 2026-11-13부터 모달 대신 채팅으로 확인한다: 카드 내용은 `done.message`의 요약 글로 보이고, 회원이 "등록해 줘"(수정 카드는 "수정해 줘", 2026-11-20)라고 하면 `done.execute`로 실행 지시가 온다(실행 버튼을 말풍선에 같이 둘지는 React가 정한다). `params`는 폼·칸 검사용으로 그대로 준다. `missing`이 비지 않으면 실행하지 않는다. 칸 이름은 Java 요청 DTO 그대로다.
+범용 확인 카드(`docs/design/tool-catalog.md` 5절). 2026-11-13부터 모달 대신 채팅으로 확인한다: 카드 내용은 `done.message`의 요약 글로 보이고, 회원이 "등록해 줘"(수정 카드는 "수정해 줘", 2026-11-20)라고 하면 `done.execute`로 실행 지시가 온다(실행 버튼을 말풍선에 같이 둘지는 React가 정한다). `params`는 폼·칸 검사용으로 그대로 준다. `missing`이 비지 않으면 실행하지 않는다. 칸 이름은 Java 요청 DTO 그대로다. 삭제 카드(2026-11-25, `call.method` DELETE: 일정·케어 항목·케어 완료 취소·건강 일지·검진기록·처방약·기타검사·관찰 기록·반복 예방·지출·즐겨찾기 11개)는 확인 안내가 "맞으면 '삭제해 줘'라고 말해 주세요."이고, "응"·"네"만으로는 실행하지 않고 "지우려면 '삭제해 줘'라고 말해 주세요."를 저장한다(`execute` 없음). "삭제해·지워·없애"가 든 확인 말이면 `execute: true`·"삭제할게요.", 취소 말이면 "삭제하지 않았어요.". 등록·삭제가 섞이면 삭제 동사나 "진행해 줘"로 실행한다. 삭제 카드가 없을 때 "삭제해 줘"는 확인 말이 아니다. 대상 번호를 못 정하면 카드 없이 "지울 <대상>을 찾지 못했어요. 이름이나 날짜를 넣어 다시 말해 주세요.". React는 DELETE를 본문 없이 보낸다.
 | 필드 | 타입 | 필수 | 검증·설명 | 근거 |
 | --- | --- | --- | --- | --- |
-| tool | String | Y | 도구 이름(등록: `draft_schedule` 일정 등록(출처 코드 `schdlSrcCd`는 넣지 않음, Java 기본값)·`draft_care_item` 케어 항목 등록(④부터), `draft_care_completion` 케어 완료 체크·`draft_daily_health_record` 건강 일지 기록·`draft_expense_limit` 월 지출 한도 설정, 수정(PATCH, 바꿀 칸만 `input`에): `draft_schedule_update` 일정 수정·`draft_care_item_update` 케어 항목 수정·`draft_expense_update` 지출 수정·`draft_pet_update` 반려동물 정보 수정, 배열·파일 칸: `draft_expense` 지출 등록(`lines` 줄 하나, `expndInptMthCd`는 직접입력 고정, 문장 속 반려동물 이름이 하나면 `lines[0].petSn`, 아니면 비움)·`draft_observation_cycle` 관찰 기록 추가(사진 `file`은 카드에서 첨부). 2단계 진행에 따라 늘어난다) | Java 도구 목록 `name` |
+| tool | String | Y | 도구 이름(2026-11-25 수정 `draft_daily_health_record_update`·`draft_checkup_update`·`draft_prescription_update`·`draft_etc_inspection_update`·`draft_inspection_value_update`·`draft_observation_cycle_update`, 삭제 `delete_schedule`·`delete_care_item`·`cancel_care_completion`·`delete_daily_health_record`·`delete_checkup`·`delete_prescription`·`delete_etc_inspection`·`delete_observation_cycle`·`delete_repeat_prevention`·`delete_expense`·`delete_place_bookmark` 추가; 등록: `draft_schedule` 일정 등록(출처 코드 `schdlSrcCd`는 넣지 않음, Java 기본값)·`draft_care_item` 케어 항목 등록(④부터), `draft_care_completion` 케어 완료 체크·`draft_daily_health_record` 건강 일지 기록·`draft_expense_limit` 월 지출 한도 설정, 수정(PATCH, 바꿀 칸만 `input`에): `draft_schedule_update` 일정 수정·`draft_care_item_update` 케어 항목 수정·`draft_expense_update` 지출 수정·`draft_pet_update` 반려동물 정보 수정, 배열·파일 칸: `draft_expense` 지출 등록(`lines` 줄 하나, `expndInptMthCd`는 직접입력 고정, 문장 속 반려동물 이름이 하나면 `lines[0].petSn`, 아니면 비움)·`draft_observation_cycle` 관찰 기록 추가(사진 `file`은 카드에서 첨부). 2단계 진행에 따라 늘어난다) | Java 도구 목록 `name` |
 | domain | String | Y | `health`·`expense` 등. 본창 새로고침 대상 | Java 도구 목록 `domain` |
 | label | String | N | 도구 표시 이름(카드 제목) | `data/tool_prompts.yaml` `label` |
 | call | `{method, path, contentType?}` | Y | 실행할 Java 공개 API. `path`의 `{칸}`은 `input`의 같은 칸 값으로 바꾼다. `contentType`은 파일 칸이 있을 때만(`multipart/form-data`, 없으면 키 없음) | Java 도구 목록 `call` |
@@ -143,6 +143,7 @@ RegisterDraft의 필드에 아래가 더해진다. 필수 칸이 모두 찬 경�
 | petChoices | List<`{petSn, petNm, petSeNm?, vrtyNm?}`> | Y | 반려동물을 정하지 못했을 때 이름 칩(양육 반려동물 전부, 문장 속 이름이 여러 마리에 걸렸으면 그 아이들만(같은 이름이면 문장의 품종 이름·종 말 "강아지"·"댕댕이"·"멍멍이"·"고양이"·"냥이"로 먼저 좁힘). `petSeNm`(종 이름)·`vrtyNm`(품종 이름)은 Java가 줄 때만 실림 — 같은 이름 칩을 "까미 (강아지·말티즈)"처럼 구별해 보여 줄 때 쓴다. 같은 이름이라 못 정하면 저장 글은 "까미가 둘이에요. 칩에서 고르거나 '강아지 까미'처럼 알려 주세요.", 카드가 여럿이면 "2번: 까미가 둘이에요. …" 뒤 그 카드의 남은 빈 칸은 "아직 2번의 <칸>이(가) 비어 있어요."(2026-11-23)). 정했거나 반려동물 칸이 없는 도구면 빈 배열 | AIM-012-04 |
 | petNm | String | N | 정한 반려동물 이름 | AIM-012-04 |
 | notice | String | N | 카드 위에 보여 줄 안내 문구. 지금은 케어 항목 등록에서 같은 반려동물에 같은 이름(띄어쓰기 무시)의 케어 항목이 있을 때만 `{petNm}에게 '{이름}' 항목이 이미 있어요. 그래도 새로 등록할까요?`, 없으면 null | AIM-012-08 |
+| targetText | String | N | 삭제 카드(`call.method` DELETE, 2026-11-25)의 대상 글. Python이 같은 턴 읽기 결과의 그 번호 행으로 만든다(예: `09-28(월) 08:30 · 체중 · 4.2kg`, 코드는 이름·날짜는 `MM-DD(요일)`·시간 미입력 일정은 날짜만). 삭제 카드는 고칠 칸이 없어(`params`는 경로 번호뿐) React는 입력 칸 대신 이 글을 보여 주고, 다음 메시지의 `action(s)`와 `action-result`에 그대로 돌려보낸다. 행을 못 찾았거나 삭제 카드가 아니면 null | `data/tool_prompts.yaml` `target_fields` |
 
 ### ActionResultRequest
 쓰는 API: POST /ai/conversations/{aiCnvrsRoomSn}/action-result
@@ -152,6 +153,7 @@ RegisterDraft의 필드에 아래가 더해진다. 필수 칸이 모두 찬 경�
 | status | String | Y | `DONE` 실행 성공·`CANCELED` 취소·`FAILED` 실행 실패 | |
 | input | Object | N | 실행한(또는 카드에 있던) 값. Java 칸 이름, 목록에 있는 칸만. 배열은 항목 칸까지 같은 규칙으로 검사(목록 밖 항목 칸·규칙 밖 값 400). 파일 칸은 보내지 않는다(와도 버림). `DONE`이면 필수 칸(항목 안 필수 칸 포함, 파일 칸 제외)이 차 있어야 한다. 요약 글은 배열 항목 값(번호·uuid·petSn 빼고)을 넣고 고정 칸·파일 칸은 뺀다: `✔ 지출 등록 — 09-29(화) · 사료 · 32,000`. 배열이 2줄 이상이면 펼치지 않고 `N건`(검사 수치 `values`는 늘 `혈액검사 N항목`) | |
 | errors | Array | N | `FAILED`일 때 Java 400 응답 `data`의 `[{field, message}]`를 그대로(2026-11-25). Python은 `field`만 써서 저장 글 끝에 칸 표시 이름으로 다시 확인을 안내하고 `message`(Java 문구)는 쓰지 않는다. 프론트는 빨간 Java 오류 글 대신 이 저장 글(응답 ConversationMessage)을 보여 준다. `DONE`·`CANCELED`면 무시. 최대 50개 | |
+| targetText | String | N | 삭제 카드의 `targetText` 그대로(2026-11-25, 200자까지). 저장 글: `DONE` `✔ 건강 일지 삭제 — <targetText>`, `CANCELED` `취소됨 — 건강 일지 삭제 · <targetText> · 삭제하지 않았어요.`, `FAILED` `실패 — 건강 일지 삭제 · 삭제하지 못했어요.`(`errors`가 있으면 끝에 다시 확인 안내). 없으면 label만. 삭제 카드가 아니면 쓰지 않는다 | |
 
 ### ReceiptResultRequest
 쓰는 API: POST /ai/conversations/{aiCnvrsRoomSn}/receipt-result
