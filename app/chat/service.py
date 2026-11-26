@@ -1,5 +1,6 @@
 import asyncio
 import io
+import json
 import logging
 import re
 import time
@@ -13,7 +14,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel
 from pydantic.alias_generators import to_camel
 
-from app.chat import catalog, rules, tools, turnlog
+from app.chat import agentstate, catalog, rules, tools, turnlog
 from app.chat.clients import (
     PTC_CALL_LIMIT,
     TOOL_LIMIT,
@@ -27,6 +28,7 @@ from app.chat.clients import (
     TitleGenerator,
     ToolAgent,
     ToolDecision,
+    with_notes,
     with_result,
 )
 from app.chat.repository import (
@@ -44,6 +46,9 @@ from app.chat.schemas import (
     ActionDraft,
     ActionResultRequest,
     ActionStatus,
+    AgentContinueRequest,
+    AgentPending,
+    AgentResult,
     AnswerDone,
     CardType,
     CheckupCardRequest,
@@ -199,6 +204,9 @@ ACTION_FAILED_FIX_UNNAMED = "입력값을 다시 확인해 주세요."
 ACTION_DROP_MESSAGE = "등록하지 않았어요."
 # 한 메시지 여러 명령 ② (2026-11-19) : 한 메시지 확인 카드 최대 수(에이전트 ③에서 프론트 합의 뒤 8)
 ACTION_MAX_CARDS = 3
+# 에이전트 ③ turnlog 태그 : 이미 실행한 쓰기를 다시 고름, done.pending을 줌
+AGENT_REPEAT = "agent_repeat"
+AGENT_PENDING = "agent_pending"
 # 쓰기 카드 뒤 이어 주는 말이 있을 때 남은 쓰기 도구를 이어 고르는 tool_result
 ACTION_CHAINED = (
     "확인 카드를 만듦(아직 저장 안 됨). 이 메시지에 다른 쓰기 요청(기록·등록·수정·삭제)이 남았으면 "
@@ -391,15 +399,17 @@ async def judge_tools(
     prior: ActionDraft | None = None,
     now: datetime | None = None,
     priors: Sequence[ActionDraft] = (),
+    carry: "AgentCarry | None" = None,
 ) -> Judged:
     """도구 흐름 판정(docs/design/tool-calling.md 4절)
-    - priors : 돌려받은 확인 카드 목록(여러 명령 ②). 있으면 prior 대신 같은 도구 카드를 바탕으로"""
+    - priors : 돌려받은 확인 카드 목록(여러 명령 ②). 있으면 prior 대신 같은 도구 카드를 바탕으로
+    - carry : 에이전트 이어 가기(agent-continue). 원래 질문 + 진행 기록으로 다시 고름"""
     if rules.is_placeholder(text):
         # 추가 요청(2026-11-09) : LLM은 자리 표시 글에 글로 되물어 decline을 안 고름(실측)
         return Judged(Intent(kind=IntentKind.FALLBACK))
     row = None
     # FN-AIM-004-13 : 등록 요청은 라우팅 키워드보다 먼저, 칸은 도구 인자로
-    if not rules.is_register_request(text):
+    if carry is None and not rules.is_register_request(text):
         # 추가 요청(2026-11-06) : 키워드에 걸린 문장은 질문꼴이 아니어도 힌트와 함께 도구 고르기
         # FN-AIM-002-10 : 도구 고르기 장애·시간 초과면 그 행으로 이동(LLM 장애와 무관)
         row = rules.match_route(text)
@@ -407,9 +417,12 @@ async def judge_tools(
     follow = _ptc_follow(agent, text, read)
     try:
         async with asyncio.timeout(first_token_sec):
-            decision = await agent.decide(
-                context, max_tokens, today, hint=row, **_code_kw(agent, follow)
-            )
+            if carry is not None:
+                decision = await agent.resume(context, carry.notes, max_tokens, today)
+            else:
+                decision = await agent.decide(
+                    context, max_tokens, today, hint=row, **_code_kw(agent, follow)
+                )
     except (ClassifyError, TimeoutError) as error:
         if isinstance(error, TimeoutError):
             # LLM 오류(ClassifyError)는 클라이언트가 로그, 시간 초과는 취소라 여기서 한 줄
@@ -422,6 +435,9 @@ async def judge_tools(
         if row is not None:
             return Judged(row.to_intent())
         raise ClassifyError("tool_decide") from None
+    if carry is not None:
+        # 이어 간 고르기 뒤 답변·이어 고르기도 같은 메시지(원래 질문 + 진행 기록)로
+        context = with_notes(context, carry.notes)
     if decision.call is not None:
         turnlog.picked(decision.call.name)
     judged = _tool_judged(
@@ -588,7 +604,16 @@ def _tool_judged(
         return Judged(Intent(kind=IntentKind.FALLBACK), out_of_scope=not call.args.unclear)
     card = tools.card_entry(call.name)
     if card is not None:
-        return _card_judged(text, call, card, today, prior, now, priors)
+        trace = read.trace if read is not None else None
+        seen = trace.seen0 if trace is not None else None
+        judged = _card_judged(text, call, card, today, prior, now, priors, seen)
+        if trace is not None and judged.action and _already_done(trace, call.name, judged.action):
+            # 같은 쓰기 반복 막기(이어 가기) : 카드 없이 "이미 실행함"을 LLM에 돌려주고 글로 답
+            logger.info("이미 실행한 쓰기 다시 고름: %s", call.name)
+            turnlog.tag(AGENT_REPEAT)
+            stream = agent.answer(context, decision, rules.AGENT_ALREADY_DONE, max_tokens, today)
+            return Judged(Intent(kind=IntentKind.SEARCH), stream=stream, notice=False)
+        return judged
     entry = tools.read_entry(call.name)
     if entry is not None:
         if read is None:
@@ -664,8 +689,10 @@ def _card_judged(
     prior: ActionDraft | None,
     now: datetime | None,
     priors: Sequence[ActionDraft] = (),
+    seen: dict[str, set[int]] | None = None,
 ) -> Judged:
     # 쓰기 도구 -> ACTION. 돌려받은 카드와 같은 도구면 그 input을 바탕으로 이 메시지 칸을 덮어씀
+    # seen : 이어 가기에서 앞 단계 READ·실행 결과 번호(번호 칸은 이 값만), 없으면 번호 칸 비움
     match = _prior_for(call.name, prior, priors)
     base = match.values if match is not None else None
     args = call.args.model_dump(exclude_none=True) if call.args is not None else {}
@@ -674,7 +701,7 @@ def _card_judged(
         args = catalog.fill_now(card, args, now)
     # LLM이 비운 날짜 : 문장의 날짜 말, 없으면 새 등록 기록 도구만 오늘 (2026-11-23)
     args = catalog.fill_date(card, args, rules.said_dates(text, today), today)
-    values, rejected = _card_values(text, card, args, base, today, now)
+    values, rejected = _card_values(text, card, args, base, today, now, seen)
     if catalog.missing_target_ids(card, values):
         # 경로·본문 필수 번호 칸은 카드에서 고를 수 없음 : 안내 글(SEARCH), 고지 없음
         logger.info("쓰기 도구 대상 번호 없음: %s", call.name)
@@ -703,13 +730,14 @@ def _card_values(
     base: dict | None,
     today: date,
     now: datetime | None,
+    seen: dict[str, set[int]] | None = None,
 ) -> tuple[dict, tuple[str, ...]]:
     # 도구 인자 -> 검증한 카드 input과 비운 칸. base는 돌려받은 카드 input
     if base:
         # 추가-1 : 날짜를 말하지 않았으면 돌려받은 카드의 날짜를 유지
         date_said = rules.mentions_date(text)
         args = catalog.keep_prior_dates(card, args, base, date_said, today)
-    values = catalog.card_input(card, args, now, {}, base)
+    values = catalog.card_input(card, args, now, seen or {}, base)
     return values, tuple(_rejected(card, args, values))
 
 
@@ -778,6 +806,69 @@ class ReadDeps:
     now: datetime | None = None
     # 돌려받은 확인 카드 : READ 뒤 같은 쓰기 도구를 고르면 그 input을 바탕으로 (2026-11-23)
     priors: tuple[ActionDraft, ...] = ()
+    # 에이전트 ③ : 이 턴 진행(READ 결과 글·번호 칸·도구 수). 카드로 멈출 때 pending 토큰에 담음
+    trace: "_Trace | None" = None
+
+
+class _Trace:
+    """[이 턴 에이전트 진행] (docs/design/agent.md 4절)
+    - used : 이어 가기 전 단계에서 이미 쓴 도구 호출 수, seen0 : 그때까지의 번호 칸 값
+    - done : 이 턴에서 실행이 끝난 카드 {tool, input} (같은 쓰기 반복 막기)
+    - notes : 이번 단계 READ 결과 글, follow : 결과 답변의 도구 실행(있으면 seen·calls를 씀)"""
+
+    def __init__(
+        self,
+        used: int = 0,
+        seen: dict[str, set[int]] | None = None,
+        done: Sequence[dict] = (),
+    ) -> None:
+        self.used = used
+        self.seen0 = seen or {}
+        self.done = list(done)
+        self.notes: list[str] = []
+        self.follow: _Follow | None = None
+        # 바로 실행 판정(_runs·_agent_allows)에 쓰는 이 턴과 이어 가기 키 : _run_turn이 채움
+        self.turn: Turn | None = None
+        self.key = ""
+
+    def note(self, tool: str, result: str) -> None:
+        self.notes.append(rules.AGENT_READ_NOTE.format(tool=tool, result=result))
+
+    def seen(self) -> dict[str, set[int]]:
+        return self.follow.seen if self.follow is not None else self.seen0
+
+
+def _same_value(left: object, right: object) -> bool:
+    return json.dumps(left, ensure_ascii=False, default=str, sort_keys=True) == json.dumps(
+        right, ensure_ascii=False, default=str, sort_keys=True
+    )
+
+
+def _already_done(trace: _Trace, tool: str, values: dict) -> bool:
+    """이미 실행한 일 (6절 7번) : 같은 도구·같은 값, 또는 이어 가기에서 원래 문장의 쓰기를
+    다 실행했는데 실행한 카드와 같은 도구를 값만 바꿔 다시 고름(잘못 읽은 LLM의 중복 저장 막기)"""
+    if _repeats(trace.done, tool, values):
+        return True
+    turn = trace.turn
+    if turn is None or turn.agent is None:
+        return False
+    if not any(card.get("tool") == tool for card in trace.done):
+        return False
+    return rules.write_count(turn.question.cnvrs_cn) <= len(trace.done)
+
+
+def _repeats(done: Sequence[dict], tool: str, values: dict) -> bool:
+    """같은 쓰기 반복 (6절 7번) : 이미 실행한 같은 도구 카드에 이번 값이 모두 같게 들어 있음
+    - 칸 오류 고치기는 값이 달라지므로 해당 없음. 값이 비면 반복으로 보지 않음"""
+    if not values:
+        return False
+    for card in done:
+        given = card.get("input") or {}
+        if card.get("tool") == tool and all(
+            key in given and _same_value(given[key], value) for key, value in values.items()
+        ):
+            return True
+    return False
 
 
 class _ReadPets:
@@ -977,7 +1068,13 @@ async def _read_answer(
         yield first.ask
         return
     follow.reads = 1 + len(extra)
-    follow.calls = 1 + len(extra)
+    # 이어 가기면 앞 단계 도구 수(trace.used)부터 : _Follow가 1 + used로 시작
+    follow.calls += len(extra)
+    if read.trace is not None:
+        read.trace.note(decision.call.name, first.result)
+        for call, outcome in zip(extra, outcomes[1:], strict=True):
+            if outcome.ask is None:
+                read.trace.note(call.name, outcome.result)
     results: dict[str, str] = {}
     for call in rest:
         if tools.read_entry(call.name) is None:
@@ -1031,18 +1128,23 @@ class _Follow:
         self.text = text
         self.read = read
         self.pets = _ReadPets(text, read)
-        # 번호 칸은 이 턴 READ 결과에 나온 값만 (catalog.read_request)
-        self.seen: dict[str, set[int]] = {}
+        # 번호 칸은 이 턴 READ 결과에 나온 값만 (catalog.read_request). 이어 가기면 앞 단계 값부터
+        trace = read.trace
+        self.seen: dict[str, set[int]] = (
+            {key: set(ids) for key, ids in trace.seen0.items()} if trace is not None else {}
+        )
         # 번호별 원래 행 : 수정 카드가 날짜만 바꿀 때 원래 시간을 씀(추가-3)
         self.rows: catalog.Rows = {}
         self.cards = cards
         self.notice_reads = notice_reads
         self.shortcuts = shortcuts
         self.reads = 0
-        # 이 턴 도구 호출 수(첫 고르기 도구 포함) : TOOL_LIMIT까지
-        self.calls = 1
+        # 이 턴 도구 호출 수(첫 고르기 도구 포함, 이어 가기면 앞 단계 수부터) : TOOL_LIMIT까지
+        self.calls = 1 + (trace.used if trace is not None else 0)
         # 코드 실행 안 도구 호출 수 : TOOL_LIMIT과 따로 PTC_CALL_LIMIT까지
         self.code_calls = 0
+        if trace is not None:
+            trace.follow = self
 
     async def __call__(self, call: tools.ToolCall) -> str | None:
         turnlog.picked(call.name)
@@ -1066,6 +1168,11 @@ class _Follow:
             values = catalog.card_input(card, raw, self.read.now, self.seen, base, self.rows)
             if prior is None:
                 values = _carry_lesion(card, values, self.read.priors)
+            trace = self.read.trace
+            if trace is not None and _already_done(trace, call.name, values):
+                logger.info("이미 실행한 쓰기 다시 고름: %s", call.name)
+                turnlog.tag(AGENT_REPEAT)
+                return rules.AGENT_ALREADY_DONE
             if catalog.missing_target_ids(card, values):
                 logger.info("쓰기 도구 대상 번호 없음: %s", call.name)
                 turnlog.tag("target_missing")
@@ -1078,7 +1185,9 @@ class _Follow:
                 card, values, found, named, draft_pet, self.read.room_pet, rejected, target
             )
             self.cards.append(shown)
-            shown_text = ACTION_RUN_SHOWN if self.runs_now() else ACTION_SHOWN
+            shown_text = ACTION_SHOWN
+            if self.runs_now():
+                shown_text = rules.AGENT_RUN_SHOWN if self._continues() else ACTION_RUN_SHOWN
             return _worded(shown_text, [shown]).format(summary=action_summary(shown))
         if call.name in (tools.NAVIGATE, tools.SEARCH_GUIDE) and call.args is not None:
             return _follow_screen(call, self.text, self.shortcuts)
@@ -1091,12 +1200,29 @@ class _Follow:
         outcome = await _read_once(entry, call, self.pets, self.seen, self.notice_reads, self.rows)
         if outcome.ask is not None:
             return rules.READ_FAILED
+        if self.read.trace is not None:
+            self.read.trace.note(call.name, outcome.result)
         # READ 뒤에도 쓰기 카드는 한 번 고를 수 있게 (2단계 ②, 목록 두 번 → 수정 카드)
         return ReadMore(outcome.result)
 
     def runs_now(self) -> bool:
         # 돌려받은 카드가 없는 턴의 명령형 문장이고 카드에 빈 칸이 없음 (_search_answer와 같은 판정)
-        return not self.read.priors and runs_now(self.cards or [], self.text)
+        # 에이전트 ③ : 이어 가기 키가 있으면 "기록하고 … 알려 줘" 꼴도, 이어 가기면 말한 쓰기만
+        trace = self.read.trace
+        cards = self.cards or []
+        if trace is not None and trace.turn is not None:
+            turn = trace.turn
+            return (
+                not self.read.priors
+                and _runs(turn, cards, trace.key)
+                and _agent_allows(turn, cards)
+            )
+        return not self.read.priors and runs_now(cards, self.text)
+
+    def _continues(self) -> bool:
+        # 바로 실행한 뒤 이어 가는 카드인지(_pending과 같은 문장 판정) : 키 있음 + 카드 뒤 할 일
+        trace = self.read.trace
+        return trace is not None and bool(trace.key) and rules.agent_more(self.text)
 
     async def code(self, call: tools.ToolCall) -> str:
         """코드 실행 안에서 부른 도구(프로그래밍식 도구 호출 시험, 2026-11-26)
@@ -1209,6 +1335,8 @@ class Turn:
     # 추가 요청(2026-11-24) : 방 요약과 경계선(이 msgSeq까지 요약됨)
     summary: str | None = None
     summary_end: int | None = None
+    # 에이전트 ③ : agent-continue로 이어 가는 턴(사용자 메시지 저장 없음). 없으면 보통 턴
+    agent: "AgentCarry | None" = None
 
     def priors(self) -> list[ActionDraft]:
         if self.actions:
@@ -1367,11 +1495,23 @@ async def answer_turn(
     titles: TitleGenerator | None = None,
     reader: ToolReader | None = None,
     summarizer: ConversationSummarizer | None = None,
+    agent_key: str = "",
 ) -> AsyncIterator[Event]:
+    # agent_key : 에이전트 이어 가기 서명 키(AGENT_STATE_KEY). 비면 done.pending 없음
     queue: asyncio.Queue[Event | None] = asyncio.Queue()
     task = asyncio.create_task(
         _run_and_compact(
-            turn, repo, agent, ai, limits, queue.put_nowait, register, titles, reader, summarizer
+            turn,
+            repo,
+            agent,
+            ai,
+            limits,
+            queue.put_nowait,
+            register,
+            titles,
+            reader,
+            summarizer,
+            agent_key,
         )
     )
     _running.add(task)
@@ -1391,10 +1531,11 @@ async def _run_and_compact(
     titles: TitleGenerator | None,
     reader: ToolReader | None,
     summarizer: ConversationSummarizer | None,
+    agent_key: str = "",
 ) -> None:
     # 요약은 스트림을 닫은(done 뒤) 다음 : 회원이 요약 LLM을 기다리지 않음
     saved = _SavedMessages(repo)
-    await _run_turn(turn, saved, agent, ai, limits, emit, register, titles, reader)  # type: ignore[arg-type]
+    await _run_turn(turn, saved, agent, ai, limits, emit, register, titles, reader, agent_key)  # type: ignore[arg-type]
     if summarizer is not None:
         await compact_summary(turn, saved.saved, repo, summarizer, ai.context_turns)
 
@@ -1409,6 +1550,7 @@ async def _run_turn(
     register: "RegisterDeps | None" = None,
     titles: TitleGenerator | None = None,
     reader: ToolReader | None = None,
+    agent_key: str = "",
 ) -> None:
     # 추가 요청(2026-11-26) : 턴 기록 한 줄. 이벤트를 보며 종류·결과·고정 문구 태그를 모음
     record = turnlog.start(turn.room_sn, turn.question.cnvrs_cn, _previous_ai_text(turn))
@@ -1418,6 +1560,17 @@ async def _run_turn(
         text = turn.question.cnvrs_cn
         card = None
         priors = turn.priors()
+        carry = turn.agent
+        if carry is not None and carry.stop:
+            # 이어 갈 일 없음(취소만·고칠 수 없는 실패만) : LLM 없이 짧은 글
+            logger.info("에이전트 이어 가기 없음: 실행 완료·고칠 칸 없음")
+            emit(("intent", Intent(kind=IntentKind.SEARCH)))
+            saved = await _save(repo, turn.room_sn, rules.AGENT_STOPPED, True)
+            emit(("done", AnswerDone(message=saved)))
+            return
+        trace = _trace_of(carry)
+        trace.turn = turn
+        trace.key = agent_key
         if register is not None and priors:
             # 돌려받은 확인 카드 + 확인·취소 말 : LLM 없이 실행 지시·취소 (2026-11-13)
             # 여러 명령 ② : 카드가 여럿이면 확인 말 한 번에 모두, 취소 말이면 모두 버림
@@ -1449,7 +1602,7 @@ async def _run_turn(
             today = register.today if register is not None else rules.today_kst()
             now = datetime.combine(today, datetime.now(rules.KST).time())
             read = (
-                ReadDeps(reader, register.contexts, turn.pet_sn, now, tuple(priors))
+                ReadDeps(reader, register.contexts, turn.pet_sn, now, tuple(priors), trace)
                 if reader is not None and register is not None
                 else None
             )
@@ -1464,6 +1617,7 @@ async def _run_turn(
                 turn.action,
                 now,
                 priors,
+                carry,
             )
         emit(("intent", judged.intent))
         kind = judged.intent.kind
@@ -1481,6 +1635,8 @@ async def _run_turn(
                 judged.cards,
                 _notice(judged),
                 judged.follow_shortcuts,
+                trace,
+                agent_key,
             )
             if answer is not None and titles is not None and _is_first_answer(turn):
                 await _retitle(repo, titles, turn, answer)
@@ -1500,13 +1656,18 @@ async def _run_turn(
             cards = await _action_reply(text, turn, judged, register)
             if reader is not None:
                 cards = [await merge_pet_lists(card, text, reader) for card in cards]
-            if not turn.priors() and runs_now(cards, text):
+            if not turn.priors() and _runs(turn, cards, agent_key) and _agent_allows(turn, cards):
                 # 동사형 명령(2026-11-26) : 빈 칸이 없으면 확인 말 없이 첫 턴에 실행 지시
                 # 돌려받은 카드를 고치는 말("4.5로 바꿔 줘")은 지금처럼 확인 말을 기다림
                 logger.info("명령 바로 실행 지시: %s", ", ".join(card.tool for card in cards))
                 turnlog.tag(turnlog.RUN_NOW)
                 saved = await _save(repo, turn.room_sn, action_run_message(cards, text), True)
-                done = AnswerDone(message=saved, action=cards[0], actions=cards, execute=True)
+                # 에이전트 ③ : 첫 고르기 1번 + 이어 고른 카드 수
+                calls = trace.used + 1 + len(judged.more)
+                pending = _pending(turn, agent_key, trace, cards, calls)
+                done = AnswerDone(
+                    message=saved, action=cards[0], actions=cards, execute=True, pending=pending
+                )
                 emit(("done", done))
                 return
             # 카드 요약을 글로 저장 : 모달 대신 채팅으로 확인, 다음 턴 맥락에도 남음 (2026-11-13)
@@ -1545,8 +1706,11 @@ async def _search_answer(
     cards: list[ActionCard] | None = None,
     notice: Callable[[], bool] = lambda: True,
     follow_shortcuts: list[Intent] | None = None,
+    trace: "_Trace | None" = None,
+    agent_key: str = "",
 ) -> str | None:
     # FN-AIM-002-02·07 : 완료면 고지 전 본문 반환(제목 요약용), 실패·미완료면 None
+    # trace·agent_key : 에이전트 ③, READ 뒤 카드를 바로 실행할 때 done.pending
     # follow_shortcuts : 결과 뒤 고른 이동·사용법 화면, 스트림이 끝난 뒤 첫 READ 화면보다 우선
     # stream : 도구 흐름이 이미 시작한 답변 스트림
     loop = asyncio.get_running_loop()
@@ -1633,16 +1797,226 @@ async def _search_answer(
         complete
         and action is not None
         and not turn.priors()
-        and runs_now([action], turn.question.cnvrs_cn)
+        and _runs(turn, [action], agent_key)
+        and _agent_allows(turn, [action])
     )
+    pending = None
     if execute:
         logger.info("READ 뒤 카드 바로 실행 지시: %s", action.tool)
         turnlog.tag(turnlog.RUN_NOW)
+        if trace is not None:
+            calls = trace.follow.calls if trace.follow is not None else trace.used + 1
+            pending = _pending(turn, agent_key, trace, [action], calls)
     done = AnswerDone(
-        message=message, shortcut=shortcut, action=action, actions=actions, execute=execute
+        message=message,
+        shortcut=shortcut,
+        action=action,
+        actions=actions,
+        execute=execute,
+        pending=pending,
     )
     emit(("done", done))
     return body if complete else None
+
+
+@dataclass
+class AgentCarry:
+    """[에이전트 이어 가기 한 번] (docs/design/agent.md 2·5절)
+    - state : 검사한 토큰, notes_list : 앞 진행 기록 + 이번 실행 결과 줄, notes : LLM에 줄 글
+    - fix_tools : 칸 오류를 이번에 한 번 고칠 도구, fixed : 칸 오류를 고친 적 있음
+    - done : 이 턴에서 실행이 끝난 카드, seen : 번호 칸에 쓸 값(앞 READ + 실행 결과 data)
+    - stop : 이어 갈 일 없음(취소만·고칠 수 없는 실패만)"""
+
+    state: agentstate.AgentState
+    notes_list: list[str]
+    notes: str
+    fix_tools: frozenset[str]
+    fixed: bool
+    done: list[dict]
+    seen: dict[str, set[int]]
+    stop: bool
+
+
+def _trace_of(carry: AgentCarry | None) -> _Trace:
+    if carry is None:
+        return _Trace()
+    return _Trace(TOOL_LIMIT - carry.state.left, carry.seen, carry.done)
+
+
+def _runs(turn: Turn, cards: Sequence[ActionCard], key: str) -> bool:
+    """바로 실행 판정 : 지금 동사형 명령(runs_now) 또는 이어 가기 키가 있을 때 쓰기 뒤 다른 일이
+    이어지는 명령("기록하고 … 알려 줘", rules.agent_command). 빈 칸·삭제 동사 규칙은 같음"""
+    text = turn.question.cnvrs_cn
+    if runs_now(cards, text):
+        return True
+    if not key or not cards or not rules.agent_command(text):
+        return False
+    return not _missing_lines(list(cards)) and _delete_confirmed(cards, text)
+
+
+def _agent_allows(turn: Turn, cards: Sequence[ActionCard]) -> bool:
+    """이어 가기에서 고른 카드를 바로 실행해도 되는지 (6절 4번 말하지 않은 쓰기)
+    - 보통 턴이면 늘 참(지금 판정 그대로)
+    - 칸 오류를 고치는 같은 도구 카드면 참
+    - 원래 문장의 쓰기 동사가 이미 실행한 카드 수보다 많을 때만 참 : 아니면 확인 카드로 멈춤"""
+    carry = turn.agent
+    if carry is None:
+        return True
+    if all(card.tool in carry.fix_tools for card in cards):
+        return True
+    return rules.write_count(turn.question.cnvrs_cn) > len(carry.done)
+
+
+def _card_json(card: ActionCard) -> dict:
+    return {"tool": card.tool, "input": card.model_dump(mode="json", by_alias=True)["input"]}
+
+
+def _pending(
+    turn: Turn,
+    key: str,
+    trace: _Trace,
+    cards: Sequence[ActionCard],
+    calls: int,
+) -> AgentPending | None:
+    """done.pending (4절) : 바로 실행하는 카드이고 카드 뒤 할 일이 남은 문장일 때만
+    - 키 없음·단순 명령·도구 상한 다 씀·토큰 48KB 넘음이면 None(지금 흐름)
+    - calls : 이 턴(이어 가기 포함) 지금까지 쓴 도구 호출 수"""
+    if not key or not cards:
+        return None
+    said = turn.question.cnvrs_cn
+    if not rules.agent_more(said):
+        return None
+    left = TOOL_LIMIT - calls
+    if left <= 0:
+        logger.info("에이전트 도구 상한: pending 없음")
+        turnlog.tag(turnlog.AGENT_LIMIT)
+        return None
+    carry = turn.agent
+    state = agentstate.AgentState(
+        room=turn.room_sn,
+        q=turn.question.msg_seq,
+        said=said,
+        left=left,
+        seen={name: sorted(ids) for name, ids in trace.seen().items()},
+        notes=[*(carry.notes_list if carry is not None else []), *trace.notes],
+        cards=[_card_json(card) for card in cards],
+        done=list(trace.done),
+        fixed=carry.fixed if carry is not None else False,
+    )
+    token = agentstate.sign(state, key, time.time())
+    if token is None:
+        logger.info("에이전트 토큰 크기 상한(%dB): pending 없음", agentstate.MAX_BYTES)
+        return None
+    turnlog.tag(AGENT_PENDING)
+    return AgentPending(agent_token=token, cards=len(cards))
+
+
+def _stale_read(note: str) -> str:
+    # "읽기 X 결과:" -> "읽기 X 결과(쓰기 실행 전 …):" (이미 표시한 줄은 그대로)
+    head, sep, rest = note.partition("\n")
+    match = re.fullmatch(r"읽기 (\S+) 결과:", head)
+    if match is None:
+        return note
+    return rules.AGENT_STALE_READ_NOTE.format(tool=match.group(1)) + sep + rest
+
+
+def _result_cards(state: agentstate.AgentState, results: Sequence[AgentResult]) -> list[dict]:
+    """결과마다 이 멈춤의 카드 : 같은 도구의 아직 안 쓴 카드를 차례로. 없으면 400"""
+    used: set[int] = set()
+    matched: list[dict] = []
+    for result in results:
+        no = next(
+            (
+                no
+                for no, card in enumerate(state.cards)
+                if no not in used and card.get("tool") == result.tool
+            ),
+            None,
+        )
+        if no is None:
+            raise AppError("INVALID_REQUEST", 400, "이 카드의 결과가 아닙니다.")
+        used.add(no)
+        matched.append(state.cards[no])
+    return matched
+
+
+def agent_carry(state: agentstate.AgentState, results: Sequence[AgentResult]) -> AgentCarry:
+    """실행 결과 -> 이어 가기 상태 (5절)
+    - DONE : 실행 완료 줄, data의 번호 칸(…Sn 정수)은 이 턴 번호 칸 값으로
+    - FAILED + errors : 칸 오류를 아직 안 고쳤으면 칸 표시 이름으로 한 번 고치게(Java 문구는 안 줌)
+    - FAILED(두 번째·errors 없음)·CANCELED : 다시 하지 않음"""
+    cards = _result_cards(state, results)
+    seen = {name: set(ids) for name, ids in state.seen.items()}
+    done = list(state.done)
+    lines: list[str] = []
+    fix: set[str] = set()
+    for result, card in zip(results, cards, strict=True):
+        entry = tools.card_entry(result.tool)
+        label = (entry.label if entry is not None else None) or result.tool
+        given = json.dumps(card.get("input") or {}, ensure_ascii=False, default=str)
+        if result.status is ActionStatus.DONE:
+            line = rules.AGENT_DONE_NOTE.format(label=label, tool=result.tool, input=given)
+            if result.data:
+                data = json.dumps(result.data, ensure_ascii=False, default=str)
+                line += rules.AGENT_DONE_DATA.format(data=data)
+                for name, ids in catalog.seen_ids(result.data).items():
+                    seen.setdefault(name, set()).update(ids)
+            lines.append(line)
+            done.append(card)
+        elif result.status is ActionStatus.FAILED and result.errors and not state.fixed:
+            fields = [error.field for error in result.errors]
+            names = _field_names(result.tool, fields) or fields
+            note = rules.AGENT_FIX_NOTE.format(
+                label=label, tool=result.tool, input=given, names=", ".join(names)
+            )
+            lines.append(note)
+            fix.add(result.tool)
+        elif result.status is ActionStatus.FAILED:
+            lines.append(rules.AGENT_FAILED_NOTE.format(label=label, tool=result.tool))
+        else:
+            lines.append(rules.AGENT_CANCELED_NOTE.format(label=label, tool=result.tool))
+    # 실행한 일이 있으면 앞 READ 결과는 실행 전 것 : 그 값으로 답하지 않고 다시 읽게 표시
+    before = (
+        [_stale_read(note) for note in state.notes] if len(done) > len(state.done) else state.notes
+    )
+    notes_list = [*before, *lines]
+    notes = "\n".join([rules.AGENT_NOTES_HEAD, *notes_list, rules.AGENT_NOTES_TAIL])
+    stop = len(done) == len(state.done) and not fix
+    return AgentCarry(
+        state, notes_list, notes, frozenset(fix), state.fixed or bool(fix), done, seen, stop
+    )
+
+
+async def continue_turn(
+    repo: ConversationRepository, room_sn: int, body: AgentContinueRequest, key: str
+) -> Turn:
+    """POST …/agent-continue : 토큰 검사 -> 방(소유는 Java) -> 이어 갈 턴. 사용자 메시지 저장 안 함
+    - 400 INVALID_REQUEST : 키 없음·서명 틀림·만료·다른 방·버전 다름·토큰에 없는 tool
+    - 404 : 남의 대화·없는 방(Java 그대로)"""
+    # 방 확인(남의 대화·없는 방 404)을 먼저 : 그 뒤 토큰 검사
+    room = await repo.get_room(room_sn)
+    if not key:
+        raise AppError("INVALID_REQUEST", 400, "이어 갈 수 없는 요청입니다.")
+    try:
+        state = agentstate.verify(body.agent_token, key, room_sn, time.time())
+    except agentstate.AgentStateError as error:
+        logger.info("에이전트 토큰 거부: %s room=%d", error.reason, room_sn)
+        raise AppError("INVALID_REQUEST", 400, "이어 갈 수 없는 요청입니다.") from None
+    carry = agent_carry(state, body.results)
+    question = next(
+        (m for m in room.messages if m.msg_seq == state.q and m.role_cd == ROLE_USER), None
+    )
+    if question is None:
+        raise AppError("INVALID_REQUEST", 400, "이어 갈 메시지가 없습니다.")
+    return Turn(
+        room_sn,
+        question,
+        room.messages,
+        room.pet_sn,
+        summary=getattr(room, "smry_cn", None),
+        summary_end=getattr(room, "smry_end_msg_seq", None),
+        agent=carry,
+    )
 
 
 def _notice(judged: Judged) -> Callable[[], bool]:

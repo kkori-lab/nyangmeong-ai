@@ -780,6 +780,88 @@ TOOL_LIMIT_REACHED = (
 )
 
 
+# 에이전트 ③ (docs/design/agent.md 2·5·6절, 2026-11-26)
+# 카드 뒤 할 일이 남은 문장 : 쓰기 동사 뒤 이어 주는 말 + 다른 일(읽기·비교·다른 쓰기)
+_AGENT_MORE = re.compile(
+    r"(하고|한\s*뒤|한\s*다음|하고\s*나서|그리고|고\s*나서|만들고|넣고|바꾸고|고치고|지우고|잡고)"
+    r".*(알려|확인|비교|보여|봐|어때|어떤지|얼마|늘었|줄었|넣어|추가|등록|기록|만들어|바꿔|수정)"
+)
+# 쓰기 동사 : 원래 문장에 쓰기가 몇 개 있는지(말하지 않은 쓰기 막기)
+_WRITE_VERB = re.compile(
+    r"기록|등록|추가|넣|만들|수정|바꾸|바꿔|변경|고쳐|삭제|지워|지우|체크|저장|잡아"
+)
+
+
+def agent_more(text: str) -> bool:
+    """카드를 실행한 뒤 LLM이 할 일이 남았을 수 있는 문장인지 : 참일 때만 done.pending
+    - "체중 4.2kg 기록하고 지난주보다 늘었는지 알려 줘"·"검진기록 만들고 수치도 넣어 줘" : 참
+    - "산책 30분 기록해 줘" 같은 단순 명령 하나 : 거짓(지금 흐름과 같음)"""
+    return _AGENT_MORE.search(text) is not None
+
+
+# 쓰기 동사 + 이어 주는 말("기록하고"·"만들고") : 카드 뒤 다른 일이 이어지는 명령
+_AGENT_COMMAND = re.compile(
+    r"(기록하|등록하|추가하|수정하|변경하|삭제하|체크하|저장하|만들|넣|바꾸|고치|지우|잡)고"
+)
+
+
+def agent_command(text: str) -> bool:
+    """에이전트 이어 가기용 명령 : "체중 4.2kg 기록하고 늘었는지 알려 줘"처럼 쓰기 동사 뒤 다른 일
+    - 문장 끝이 읽기 말("알려 줘")이라 commands_now는 거짓이지만 앞 쓰기는 명령이다
+    - 물음표로 끝나면 부탁꼴만(commands_now와 같음). 이어 가기 키가 있을 때만 쓴다"""
+    compact = _compact_reply(text)
+    if not _AGENT_COMMAND.search(compact) or not agent_more(text):
+        return False
+    asking = text.rstrip().endswith("?")
+    return not asking or bool(_RUN_ASKING.search(compact))
+
+
+def write_count(text: str) -> int:
+    """문장 속 쓰기 동사 수 : 이어 가기에서 이미 실행한 카드 수보다 많을 때만 새 카드를 바로 실행"""
+    return len(_WRITE_VERB.findall(text))
+
+
+# 이어 가기 LLM에 주는 진행 기록 : 원래 질문 뒤에 붙임(회원이 새로 한 말이 아님)
+AGENT_NOTES_HEAD = (
+    "[이 턴 진행 기록 — 서버가 붙인 것, 회원이 새로 한 말이 아님]\n"
+    "위 질문을 처리하던 중 확인 카드를 실행했고 결과는 아래와 같다."
+)
+AGENT_NOTES_TAIL = (
+    "질문에서 남은 일이 있으면 이어서 도구를 부르고, 다 했으면 결과를 바탕으로 짧게 답한다. "
+    "'실행 완료'인 일은 이미 저장된 것이다. 다시 하지 않고, "
+    "저장 전이라거나 확인 말을 해 달라고 하지 않는다. "
+    "'취소'·'다시 하지 않음'이라고 적힌 일도 다시 하지 않는다. "
+    "번호 칸(…_sn)은 진행 기록과 읽기 결과에 나온 번호만 쓴다."
+)
+AGENT_READ_NOTE = "읽기 {tool} 결과:\n{result}"
+# 실행 전에 읽은 결과 : 실행한 기록이 빠져 있으므로 답에 쓰려면 같은 읽기 도구를 다시 부르게
+AGENT_STALE_READ_NOTE = (
+    "읽기 {tool} 결과(쓰기 실행 전이라 방금 실행한 기록은 빠져 있음. "
+    "답에 쓰려면 이 읽기 도구를 다시 부른다):"
+)
+AGENT_DONE_NOTE = "- 실행 완료: {label} ({tool}) 입력 {input}"
+AGENT_DONE_DATA = " · 저장 결과 {data}"
+AGENT_FIX_NOTE = (
+    "- 실행 실패: {label} ({tool}) 입력 {input}. 다시 확인할 칸: {names}. "
+    "이 칸만 고친 같은 도구를 한 번 부른다."
+)
+AGENT_FAILED_NOTE = "- 실행 실패: {label} ({tool}). 다시 하지 않음."
+AGENT_CANCELED_NOTE = "- 회원이 취소: {label} ({tool}). 다시 하지 않음."
+# 바로 실행하고 결과를 받아 이어 가는 카드(done.pending)의 tool_result : 남은 일은 지금 답하지 않음
+AGENT_RUN_SHOWN = (
+    "확인 카드를 만듦. 카드 내용: {summary}. 회원이 바로 하라고 했으므로 이 턴에 실행된다. "
+    "질문의 남은 일(조회·비교 등)은 실행 결과를 받은 뒤 이어서 하므로 지금 답하지 않는다. "
+    "확인을 묻지 말고 카드 내용을 짧게 보여 준 뒤 '등록하고 이어서 알려 드릴게요.'로 끝낸다."
+)
+# 같은 쓰기 반복 막기 (6절 7번) : 이미 실행한 카드와 같은 도구·같은 값
+AGENT_ALREADY_DONE = (
+    "이 일은 이 턴에서 이미 실행했으므로 카드를 다시 만들지 않음. "
+    "다시 저장하지 말고 지금까지의 결과로 답한다."
+)
+# 이어 갈 일이 없음(취소만·고칠 수 없는 실패만) : LLM 없이 저장하는 짧은 글
+AGENT_STOPPED = "남은 일은 이어서 하지 않았어요."
+
+
 _DATE_HEAD = re.compile(r"\d{4}-\d{2}-\d{2}(?![\d])")
 
 

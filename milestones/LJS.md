@@ -874,3 +874,11 @@
 - 결과 (2026-11-26): 검증 통과(1회차), 사람 확인. 다단계 평가 Haiku 8/8·쓰기 잘못 0. 기획 밖 기존 테스트 3개(`test_action_update_follow`·`test_answer_failure_log`·`test_read_tools`)를 새 상한·`step` 순서로 고침(사람 결정 "추천안대로")
 - 연결 남음: 없음 (`step` 표시 문구는 ①의 연결 남음에 포함, 실제 Java 도구 목록에 표시 이름이 없어 `label`은 도구 이름)
 
+
+## SCR-AIM-004 대화창 · AI 매니저 에이전트 ③ 쓰기 결과 이어 가기 (SCR-AIM-012 공통, 추가 요청) — 끝
+- 기능: 동사형 명령 첫 턴 `execute` 카드로 멈춘 루프를 서명 토큰(`done.pending.agentToken`)에 실어 React에 맡기고, `POST /ai/conversations/{방}/agent-continue`로 실행 결과를 LLM에 줘 읽기·쓰기를 이어 간다. 칸 오류 한 번 고치기, 같은 쓰기 반복 막기, 결과에 새 번호(`data`) 싣기. 설계 `docs/design/agent.md` 2·4·5·6절. 카드 3장 → 8장은 프론트 합의 뒤(다음). 기능 ID 추가 없음(명세 수정은 구현 뒤 맨 마지막, 2026-11-06 결정)
+- 요청: 2026-11-26 LJS (에이전트 ① 8절 순서 ③)
+- 기다리는 것: 없음 (`AGENT_STATE_KEY`가 없으면 `pending`이 안 와 지금 흐름 그대로라 프론트 합의 전에 넣어도 깨지지 않음. 합의는 ①의 연결 남음)
+- 완료 조건: `/start` 기획의 완료 조건을 따른다.
+- 결과 (2026-11-26): 검증 통과(2회차, 잠금 해제 전 1회차 실패 1번 더), 사람 확인. 추가 요청 1개(추가-1 `tests/conftest.py` `EMPTY_KEYS`에 `AGENT_STATE_KEY`). 기획과 달라진 것: A3 이어 가기는 tool_result 잇기 대신 원래 질문 + 진행 기록으로 다시 고르기, A10 쓰기 꼴은 새 파일 `agent_write_eval.jsonl`(기존 문항 수 테스트 유지). 평가 Haiku 13~14/14·쓰기 잘못 0
+- 연결 남음: A5·A6 프론트 `agent-continue` 호출·`results[].data` 칸 (①의 프론트 합의, LJS 프론트), 서버 `.env`에 `AGENT_STATE_KEY` (배포, 사람)
