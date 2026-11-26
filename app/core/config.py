@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     answer_total_sec: float = 60.0
     # 프로그래밍식 도구 호출 시험(2026-11-26) : 켜면 읽기 도구를 코드 실행 안에서 부름. 기본 꺼짐
     llm_ptc: bool = False
+    # 에이전트 이어 가기 서명 키(docs/design/agent.md 4절, 2026-11-26). 비면 done.pending 없음
+    agent_state_key: SecretStr = SecretStr("")
 
 
 @lru_cache

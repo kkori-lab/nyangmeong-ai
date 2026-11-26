@@ -252,6 +252,13 @@ class StepEvent(_Camel):
     kind: Literal["READ", "CARD"]
 
 
+class AgentPending(_Camel):
+    # done.pending (에이전트 ③, 2026-11-26) : 카드 실행 뒤 agent-continue로 이어 갈 서명 토큰
+    agent_token: str
+    # 이 멈춤의 카드 수
+    cards: int
+
+
 class AnswerDone(_Camel):
     # SSE done 이벤트. message는 저장된 AI 메시지(없거나 저장 실패면 null)
     message: ConversationMessage | None = None
@@ -265,6 +272,8 @@ class AnswerDone(_Camel):
     actions: list[ActionCard] | None = None
     # 돌려받은 카드 + 확인 말("등록해 줘") : React가 action의 call을 바로 실행 (2026-11-13)
     execute: bool = False
+    # 에이전트 ③ : 실행 결과를 보고 이어 갈 수 있을 때만(없으면 null, 지금 흐름)
+    pending: AgentPending | None = None
 
 
 class StreamError(_Camel):
@@ -305,6 +314,28 @@ class ActionResultRequest(_Camel):
     errors: list[ActionFieldError] = Field(default_factory=list, max_length=50)
     # 삭제 카드의 대상 글(ActionCard.targetText 그대로, 2026-11-25) : 결과 요약에 씀
     target_text: str | None = Field(default=None, max_length=200)
+
+
+# agent-continue results 최대 수 : 지금 카드 최대 3장(ACTION_MAX_CARDS), 8장은 프론트 합의 뒤
+AGENT_RESULTS_MAX = 3
+# agentToken 길이 상한 : 서명 토큰 48KB(agentstate.MAX_BYTES)
+AGENT_TOKEN_MAX = 48 * 1024
+
+
+class AgentResult(_Camel):
+    # 이 멈춤의 카드 하나의 실행 결과 (docs/design/agent.md 5절)
+    tool: str = Field(min_length=1, max_length=64)
+    status: ActionStatus
+    # FAILED 때 Java 400 data [{field, message}] (ActionResultRequest errors와 같음)
+    errors: list[ActionFieldError] = Field(default_factory=list, max_length=50)
+    # DONE 때 Java 성공 응답 data(선택) : 새 번호(…Sn 정수 칸)만 이 턴 번호 칸 값으로 씀
+    data: dict[str, Any] | None = None
+
+
+class AgentContinueRequest(_Camel):
+    # POST /ai/conversations/{방}/agent-continue (에이전트 ③, 2026-11-26)
+    agent_token: str = Field(min_length=1, max_length=AGENT_TOKEN_MAX)
+    results: list[AgentResult] = Field(min_length=1, max_length=AGENT_RESULTS_MAX)
 
 
 class ReceiptResult(StrEnum):

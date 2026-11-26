@@ -35,6 +35,7 @@ from app.chat.repository import (
 from app.chat.schemas import (
     MAX_MESSAGE_LENGTH,
     ActionResultRequest,
+    AgentContinueRequest,
     CheckupCardRequest,
     ConversationCreateRequest,
     LesionCardRequest,
@@ -153,7 +154,42 @@ async def send_message(
     limits = service.AnswerLimits(settings.answer_first_token_sec, settings.answer_total_sec)
     register = service.RegisterDeps(contexts, extractor, rules.today_kst())
     events = service.answer_turn(
-        turn, repo, agent, ai, limits, register, titles, reader, summarizer
+        turn,
+        repo,
+        agent,
+        ai,
+        limits,
+        register,
+        titles,
+        reader,
+        summarizer,
+        agent_key=settings.agent_state_key.get_secret_value(),
+    )
+    return StreamingResponse(_sse(events), media_type="text/event-stream")
+
+
+# 에이전트 ③ (docs/design/agent.md 2·4·5절, 2026-11-26) : 카드로 멈춘 루프를 실행 결과로 이어 감
+# 응답은 /messages와 같은 SSE. 토큰·방 오류는 스트림 시작 전 JSON(400·404). LLM 전에 인증 확인
+@router.post("/{aiCnvrsRoomSn}/agent-continue", dependencies=[Depends(require_member)])
+async def continue_agent(
+    body: AgentContinueRequest,
+    repo: Repo,
+    ai: Annotated[AiSettings, Depends(get_ai_settings)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    contexts: Annotated[RegisterContextRepository, Depends(get_register_context_repository)],
+    extractor: Annotated[RegisterExtractor, Depends(get_register_extractor)],
+    titles: Annotated[TitleGenerator, Depends(get_title_generator)],
+    agent: Annotated[ToolAgent, Depends(get_tool_agent)],
+    reader: Annotated[ToolReader, Depends(get_tool_reader)],
+    summarizer: Annotated[ConversationSummarizer, Depends(get_conversation_summarizer)],
+    room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
+) -> StreamingResponse:
+    key = settings.agent_state_key.get_secret_value()
+    turn = await service.continue_turn(repo, room_sn, body, key)
+    limits = service.AnswerLimits(settings.answer_first_token_sec, settings.answer_total_sec)
+    register = service.RegisterDeps(contexts, extractor, rules.today_kst())
+    events = service.answer_turn(
+        turn, repo, agent, ai, limits, register, titles, reader, summarizer, agent_key=key
     )
     return StreamingResponse(_sse(events), media_type="text/event-stream")
 

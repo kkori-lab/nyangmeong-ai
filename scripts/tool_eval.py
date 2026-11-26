@@ -10,6 +10,9 @@
   code는 읽기 도구를 코드에서만, both는 direct·코드 둘 다
 - --agent (2026-11-26) : 에이전트 ② 다단계 세트(docs/design/agent.md 7절, 읽기 꼴).
   가짜 Java 읽기로 루프를 끝까지 돌려 고른 도구 차례·끝(글·카드)·상한 걸림을 잰다
+  ③ 쓰기 꼴 : 행의 results(멈춤마다 카드 결과 DONE·FAILED+errors·data)로 카드에서 멈춘 루프를
+  service.agent_carry -> judge_tools(carry)로 이어 간다(agent-continue와 같은 길). pending은
+  rules.agent_more로 보고, 이어 갈 일이 없으면 끝은 "멈춤"
 pytest 수집 제외(tests/ 밖), 테스트·CI에서 미호출(AGENTS.md 5번)
 """
 
@@ -23,10 +26,10 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from app.chat import rules, service, tools, turnlog
-from app.chat.clients import AnthropicToolAgent, ToolDecision, _code_calls
+from app.chat import agentstate, rules, service, tools, turnlog
+from app.chat.clients import TOOL_LIMIT, AnthropicToolAgent, ToolDecision, _code_calls
 from app.chat.repository import get_ai_settings
-from app.chat.schemas import IntentKind
+from app.chat.schemas import AgentResult, IntentKind
 from app.core.config import get_settings
 from app.core.llm import get_anthropic_client
 from tests.chat.fakes import FakeEvalPets, FakeEvalReader, fake_catalog
@@ -34,11 +37,15 @@ from tests.chat.fakes import FakeEvalPets, FakeEvalReader, fake_catalog
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "tests/chat/data/tool_eval.jsonl"
 AGENT_DATA = ROOT / "tests/chat/data/agent_eval.jsonl"
+# ③ 쓰기 꼴(가짜 실행 결과 results) : --agent가 읽기 꼴 뒤에 이어서 잰다
+AGENT_WRITE_DATA = ROOT / "tests/chat/data/agent_write_eval.jsonl"
 # 다단계 세트 기준 날짜 : 가짜 일정(2026-11-28 병원)이 "내일"
 AGENT_TODAY = date(2026, 11, 27)
 # 다단계 정답률 기준(agent.md 7절) : 못 넘으면 --sonnet 비교 뒤 사람이 정함
 AGENT_PASS = 0.8
 CARD_END = "카드:"
+# 이어 갈 일이 없음(취소만·고칠 수 없는 실패만)으로 끝난 루프
+STOP_END = "멈춤"
 OUT_DIR = ROOT / ".cache/tool_eval"
 SONNET = "claude-sonnet-5-5"
 # 도구 고르기 기준 문항(tool-calling.md 7-1절 4회차 판정) : T01~T44
@@ -429,6 +436,17 @@ class AgentRun:
     ms: float = 0.0
     usage: Usage = field(default_factory=Usage)
     error: str | None = None
+    # ③ : 첫 멈춤에 done.pending을 줄 문장인지(rules.agent_more), 이어 간 횟수
+    pending: bool = False
+    continued: int = 0
+
+
+def agent_cards(judged: service.Judged) -> list[dict]:
+    """멈춘 카드의 {tool, input} : ACTION이면 첫 카드 + 이어 고른 카드, READ 뒤 카드면 그 카드"""
+    if judged.intent.kind is IntentKind.ACTION and judged.tool:
+        first = {"tool": judged.tool, "input": judged.action or {}}
+        return [first, *({"tool": tool, "input": values} for tool, values, _ in judged.more)]
+    return [{"tool": card.tool, "input": card.values} for card in judged.cards or []]
 
 
 def agent_end(judged: service.Judged) -> str:
@@ -447,25 +465,74 @@ async def run_agent(client, model: str, row: dict, today: date) -> AgentRun:
     ai = get_ai_settings()
     limits = get_settings()
     reader = _EmptyReader(tuple(row.get("empty", ())))
-    deps = service.ReadDeps(reader=reader, contexts=FakeEvalPets())
+    pets = FakeEvalPets()
+    trace = service._Trace()
+    deps = service.ReadDeps(reader=reader, contexts=pets, trace=trace)
     context = [{"role": "user", "content": row["q"]}]
     record = turnlog.start(0, row["q"], None)
     started = time.monotonic()
     error = None
     end = "오류"
+    pending = rules.agent_more(row["q"])
+    continued = 0
+    sec = limits.answer_first_token_sec
     try:
         judged = await service.judge_tools(
-            row["q"], context, agent, ai.max_tokens, today, limits.answer_first_token_sec, read=deps
+            row["q"], context, agent, ai.max_tokens, today, sec, read=deps
         )
-        if judged.stream is not None:
-            async for _ in judged.stream:
-                pass
+        await _drain(judged)
         end = agent_end(judged)
+        notes: list[str] = []
+        fixed = False
+        for stop in row.get("results", []) if pending else []:
+            cards = agent_cards(judged)
+            if not cards or not end.startswith(CARD_END):
+                break
+            calls = trace.follow.calls if trace.follow is not None else trace.used + 1
+            calls += len(judged.more)
+            state = agentstate.AgentState(
+                room=0,
+                q=0,
+                said=row["q"],
+                left=TOOL_LIMIT - calls,
+                seen={name: sorted(ids) for name, ids in trace.seen().items()},
+                notes=[*notes, *trace.notes],
+                cards=cards,
+                done=list(trace.done),
+                fixed=fixed,
+            )
+            results = [
+                AgentResult.model_validate({"tool": card["tool"], **result})
+                for card, result in zip(cards, stop, strict=False)
+            ]
+            carry = service.agent_carry(state, results)
+            continued += 1
+            if carry.stop or state.left <= 0:
+                end = STOP_END
+                break
+            notes = carry.notes_list
+            fixed = carry.fixed
+            trace = service._trace_of(carry)
+            deps = service.ReadDeps(reader=reader, contexts=pets, trace=trace)
+            judged = await service.judge_tools(
+                row["q"], context, agent, ai.max_tokens, today, sec, read=deps, carry=carry
+            )
+            await _drain(judged)
+            end = agent_end(judged)
     except Exception as failure:
         error = type(failure).__name__
     turnlog.finish(record)
     ms = (time.monotonic() - started) * 1000
-    return AgentRun(list(record.tools), end, list(record.tags), ms, usage, error)
+    run = AgentRun(list(record.tools), end, list(record.tags), ms, usage, error)
+    run.pending = pending
+    run.continued = continued
+    return run
+
+
+async def _drain(judged: service.Judged) -> None:
+    if judged.stream is not None:
+        async for _ in judged.stream:
+            pass
 
 
 def _matches(want: str | list[str], got: str) -> bool:
@@ -489,9 +556,13 @@ def score_agent(row: dict, run: AgentRun) -> dict:
     steps_ok = present and (not row.get("ordered") or _in_order(expected, run.steps))
     end_ok = run.end == row["end"]
     want_card = row["end"].removeprefix(CARD_END) if row["end"].startswith(CARD_END) else None
-    wrong = [name for name in run.steps if _is_write(name) and name != want_card]
+    # ③ 쓰기 꼴 : 행의 writes는 이 턴에 고를 수 있는 쓰기 도구(이어 가기 전 카드 등)
+    allowed = {want_card, *row.get("writes", ())}
+    wrong = [name for name in run.steps if _is_write(name) and name not in allowed]
+    # pending 기대가 있으면(단순 명령은 false) 같아야 정답
+    pending_ok = "pending" not in row or run.pending == row["pending"]
     return {
-        "ok": run.error is None and end_ok and steps_ok,
+        "ok": run.error is None and end_ok and steps_ok and pending_ok,
         "end_ok": end_ok,
         "steps_ok": steps_ok,
         "write_wrong": len(wrong),
@@ -533,8 +604,10 @@ def print_agent_table(sums: list[dict]) -> None:
 
 
 async def agent_main(client, options) -> None:
-    text = AGENT_DATA.read_text(encoding="utf-8")
-    rows = [json.loads(line) for line in text.splitlines() if line]
+    rows = []
+    for path in (AGENT_DATA, AGENT_WRITE_DATA):
+        text = path.read_text(encoding="utf-8")
+        rows += [json.loads(line) for line in text.splitlines() if line]
     if options.only:
         only = set(options.only.split(","))
         rows = [row for row in rows if row["id"] in only]

@@ -370,6 +370,25 @@ class ToolAgent(Protocol):
         code: CodeRun | None = None,
     ) -> AsyncIterator[str]: ...
 
+    # 에이전트 ③ 이어 가기(agent-continue) : 원래 질문에 이 턴 진행 기록(notes)을 붙여 다시 고르기
+    async def resume(
+        self, messages: list[dict], notes: str, max_tokens: int, today: date
+    ) -> ToolDecision: ...
+
+
+def with_notes(messages: list[dict], notes: str) -> list[dict]:
+    """이어 가기 메시지 : 마지막 사용자 메시지(원래 질문) 뒤에 진행 기록을 붙인 복사본
+    Messages API는 user·assistant가 번갈아야 해 새 user 턴 대신 같은 턴에 덧붙임"""
+    if not messages or messages[-1].get("role") != "user":
+        return [*messages, {"role": "user", "content": notes}]
+    last = messages[-1]
+    content = last["content"]
+    if isinstance(content, str):
+        joined: str | list = f"{content}\n\n{notes}"
+    else:
+        joined = [*content, {"type": "text", "text": notes}]
+    return [*messages[:-1], {**last, "content": joined}]
+
 
 # 확인 카드는 채팅 확인 말로 실행 (2026-11-13) : 버튼을 누르라고 안내하지 않게 (2026-11-20)
 # 2026-11-26 추가-2 : "✔ 관찰 항목 등록 — …" 뒤 "등록 됐어?"에 "아직 등록되지 않았다"고 답함
@@ -874,6 +893,12 @@ class AnthropicToolAgent:
         request["tool_choice"] = TOOL_CHOICE_NONE
         async for text in self._texts(self._events(request), time.monotonic(), "도구 결과 답변"):
             yield text
+
+    async def resume(
+        self, messages: list[dict], notes: str, max_tokens: int, today: date
+    ) -> ToolDecision:
+        # 이어 가기 첫 고르기 : 원래 질문 + 진행 기록으로 decide와 같은 고르기(도구 목록 그대로)
+        return await self.decide(with_notes(messages, notes), max_tokens, today)
 
     def _record_failure(self, final: Message | None, started: float, reason: str) -> None:
         usage = final.usage if final is not None else None

@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from datetime import date
 
 from app.chat import catalog, tools
-from app.chat.clients import FOLLOW_ROUNDS, ClassifyError, ReadMore, ToolDecision
+from app.chat.clients import FOLLOW_ROUNDS, ClassifyError, ReadMore, ToolDecision, with_notes
 from app.chat.rules import RouteRow
 from app.core.backend import external_error
 
@@ -71,6 +71,8 @@ class FakeToolAgent:
         self.follows = ((follow_tool, self.follow_raw),) if follow_tool is not None else follows
         self.decides: list[tuple[list[dict], date, RouteRow | None]] = []
         self.results: list[str | None] = []
+        # 이어 가기(agent-continue)로 받은 진행 기록
+        self.resumes: list[str] = []
 
     async def decide(
         self, messages: list[dict], max_tokens: int, today: date, hint: RouteRow | None = None
@@ -104,6 +106,13 @@ class FakeToolAgent:
                     break
         for chunk in self.answer_chunks:
             yield chunk
+
+    async def resume(
+        self, messages: list[dict], notes: str, max_tokens: int, today: date
+    ) -> ToolDecision:
+        # 이어 가기 : 진행 기록을 남기고 실제처럼 붙인 메시지로 decide
+        self.resumes.append(notes)
+        return await self.decide(with_notes(messages, notes), max_tokens, today)
 
 
 class FakeBasicToolAgent(FakeToolAgent):
