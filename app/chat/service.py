@@ -584,8 +584,7 @@ async def _unknown_pet_judged(
         return judged
     logger.info("쓰기 카드 반려동물 이름 목록에 없음: %d개", len(unknown))
     turnlog.tag(PET_UNKNOWN_TAG)
-    names = "', '".join(unknown)
-    message = PET_UNKNOWN.format(names=names, pets=_pet_names(pets)) if pets else READ_NO_PET
+    message = pet_unknown_text(PET_UNKNOWN, unknown, pets=_pet_names(pets)) if pets else READ_NO_PET
     return Judged(Intent(kind=IntentKind.SEARCH), stream=_fixed(message), notice=False)
 
 
@@ -958,8 +957,20 @@ def unknown_pets(said: Sequence[str], pets: Sequence[PetInfo], text: str) -> lis
             continue
         if any(key in pet or pet in key for pet in known):
             continue
-        found.append(key)
+        # 문장에 쓴 형태 : "구름" + 문장 "구름이 …" -> "구름이" (받침 있는 이름만)
+        if _batchim(key) and key + "이" in compact:
+            key += "이"
+        if key not in found:
+            found.append(key)
     return found
+
+
+def pet_unknown_text(template: str, unknown: Sequence[str], **values: str) -> str:
+    # 없는 반려동물 안내 : 마지막 이름 받침이면 "'구름'라는" -> "'구름'이라는"
+    text = template.format(names="', '".join(unknown), **values)
+    if unknown and _batchim(unknown[-1]):
+        text = text.replace("'라는", "'이라는", 1)
+    return text
 
 
 def _pet_names(pets: Sequence[PetInfo]) -> str:
@@ -1007,8 +1018,7 @@ async def _read_once(
         unknown = unknown_pets(catalog.said_pet_names(values), found, pets.compact)
         if unknown and not pets.named(found):
             turnlog.tag(PET_UNKNOWN_TAG)
-            names = "', '".join(unknown)
-            return _ReadOutcome(ask=PET_UNKNOWN.format(names=names, pets=_pet_names(found)))
+            return _ReadOutcome(ask=pet_unknown_text(PET_UNKNOWN, unknown, pets=_pet_names(found)))
     if "pet" in entry.hooks:
         # 읽을 반려동물 : 이름 > 펫 태그 > 모두. 상한을 넘으면 Java 미호출·이름 되물음
         found = await pets.pets()
@@ -1095,7 +1105,7 @@ async def _read_once(
     if notice_reads is not None and entry.notice:
         notice_reads.add(entry.name)
     if unknown:
-        blocks.insert(0, READ_PET_UNKNOWN_NOTE.format(names="', '".join(unknown)))
+        blocks.insert(0, pet_unknown_text(READ_PET_UNKNOWN_NOTE, unknown))
     return _ReadOutcome(result="\n\n".join(blocks))
 
 
@@ -1255,9 +1265,7 @@ class _Follow:
             if unknown and _uses_pets(card):
                 logger.info("쓰기 도구 반려동물 이름 목록에 없음: %s", call.name)
                 turnlog.tag(PET_UNKNOWN_TAG)
-                return CARD_PET_UNKNOWN_NOTE.format(
-                    names="', '".join(unknown), pets=_pet_names(found)
-                )
+                return pet_unknown_text(CARD_PET_UNKNOWN_NOTE, unknown, pets=_pet_names(found))
             named = self.pets.named(found)
             rejected = _rejected(card, raw, values)
             draft_pet = base.get(catalog.PET_SN) if base else None
