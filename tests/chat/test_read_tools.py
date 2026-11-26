@@ -168,7 +168,8 @@ def test_케어_항목_목록은_메인_표시_조건을_보내지_않아야_한
     assert reader.calls == [("/api/pets/1/care-items", {})]
 
 
-def test_도구_결과에서_메모_같은_내용_칸은_중첩까지_지워야_한다(client, java):
+def test_도구_결과의_메모_같은_내용_칸은_중첩까지_그대로_넘겨야_한다(client, java):
+    # 2026-11-25 결정 : 알레르기·메모 같은 …Cn 칸도 AI가 안다
     data = [
         {
             "schdlNm": "정기검진",
@@ -182,9 +183,7 @@ def test_도구_결과에서_메모_같은_내용_칸은_중첩까지_지워야_
 
     events(send(client, room, "다음 병원 언제야?"))
 
-    assert payload(agent.results[0]) == [
-        {"schdlNm": "정기검진", "lastCycle": {"obsrvSz": 1.5, "cyclCnt": 2}}
-    ]
+    assert payload(agent.results[0]) == data
 
 
 def test_Java_READ가_실패하면_불러오지_못함을_도구_결과로_넘겨야_한다(client, java):

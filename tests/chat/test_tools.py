@@ -606,6 +606,14 @@ def test_도구_system에는_채팅_확인_규칙이_들어가고_확인_버튼_
     assert "[확인]을 누르" not in system
 
 
+# 2026-11-26 추가-2 : 실행 결과 글(✔) 뒤 "등록 됐어?"에 아직 안 됐다고 답하지 않게
+def test_도구_system에는_결과_글이_저장_완료인지_알려_주는_규칙이_들어간다():
+    system = tool_system()
+    assert clients.ACTION_RESULT_RULE in system
+    assert "'✔'로 시작하는 결과 글은 저장" in clients.ACTION_RESULT_RULE
+    assert "'취소됨 —'·'실패 —'" in clients.ACTION_RESULT_RULE
+
+
 # 사람 확인 피드백 2차 (2026-11-25) : 대표 용어·뜻 없는 글자가 섞인 포인트
 def test_반려동물_캐릭터_도구_설명에는_대표_반려동물_용어_규칙이_들어간다():
     defs = {d["name"]: d["description"] for d in tools.tool_definitions()}
