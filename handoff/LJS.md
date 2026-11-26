@@ -1,8 +1,8 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-004 대화창 · READ 결과 내용(…Cn) 칸 모두 싣기 (반려동물 알레르기·질환·특징, 기록 메모, 추가 요청) — 검증 통과(1회차), 사람 확인 남음 (승인 2026-11-25 12:28, 시작 2026-11-25 12:24)
-- 사람 확인 남음: 검증 보고의 "사람 확인"대로 Postman으로 ① 루루(petSn 3) 알레르기 답 ② 알레르기 빈 나비(327) "등록된 알레르기 없음" ③ 까미(1) 검진 메모 답 ④ 취두부(1004) 알레르기·질환·특징 추가·빼기·바꾸기 카드 `input` 확인([확인]은 누르지 않음) → 마치면 `/end`. 참고: 일지 목록은 Java 응답에 메모 칸이 없음, "바꿔 줘" 첫 시도에 LLM이 문장 전체를 `algyCn`에 넣은 적 1/3, 커뮤니티 글·댓글 본문(`…Cn`)도 이제 LLM에 감(POL-006 정리 때 범위 포함)
+SCR-AIM-004 대화창 · READ 결과 내용(…Cn) 칸 모두 싣기 (반려동물 알레르기·질환·특징, 기록 메모, 추가 요청) — 진행 중: 기획·추가-1 검증 통과(1회차), 사람 확인 끝(2026-11-26), 추가-2 검증 남음 (승인 2026-11-25 12:28, 시작 2026-11-25 12:24)
+- 사람 확인 남음: 검증 보고의 "사람 확인"대로 Postman으로 ① 루루(petSn 3) 알레르기 답 ② 알레르기 빈 나비(327) "등록된 알레르기 없음" ③ 까미(1) 검진 메모 답 ④ 취두부(1004) 알레르기·질환·특징 추가·빼기·바꾸기 카드 `input` 확인([확인]은 누르지 않음) ⑤ 추가-2: 프론트 대화창에서 카드 실행해 "✔ …" 결과 글이 나온 뒤 "등록 됐어?" → 등록됐다고 답함 → 마치면 `/end`. 참고: 일지 목록은 Java 응답에 메모 칸이 없음, "바꿔 줘" 첫 시도에 LLM이 문장 전체를 `algyCn`에 넣은 적 1/3, 커뮤니티 글·댓글 본문(`…Cn`)도 이제 LLM에 감(POL-006 정리 때 범위 포함)
 - 원인: `rules.py` `_drop_free_text`가 이름이 `Cn`으로 끝나는 칸을 모두 빼서(2026-11-06, 메모는 외부 AI에 안 보냄) `get_pet`의 `algyCn`·`dssCn`·`chrcCn`이 LLM에 안 감 → "루루 알레르기" 질문에 "불러오지 못했어요"
   결정: 추천안대로
 - 결정(2026-11-25 사람): 반려동물 정보와 기록 메모 모두 AI가 안다. READ 결과에서 `…Cn` 칸을 빼지 않는다
@@ -20,8 +20,10 @@ SCR-AIM-004 대화창 · READ 결과 내용(…Cn) 칸 모두 싣기 (반려동�
 | 번호 | 바꿀 파일 | 완료 조건 | 요청 |
 | --- | --- | --- | --- |
 | 추가-1 | `app/chat/service.py`(또는 카드 만드는 모듈), `app/chat/rules.py`, `data/tool_prompts.yaml` `draft_pet_update`, `tests/chat/` 새 테스트 | 명령: `sh scripts/check.sh` / 화면: 알레르기 "새우"인 아이에 "알레르기에 닭고기 넣어 줘" → 카드 알레르기 칸 "새우,닭고기", "새우 알레르기 빼 줘" → 그 항목만 빠짐, "알레르기를 닭고기로 바꿔 줘" → "닭고기"만. 특징·질환도 같음 | 요청 2026-11-25 12:29 "반려동물 수정 카드에서 알레르기·질환·특징을 고칠 때 기존 값을 읽어 추가·삭제·바꾸기로 합쳐 달라(지금은 통째로 덮어써 기존 값이 지워짐)" |
+| 추가-2 | `app/chat/clients.py`(도구 고르기 시스템 규칙), `tests/chat/test_tools.py` | 명령: `sh scripts/check.sh` / 화면: 확인 카드 실행 뒤 "✔ …" 결과 글이 나온 방에서 "등록 됐어?" → 등록됐다고 답함(다시 확인 말을 하라고 하지 않음), "취소됨 —"·"실패 —" 뒤에는 저장되지 않았다고 답함 | 요청 2026-11-26 09:13 "눈 분석 관찰 항목을 등록한 뒤(✔ 결과 글 있음) 등록 됐냐고 묻자 AI가 아직 등록되지 않았다고 답함" — A안: 이것만 이번에, 기존 관찰 항목에 붙이기는 다음 마일스톤 |
 
 ## 다음에 할 것
+- 추가-2(실행 결과 글 "✔" = 저장 끝 규칙, `app/chat/clients.py` `ACTION_RESULT_RULE`) 검증 남음: `sh scripts/check.sh` 0, 검증 에이전트 보고 없음 → `/impl`로 검증 뒤 `/end`
 - 연결 남음: SCR-AIM-012 수정·삭제 도구 Java (LJS 백엔드): PR #306(`@AiTool` 17개·`@AiExclude`·수정 400 칸 이름) 병합 — AI PR과 같이. 병합 뒤 배포 Java 도구 목록에 17개가 실리는지 확인
 - 연결 남음: SCR-AIM-012 삭제 카드 프론트 (LJS 프론트, frontend 세션에 계약 알림): 입력 칸 대신 `targetText` 표시·빨간 [삭제]·다음 메시지와 `action-result`에 `targetText` 돌려보내기(지금은 `{tool, input}`만이라 결과 요약에 대상 글이 빠짐)·삭제 뒤 본창 새로고침. 커뮤니티 수정·삭제·값 비우기·참고범위는 다음 차수
 - 연결 남음: SCR-AIM-012 실행 실패 글 (LJS 프론트): `action-result` FAILED에 Java 400 `data`를 `errors`로 싣고, 빨간 Java 오류 글 대신 응답 저장 글을 보이기(`docs/api/chat.md` ActionResultRequest, 2026-11-25). 지출 `lines[0].idmptDmndId` 공백: `actionForm.js` `buildActionRequest`가 `generated: "uuid"` 칸을 안 만듦
@@ -31,7 +33,7 @@ SCR-AIM-004 대화창 · READ 결과 내용(…Cn) 칸 모두 싣기 (반려동�
 - 연결 남음: SCR-AIM-013 checkup-card 검진기록 0건 (LJS 프론트): 프론트 PR #501은 글("검진기록이 없어요")로 판단 → AI 병합 뒤 `noCardReason === "NO_CHECKUP"`으로 바꿈(프론트 핸드오프에 있음, 2026-11-24 알림 보냄)
 - 연결 남음: SCR-AIM-013 image-intent `SKIN` 분기·ASK 칩에 피부 분석 (LJS 프론트, frontend 세션에 `docs/api/chat.md` 계약과 함께 알림). 로컬 DB: 검증 대화방 652~669·685·704(메시지 2411, petSn 1006)(mbrSn 1) 정리
 - 안구 질환 분석 후속 (LJS): ① 연결 남음: 프론트 `image-intent` `EYE` 분기·ASK 칩 "눈 분석"(LJS 프론트) ② 결과 저장은 `lesion-card`로 끝(2026-11-24, 부위 얼굴 HLTC0044 미리 고름·눈 코드 추가 없음, 써 보고 불편하면 다시 정함) ③ `data/eye_lesions.yaml` 목록·위험군·안내문 검수(`rule_version` 올림) ④ 기능명세서 FN 행·화면 ID ⑤ 프론트에서 `POST /ai/eye-analyses` 부르기(LJS 프론트). 사람 얼굴 사진은 실측 안 함
-- 피부 병변 분석 후속 (LJS, `milestones/LJS.md` 피부 절): ① `data/skin_lesions.yaml` 병변 목록·위험군·안내 문장 검수(초안, `rule_version` 올림) ② 기능명세서 FN 행·화면 ID ③ 저장은 `lesion-card`로 끝(2026-11-24). 남은 것: 같은 부위를 이미 관찰 중이면 `draft_observation_cycle`로 바꾸기(부위를 회원이 카드에서 고른 뒤라 지금은 늘 새 항목) ④ 설명 LLM·지식 카드·동시 요청 429 ⑤ YOLO: AI Hub 피부질환·안구질환 데이터 약관 확인 → M3 Air(MPS)에서 일부 데이터로 한 바퀴 시간 측정 → Rust 캐릭터 서버(인스턴스 2)에 추론, 클래스는 yaml 목록과 맞춤 — 2026-11-24 frontend-9b 재요청: 누리 "털 빠짐" 항목이 있을 때 피부 사진 → 같은 이름 새 항목 카드. 기존 항목과 맞추는 기준(이름·부위)을 정해 알려 달라 함
+- 피부 병변 분석 후속 (LJS, `milestones/LJS.md` 피부 절): ① `data/skin_lesions.yaml` 병변 목록·위험군·안내 문장 검수(초안, `rule_version` 올림) ② 기능명세서 FN 행·화면 ID ③ 저장은 `lesion-card`로 끝(2026-11-24). 남은 것: 같은 부위를 이미 관찰 중이면 `draft_observation_cycle`로 바꾸기(부위를 회원이 카드에서 고른 뒤라 지금은 늘 새 항목) — 2026-11-26 사람 확인 중 눈 분석 뒤 "16시 54분 흰자 충혈에 추가해 줘"에도 새 항목 카드를 띄움(다음 마일스톤 1순위로 넘김). 분석 카드 뒤 "○○에 추가해 줘"면 `draft_observation_cycle`로(분석 메모 옮김, 두 도구 설명·분석 안내 문구), 분석 사진을 기록 카드에 붙이는 건 React와 계약 맞춤 ④ 설명 LLM·지식 카드·동시 요청 429 ⑤ YOLO: AI Hub 피부질환·안구질환 데이터 약관 확인 → M3 Air(MPS)에서 일부 데이터로 한 바퀴 시간 측정 → Rust 캐릭터 서버(인스턴스 2)에 추론, 클래스는 yaml 목록과 맞춤 — 2026-11-24 frontend-9b 재요청: 누리 "털 빠짐" 항목이 있을 때 피부 사진 → 같은 이름 새 항목 카드. 기존 항목과 맞추는 기준(이름·부위)을 정해 알려 달라 함
 - SDMA 코드 반영 (LJS): Java HLTG12에 SDMA `HLTC0078`이 생겼다(2026-11-23 도구 목록). `data/lab_items.yaml` SDMA에 `cd`를 넣고 5행 주석을 고친다 — 지금은 직접입력명으로 보내 Java가 `HLTC0035`(직접입력)로 저장. 아래 JAJ 요청 줄의 후속. 2026-11-24 미룸(사람 결정): 지금도 이름 "SDMA"로 빠짐없이 저장되고 리포트는 이름으로 읽어 영향 없음. 미룰수록 직접입력 SDMA 행이 쌓여 나중에 코드 넣으면 옛 행과 항목이 갈림(DB 정리 필요), 프론트 추이가 코드로 묶는지는 미확인
 - 연결 남음: SCR-AIM-013 대화창 PDF 프론트 (LJS 프론트, frontend 세션에 알림): `ChatInput.jsx` PDF 허용 → `image-intent` `CHECKUP_PDF`면 `POST /ai/checkups/lab-results` → `POST /ai/conversations/{방}/checkup-card`(`docs/api/chat.md`) → 기존 확인 카드로 그림. 실행 뒤 같은 `ckupRcdSn`에 PDF 첨부(`checkup-attachments`)할지 프론트가 정함
 - 같은 이름 반려동물 후속 (LJS 프론트): `PetChoiceChips`가 같은 이름이면 "연탄 (강아지·말티즈)"처럼 `petSeNm`·`vrtyNm` 표시(칩에 두 칸 실림, `docs/api/chat.md` petChoices) — frontend 세션에 알림
