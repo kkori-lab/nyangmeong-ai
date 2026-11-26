@@ -388,7 +388,7 @@ def test_반려동물_목록을_못_받으면_error_이벤트여야_한다(clien
 
     evs = events(send(client, room, "체중 어때?"))
 
-    assert [name for name, _ in evs] == ["intent", "error"]
+    assert [name for name, _ in evs] == ["intent", "step", "error"]
     assert reader.calls == []
 
 
@@ -811,7 +811,7 @@ def test_follow가_있으면_결과_답변에서_고른_읽기_도구_결과를_
     assert asyncio.run(run()) == ["7번 검진은 ", "메이병원이에요."]
     assert [c.name for c in calls] == ["get_checkup"]
     first, second = fake.requests
-    assert first["tool_choice"] == {"type": "auto", "disable_parallel_tool_use": True}
+    assert first["tool_choice"] == {"type": "auto"}  # 2026-11-26 한 응답 도구 여럿
     assert second["tool_choice"] == {"type": "none"}
     assert second["messages"][3]["content"][0]["type"] == "tool_use"
     assert second["messages"][4]["content"][0] == {

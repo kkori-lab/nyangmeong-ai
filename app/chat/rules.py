@@ -502,6 +502,28 @@ def _compact_reply(text: str) -> str:
     return re.sub(r"[\s.!~?ㅎㅋ^]+", "", text)
 
 
+# 동사형 명령 (2026-11-26 팀 합의) : 첫 턴에 확인 말 없이 바로 실행. 문장 끝이 쓰기 명령형
+# 하다형 동사 + 해 줘 등, 어형 동사(바꿔·지워 …)는 꼬리 없이도, 끝이 맨 "기록"이어도 명령
+_RUN_HA = r"(등록|수정|변경|저장|추가|기록|체크|완료|삭제)"
+_RUN_EO = r"(바꿔|바꾸어|고쳐|넣어|적어|남겨|지워|없애|올려|잡아)"
+_RUN_ASK = r"(해줄래|해줄래요|해주실래요|줄래|줄래요|주실래요)"
+_RUN_HA_TAIL = rf"(해줘|해줘요|해주세요|해주라|해둬|해놔|해|해요|하자|ㄱ|{_RUN_ASK})"
+_RUN_EO_TAIL = rf"(줘|줘요|주세요|주라|둬|놔|요|{_RUN_ASK})?"
+_RUN_NOW = re.compile(rf"(?:{_RUN_HA}{_RUN_HA_TAIL}|{_RUN_EO}{_RUN_EO_TAIL}|기록)$")
+_RUN_ASKING = re.compile(rf"{_RUN_ASK}$")
+
+
+def commands_now(text: str) -> bool:
+    """쓰기 명령형 문장("…기록해 줘"·"…지워 줘"·"…4kg 기록") : 빈 칸이 없으면 첫 턴에 바로 실행
+    - 물음표로 끝나면 "해 줄래?"처럼 부탁꼴만 명령, "등록해?"는 물음
+    - 동사 없는 말("코코 체중 4kg")·물음꼴("등록할까?")은 거짓"""
+    compact = _compact_reply(text)
+    if not _RUN_NOW.search(compact):
+        return False
+    asking = text.rstrip().endswith("?")
+    return not asking or bool(_RUN_ASKING.search(compact))
+
+
 def says_delete(text: str) -> bool:
     """삭제 동사(삭제·지워·없애)가 든 말 : 삭제 카드는 이 말이어야 실행 (2026-11-25)"""
     return bool(_DELETE_WORD.search(_compact_reply(text)))
@@ -749,6 +771,13 @@ READ_TRUNCATED = "\n(결과가 길어 앞부분만 보냄)"
 READ_FAILED = "기록을 불러오지 못함. 앱의 해당 화면에서 확인하라고 안내한다."
 # 결과를 받은 뒤 읽기 도구가 아닌 도구를 고름 : 실행하지 않고 받은 결과로 답하게
 READ_NOT_RUN = "이 도구는 실행하지 않음. 앞서 받은 결과만으로 답한다."
+# 첫 응답에 읽기 도구와 같이 고른 카드·이동 (2026-11-26 동시 도구) : 결과를 본 뒤 다시 고르게
+READ_LATER = "이 도구는 아직 실행하지 않음. 읽은 결과를 본 뒤 필요하면 다시 고른다."
+# 한 턴 도구 상한에 걸림 : 더 부르지 않고 지금까지 받은 결과로 답하게 (에이전트 루프)
+TOOL_LIMIT_REACHED = (
+    "이 턴에는 도구를 더 부를 수 없어 실행하지 않음. 지금까지 받은 결과만으로 답하고, "
+    "못 확인한 것은 앱 화면에서 보라고 안내한다."
+)
 
 
 _DATE_HEAD = re.compile(r"\d{4}-\d{2}-\d{2}(?![\d])")

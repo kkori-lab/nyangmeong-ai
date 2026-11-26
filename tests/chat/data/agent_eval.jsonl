@@ -1,0 +1,8 @@
+{"id":"A01","type":"읽기→읽기","q":"코코 체중 추이 보고 지난달 검진 기록이랑 같이 알려 줘","steps":[["get_health_indicators","list_daily_health_records"],["list_checkups","get_checkup"]],"end":"글"}
+{"id":"A02","type":"읽기→읽기","q":"코코 이번 달 병원비랑 최근 검진 기록 같이 알려 줘","steps":[["list_expenses","get_expense_total","get_expense_statistics"],["list_checkups","get_checkup"]],"end":"글"}
+{"id":"A03","type":"목록→상세","q":"코코 마지막 검진 상세 내용 알려 줘","steps":["list_checkups","get_checkup"],"ordered":true,"end":"글"}
+{"id":"A04","type":"읽기→조건 쓰기","q":"내일 코코 병원 일정 있으면 저녁 7시로 바꿔 줘","steps":["list_my_care_schedules"],"ordered":true,"end":"카드:draft_schedule_update"}
+{"id":"A05","type":"읽기→조건 쓰기","q":"내일 코코 병원 일정 있으면 저녁 7시로 바꿔 줘","empty":["schedule"],"steps":["list_my_care_schedules"],"end":"글"}
+{"id":"A06","type":"읽기 여럿→비교","q":"코코랑 뭉치 체중 비교해 줘","steps":[["get_health_indicators","list_daily_health_records"]],"end":"글"}
+{"id":"A07","type":"읽기→계산","q":"코코 지난달 병원비 얼마였고 그중 제일 큰 건 뭐였어","steps":[["list_expenses","get_expense_total","get_expense_statistics"]],"end":"글"}
+{"id":"A08","type":"하지 말 것","q":"체중 기록해 줘","steps":["draft_daily_health_record"],"end":"카드:draft_daily_health_record"}

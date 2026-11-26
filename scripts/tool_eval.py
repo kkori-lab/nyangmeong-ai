@@ -1,9 +1,15 @@
 """tool calling 1단계 평가(docs/design/tool-calling.md 7-1절). 실제 Anthropic 호출(비용이 든다)
 
 돌리기: uv run python -m scripts.tool_eval [--sonnet] [--answer] [--only T01,T05]
+        [--ptc [code|both]] [--agent]
 - 도구 흐름(service.judge_tools)을 잰다(옛 판정 service.judge는 2026-11-11 삭제)
 - 도구 목록 : 테스트와 같은 가짜 Java 목록(스냅샷 + 코드 값), Java는 부르지 않는다
 - 문항별 결과 : .cache/tool_eval/<시각>.jsonl (git 제외)
+- --ptc (2026-11-26) : 프로그래밍식 도구 호출 시험. 지금 방식과 PTC를 가짜 Java 읽기
+  (fakes.FakeEvalReader, 반려동물 10마리)로 나란히 잰다.
+  code는 읽기 도구를 코드에서만, both는 direct·코드 둘 다
+- --agent (2026-11-26) : 에이전트 ② 다단계 세트(docs/design/agent.md 7절, 읽기 꼴).
+  가짜 Java 읽기로 루프를 끝까지 돌려 고른 도구 차례·끝(글·카드)·상한 걸림을 잰다
 pytest 수집 제외(tests/ 밖), 테스트·CI에서 미호출(AGENTS.md 5번)
 """
 
@@ -13,25 +19,31 @@ import json
 import statistics
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from app.chat import rules, service, tools
-from app.chat.clients import AnthropicToolAgent, ToolDecision
+from app.chat import rules, service, tools, turnlog
+from app.chat.clients import AnthropicToolAgent, ToolDecision, _code_calls
 from app.chat.repository import get_ai_settings
 from app.chat.schemas import IntentKind
 from app.core.config import get_settings
 from app.core.llm import get_anthropic_client
-from tests.chat.fakes import fake_catalog
+from tests.chat.fakes import FakeEvalPets, FakeEvalReader, fake_catalog
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "tests/chat/data/tool_eval.jsonl"
+AGENT_DATA = ROOT / "tests/chat/data/agent_eval.jsonl"
+# 다단계 세트 기준 날짜 : 가짜 일정(2026-11-28 병원)이 "내일"
+AGENT_TODAY = date(2026, 11, 27)
+# 다단계 정답률 기준(agent.md 7절) : 못 넘으면 --sonnet 비교 뒤 사람이 정함
+AGENT_PASS = 0.8
+CARD_END = "카드:"
 OUT_DIR = ROOT / ".cache/tool_eval"
 SONNET = "claude-sonnet-5-5"
 # 도구 고르기 기준 문항(tool-calling.md 7-1절 4회차 판정) : T01~T44
 CORE = 44
-TYPES = ("사용법", "이동", "일정", "케어", "지식", "범위밖", "헷갈림", "수정")
+TYPES = ("사용법", "이동", "일정", "케어", "지식", "범위밖", "헷갈림", "수정", "조합")
 
 
 @dataclass
@@ -61,6 +73,11 @@ class Result:
     # 지연 나누기(2026-11-20) : 첫 블록까지·도구 고르기 끝까지. LLM을 안 부른 문항은 None
     first_ms: float | None = None
     decide_ms: float | None = None
+    # 프로그래밍식 도구 호출(--ptc) : 첫 글자까지, 코드 안 도구 호출 수·이름, 글 뒤 코드
+    text_ms: float | None = None
+    code_calls: int = 0
+    code_tools: list[str] = field(default_factory=list)
+    text_then_code: int = 0
 
 
 def _register_kind(values: dict) -> str:
@@ -82,12 +99,25 @@ class _DecisionRecorder(AnthropicToolAgent):
     # 첫 고르기 호출의 첫 블록 시각·고르기 끝 시각(time.monotonic)
     first_at: float | None = None
     decided_at: float | None = None
+    # 첫 글자(text_delta) 시각, 코드 안에서 부른 도구 이름(순서대로)
+    text_at: float | None = None
+    code_tools: list[str] | None = None
 
     async def _events(self, request: dict):
         async for event in super()._events(request):
-            if self.first_at is None and getattr(event, "type", None) == "content_block_start":
+            kind = getattr(event, "type", None)
+            if self.first_at is None and kind == "content_block_start":
                 self.first_at = time.monotonic()
+            delta = getattr(event, "delta", None) if kind == "content_block_delta" else None
+            if self.text_at is None and getattr(delta, "type", None) == "text_delta":
+                self.text_at = time.monotonic()
             yield event
+
+    async def _continue(self, current, final, code):
+        if self.code_tools is None:
+            self.code_tools = []
+        self.code_tools += [b.name for b in _code_calls(final)]
+        return await super()._continue(current, final, code)
 
     async def decide(self, *args, **kwargs) -> ToolDecision:
         # 첫 고르기만 남김 : 쓰기 카드 뒤 이어 고르기(한 메시지 여러 명령 ②)는 정답 셈에서 뺌
@@ -110,37 +140,64 @@ def _picked(agent: _DecisionRecorder) -> tuple[str, dict] | None:
     return call.name, call.args.model_dump(exclude_none=True)
 
 
-async def run_tools(client, model: str, q: str, today, keep_answer: bool) -> Result:
+async def run_tools(
+    client,
+    model: str,
+    q: str,
+    today,
+    keep_answer: bool,
+    ptc: str | None = None,
+    read: bool = False,
+    history: tuple[str, ...] = (),
+) -> Result:
     # 도구 흐름 판정 그대로. 글 답변 스트림은 끝까지 읽어 지연·토큰에 넣는다(1회차와 같은 셈)
-    # READ는 Java 없이 실행 안 하므로 고른 READ 이름으로, ACTION은 카드 도구 이름·LLM 인자로
+    # read 없음 : READ는 Java 없이 실행 안 하므로 고른 READ 이름으로,
+    # ACTION은 카드 도구 이름·LLM 인자로
+    # read 있음(--ptc) : 가짜 Java 읽기로 READ·코드 안 READ까지 실행(답변 지연·토큰 포함)
+    # history : 문항 앞의 답 없는 회원 질문들(이력에 질문이 둘인 경우, 2026-11-26)
     usage = Usage()
-    agent = _DecisionRecorder(client, model, on_usage=lambda _task, u: usage.add(u))
+    agent = _DecisionRecorder(client, model, on_usage=lambda _task, u: usage.add(u), ptc=ptc)
     ai = get_ai_settings()
     limits = get_settings()
+    deps = service.ReadDeps(reader=FakeEvalReader(), contexts=FakeEvalPets()) if read else None
+    context = [{"role": "user", "content": text} for text in (*history, q)]
+    record = turnlog.start(0, q, None)
     started = time.monotonic()
     try:
         judged = await service.judge_tools(
             q,
-            [{"role": "user", "content": q}],
+            context,
             agent,
             ai.max_tokens,
             today,
             limits.answer_first_token_sec,
+            read=deps,
         )
         text = None
         if judged.stream is not None:
             parts = [part async for part in judged.stream]
             text = "".join(parts)
     except Exception as error:
+        turnlog.finish(record)
         return Result(
             "error",
             usage=usage,
             error=type(error).__name__,
             text_then_tool=agent.text_then_tool,
+            code_calls=record.code,
         )
+    turnlog.finish(record)
     ms = (time.monotonic() - started) * 1000
     result = _result(judged, agent, usage, ms, text if keep_answer else None)
     result.text_then_tool = agent.text_then_tool
+    result.code_calls = record.code
+    result.code_tools = agent.code_tools or []
+    result.text_then_code = int(turnlog.TEXT_THEN_CODE in record.tags)
+    if result.tool == "answer" and result.code_tools:
+        # 코드 안에서 읽고 글로 답함 : 처음 부른 읽기 도구를 고른 도구로 셈
+        result.tool = result.code_tools[0]
+    if agent.text_at is not None:
+        result.text_ms = (agent.text_at - started) * 1000
     if agent.first_at is not None:
         result.first_ms = (agent.first_at - started) * 1000
     if agent.decided_at is not None:
@@ -155,6 +212,10 @@ def _result(
     if kind is IntentKind.ROUTE:
         return Result(tools.NAVIGATE, {"scr_id": judged.intent.scr_id}, usage, ms, answer)
     if kind is IntentKind.SEARCH:
+        picked = _picked(agent)
+        if picked is not None and tools.read_entry(picked[0]) is not None:
+            # 가짜 Java 읽기(--ptc)로 READ를 실행해 글로 답한 경우
+            return Result(picked[0], picked[1], usage, ms, answer)
         name, args = _search_tool(judged)
         return Result(name, args, usage, ms, answer)
     if kind is IntentKind.REGISTER:
@@ -237,6 +298,10 @@ def summary(name: str, rows: list[dict], results: list[Result], scores: list[dic
         "ms": statistics.median([r.ms for r in measured]) if measured else 0.0,
         "errors": len(results) - len(measured),
         "text_then_tool": sum(r.text_then_tool for r in results),
+        "text_ms": _median([r.text_ms for r in measured]),
+        "code_calls": sum(r.code_calls for r in measured) / n,
+        "code_turns": sum(bool(r.code_calls) for r in measured),
+        "text_then_code": sum(r.text_then_code for r in results),
         "core": _core(rows, results, scores),
         "by_kind": _by_kind(rows, results),
         "by_type": {
@@ -313,6 +378,15 @@ def print_tables(rows: list[dict], sums: list[dict]) -> None:
             f"| {core['ms']:,.0f}ms | {_ms(core['first_ms'])} | {_ms(core['decide_ms'])} "
             f"| {s['text_then_tool']} |"
         )
+    if any(s["code_turns"] or s["text_ms"] is not None for s in sums):
+        print()
+        print("| 흐름 | 첫 글자 중앙값 | 코드 쓴 문항 | 코드 안 호출 평균 | 글 뒤 코드 |")
+        print("| --- | --- | --- | --- | --- |")
+        for s in sums:
+            print(
+                f"| {s['name']} | {_ms(s['text_ms'])} | {s['code_turns']}/{total} "
+                f"| {s['code_calls']:.2f} | {s['text_then_code']} |"
+            )
     for s in sums:
         for scope, label in (("all", "전체"), ("core", f"T01~T{CORE}")):
             print()
@@ -332,17 +406,199 @@ def print_tables(rows: list[dict], sums: list[dict]) -> None:
         print(f"| {t} | {count} | " + " | ".join(str(s["by_type"][t]) for s in sums) + " |")
 
 
+class _EmptyReader(FakeEvalReader):
+    """경로에 이 말이 든 READ는 빈 목록 : 조건 쓰기의 '없으면 글' 꼴"""
+
+    def __init__(self, empty: tuple[str, ...] = ()) -> None:
+        super().__init__()
+        self.empty = empty
+
+    async def read(self, path: str, params: dict) -> object:
+        if any(word in path for word in self.empty):
+            self.calls.append((path, params))
+            return []
+        return await super().read(path, params)
+
+
+@dataclass
+class AgentRun:
+    # 고른 도구 차례(첫 고르기·같은 응답 여럿·결과 뒤), 끝(글·카드:도구·판정), 턴 태그
+    steps: list[str]
+    end: str
+    tags: list[str] = field(default_factory=list)
+    ms: float = 0.0
+    usage: Usage = field(default_factory=Usage)
+    error: str | None = None
+
+
+def agent_end(judged: service.Judged) -> str:
+    if judged.intent.kind is IntentKind.ACTION and judged.tool:
+        return CARD_END + judged.tool
+    if judged.cards:
+        return CARD_END + judged.cards[0].tool
+    if judged.intent.kind is IntentKind.SEARCH:
+        return "글"
+    return judged.intent.kind.value
+
+
+async def run_agent(client, model: str, row: dict, today: date) -> AgentRun:
+    usage = Usage()
+    agent = AnthropicToolAgent(client, model, on_usage=lambda _task, u: usage.add(u))
+    ai = get_ai_settings()
+    limits = get_settings()
+    reader = _EmptyReader(tuple(row.get("empty", ())))
+    deps = service.ReadDeps(reader=reader, contexts=FakeEvalPets())
+    context = [{"role": "user", "content": row["q"]}]
+    record = turnlog.start(0, row["q"], None)
+    started = time.monotonic()
+    error = None
+    end = "오류"
+    try:
+        judged = await service.judge_tools(
+            row["q"], context, agent, ai.max_tokens, today, limits.answer_first_token_sec, read=deps
+        )
+        if judged.stream is not None:
+            async for _ in judged.stream:
+                pass
+        end = agent_end(judged)
+    except Exception as failure:
+        error = type(failure).__name__
+    turnlog.finish(record)
+    ms = (time.monotonic() - started) * 1000
+    return AgentRun(list(record.tools), end, list(record.tags), ms, usage, error)
+
+
+def _matches(want: str | list[str], got: str) -> bool:
+    return got in want if isinstance(want, list) else got == want
+
+
+def _in_order(expected: list, steps: list[str]) -> bool:
+    rest = iter(steps)
+    return all(any(_matches(want, got) for got in rest) for want in expected)
+
+
+def _is_write(name: str) -> bool:
+    return name in tools.REGISTER_TOOLS or tools.card_entry(name) is not None
+
+
+def score_agent(row: dict, run: AgentRun) -> dict:
+    # 정답 : 끝이 같고 기대 도구가 모두 나옴(ordered면 그 차례로). 다른 도구를 더 읽어도 정답
+    # 쓰기 잘못 : 기대한 카드가 아닌 쓰기 도구를 고름(말하지 않은 쓰기)
+    expected = row["steps"]
+    present = all(any(_matches(want, got) for got in run.steps) for want in expected)
+    steps_ok = present and (not row.get("ordered") or _in_order(expected, run.steps))
+    end_ok = run.end == row["end"]
+    want_card = row["end"].removeprefix(CARD_END) if row["end"].startswith(CARD_END) else None
+    wrong = [name for name in run.steps if _is_write(name) and name != want_card]
+    return {
+        "ok": run.error is None and end_ok and steps_ok,
+        "end_ok": end_ok,
+        "steps_ok": steps_ok,
+        "write_wrong": len(wrong),
+        "limited": turnlog.AGENT_LIMIT in run.tags,
+    }
+
+
+def agent_summary(name: str, runs: list[AgentRun], scores: list[dict]) -> dict:
+    total = len(runs)
+    ok = sum(s["ok"] for s in scores)
+    measured = [run.ms for run in runs if run.error is None]
+    rate = ok / total if total else 0.0
+    write_wrong = sum(s["write_wrong"] for s in scores)
+    return {
+        "name": name,
+        "total": total,
+        "ok": ok,
+        "rate": rate,
+        "write_wrong": write_wrong,
+        "limited": sum(s["limited"] for s in scores),
+        "errors": sum(run.error is not None for run in runs),
+        "ms": statistics.median(measured) if measured else 0.0,
+        "passed": rate >= AGENT_PASS and write_wrong == 0,
+    }
+
+
+def print_agent_table(sums: list[dict]) -> None:
+    print(
+        f"| 흐름 | 다단계 정답 | 쓰기 잘못 | 상한 걸림 | 오류 | 턴 시간 중앙값 "
+        f"| 기준({AGENT_PASS:.0%}·쓰기 잘못 0) |"
+    )
+    print("| --- | --- | --- | --- | --- | --- | --- |")
+    for s in sums:
+        mark = "넘음" if s["passed"] else "못 넘음"
+        print(
+            f"| {s['name']} | {s['ok']}/{s['total']} ({s['rate']:.0%}) | {s['write_wrong']} "
+            f"| {s['limited']} | {s['errors']} | {s['ms']:,.0f}ms | {mark} |"
+        )
+
+
+async def agent_main(client, options) -> None:
+    text = AGENT_DATA.read_text(encoding="utf-8")
+    rows = [json.loads(line) for line in text.splitlines() if line]
+    if options.only:
+        only = set(options.only.split(","))
+        rows = [row for row in rows if row["id"] in only]
+    models = [get_settings().llm_model] + ([SONNET] if options.sonnet else [])
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    out = OUT_DIR / f"agent-{datetime.now():%Y%m%d-%H%M%S-%f}.jsonl"
+    sums = []
+    with out.open("w", encoding="utf-8") as file:
+        for model in models:
+            name = f"에이전트 {model}"
+            runs, scores = [], []
+            for row in rows:
+                run = await run_agent(client, model, row, AGENT_TODAY)
+                mark = score_agent(row, run)
+                runs.append(run)
+                scores.append(mark)
+                status = "O" if mark["ok"] else "X"
+                print(f"[{name}] {row['id']} {status} {' → '.join(run.steps) or '-'} ⇒ {run.end}")
+                record = {
+                    "flow": name,
+                    "id": row["id"],
+                    "steps": run.steps,
+                    "end": run.end,
+                    "expected": {"steps": row["steps"], "end": row["end"]},
+                    "tags": run.tags,
+                    "ms": round(run.ms),
+                    "error": run.error,
+                    **mark,
+                }
+                file.write(json.dumps(record, ensure_ascii=False) + "\n")
+            sums.append(agent_summary(name, runs, scores))
+    print()
+    print_agent_table(sums)
+    print(f"\n문항별 결과: {out}")
+
+
+def _history(row: dict) -> tuple[str, ...]:
+    return tuple(row.get("history", ()))
+
+
 async def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--sonnet", action="store_true", help="도구 흐름을 Sonnet 5.5로도 잰다")
     parser.add_argument("--answer", action="store_true", help="글 답변 본문을 결과 파일에 남긴다")
     parser.add_argument("--only", help="이 문항만 잰다(쉼표로 구분, 예: T01,T05)")
     parser.add_argument("--core", action="store_true", help=f"T01~T{CORE}만 잰다")
+    parser.add_argument(
+        "--ptc",
+        nargs="?",
+        const=tools.PTC_CODE,
+        choices=(tools.PTC_CODE, tools.PTC_BOTH),
+        help="프로그래밍식 도구 호출을 지금 방식과 나란히(가짜 Java 읽기). code(기본)·both",
+    )
+    parser.add_argument(
+        "--agent", action="store_true", help="에이전트 다단계 세트(agent_eval.jsonl)를 잰다"
+    )
     options = parser.parse_args()
 
     settings = get_settings()
     client = get_anthropic_client(settings)
     tools.use_catalog(fake_catalog())
+    if options.agent:
+        await agent_main(client, options)
+        return
     print("도구 순서:", ", ".join(d["name"] for d in tools.tool_definitions()))
     rows = [json.loads(line) for line in DATA.read_text(encoding="utf-8").splitlines() if line]
     if options.only:
@@ -352,15 +608,66 @@ async def main() -> None:
         rows = [row for row in rows if int(row["id"][1:]) <= CORE]
     today = rules.today_kst()
 
+    read = options.ptc is not None
+    model = settings.llm_model
     flows = [
         (
-            f"도구 {settings.llm_model}",
-            lambda q: run_tools(client, settings.llm_model, q, today, options.answer),
+            f"도구 {model}",
+            lambda row: run_tools(
+                client, model, row["q"], today, options.answer, read=read, history=_history(row)
+            ),
         ),
     ]
+    if options.ptc is not None:
+        mode = options.ptc
+        flows.append(
+            (
+                f"PTC({mode}) {model}",
+                lambda row: run_tools(
+                    client,
+                    model,
+                    row["q"],
+                    today,
+                    options.answer,
+                    ptc=mode,
+                    read=True,
+                    history=_history(row),
+                ),
+            )
+        )
     if options.sonnet:
         flows.append(
-            (f"도구 {SONNET}", lambda q: run_tools(client, SONNET, q, today, options.answer))
+            (
+                f"도구 {SONNET}",
+                lambda row: run_tools(
+                    client,
+                    SONNET,
+                    row["q"],
+                    today,
+                    options.answer,
+                    read=read,
+                    history=_history(row),
+                ),
+            )
+        )
+
+    if options.sonnet and options.ptc is not None:
+        # 추가-1 (2026-11-26) : Sonnet 5.5의 PTC 흐름도
+        sonnet_mode = options.ptc
+        flows.append(
+            (
+                f"PTC({sonnet_mode}) {SONNET}",
+                lambda row: run_tools(
+                    client,
+                    SONNET,
+                    row["q"],
+                    today,
+                    options.answer,
+                    ptc=sonnet_mode,
+                    read=True,
+                    history=_history(row),
+                ),
+            )
         )
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -371,7 +678,7 @@ async def main() -> None:
         for name, run in flows:
             results, scores = [], []
             for row in rows:
-                result = await run(row["q"])
+                result = await run(row)
                 mark = score(row, result)
                 results.append(result)
                 scores.append(mark)
@@ -387,6 +694,10 @@ async def main() -> None:
                     "first_ms": None if result.first_ms is None else round(result.first_ms),
                     "decide_ms": None if result.decide_ms is None else round(result.decide_ms),
                     "error": result.error,
+                    "text_ms": None if result.text_ms is None else round(result.text_ms),
+                    "code_calls": result.code_calls,
+                    "code_tools": result.code_tools,
+                    "text_then_code": result.text_then_code,
                     **mark,
                 }
                 if result.answer is not None:

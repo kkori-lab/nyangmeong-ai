@@ -323,7 +323,7 @@ def test_관찰_항목을_읽은_뒤_고른_관찰_기록은_목록의_번호와
     )
     room = room_of(client, java, pet_sn=CHOCO)
 
-    evs = events(send(client, room, "초코 등에 난 혹 오늘 1.2cm야 기록해 줘"))
+    evs = events(send(client, room, "초코 등에 난 혹 오늘 1.2cm야 기록할까?"))
 
     assert agent.results[1].startswith(ACTION_SHOWN.split("{summary}")[0])
     action = evs[-1][1]["action"]

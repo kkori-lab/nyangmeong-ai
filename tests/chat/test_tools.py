@@ -522,7 +522,7 @@ def test_도구_요청은_도구_정의와_캐시한_system과_오늘_날짜를_
 
     body = fake.requests[0]
     assert [t["name"] for t in body["tools"]] == [d["name"] for d in tools.tool_definitions()]
-    assert body["tool_choice"] == {"type": "auto", "disable_parallel_tool_use": True}
+    assert body["tool_choice"] == {"type": "auto"}  # 2026-11-26 한 응답 도구 여럿
     assert body["system"][0]["cache_control"] == {"type": "ephemeral"}
     assert body["system"][1]["text"] == "오늘: 2026-09-29 (화)"
     assert body["messages"] == CONTEXT

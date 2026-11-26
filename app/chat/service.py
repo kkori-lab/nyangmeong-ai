@@ -4,6 +4,7 @@ import logging
 import re
 import time
 from collections.abc import AsyncIterator, Callable, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
@@ -14,7 +15,8 @@ from pydantic.alias_generators import to_camel
 
 from app.chat import catalog, rules, tools, turnlog
 from app.chat.clients import (
-    READ_LIMIT,
+    PTC_CALL_LIMIT,
+    TOOL_LIMIT,
     AnswerError,
     ClassifyError,
     ConversationSummarizer,
@@ -69,6 +71,7 @@ from app.chat.schemas import (
     RegisterDraft,
     RegisterResult,
     RegisterResultRequest,
+    StepEvent,
     StreamError,
 )
 from app.core.backend import BackendError, external_error, failure_reason
@@ -140,6 +143,12 @@ READ_MAX_PETS = 10
 READ_CONCURRENCY = 4
 # READ 결과 글의 마리별 머리줄 : LLM이 "선택된 반려동물 기준" 같은 말을 지어내지 않게
 READ_PET_LABEL = "조회한 반려동물: {name}"
+# 프로그래밍식 도구 호출 시험 (2026-11-26) : 코드에 돌려주는 tool_result 글(회원에게 안 보임)
+# allowed_callers는 보안 경계가 아니라 서버가 막음(문서). 읽기 도구만 코드에서
+CODE_NOT_READ = (
+    "이 도구는 코드에서 부를 수 없음. 읽기 도구만 코드에서 부르고 나머지는 코드 밖에서 부른다."
+)
+CODE_LIMIT = "코드 안 도구 호출 상한({limit}번)을 넘어 실행하지 않음. 받은 결과로 답한다."
 # READ 결과를 본 LLM이 쓰기 도구를 고른 경우의 tool_result : 카드는 done.action으로
 # 결과 뒤 navigate의 결과 글 : 화면은 옮기지 않고 답 아래 바로가기 버튼(done.shortcut)
 ROUTE_SHOWN = (
@@ -152,6 +161,11 @@ ACTION_SHOWN = (
     "확인 카드를 만듦(아직 저장 안 됨). 카드 내용: {summary}. "
     "회원이 대화로 '등록해 줘'라고 말해야 저장된다. 카드 내용을 그대로 보여 주고, "
     "맞으면 '등록해 줘'라고 말해 달라고 한두 문장으로 안내한다."
+)
+# 동사형 명령(2026-11-26) : READ 뒤 카드도 빈 칸이 없으면 확인 말 없이 이 턴에 실행 지시
+ACTION_RUN_SHOWN = (
+    "확인 카드를 만듦. 카드 내용: {summary}. 회원이 바로 하라고 했으므로 이 턴에 실행된다. "
+    "확인을 묻지 말고 카드 내용을 짧게 보여 준 뒤 '등록할게요.'로 끝낸다."
 )
 # 확인 카드를 모달 대신 채팅으로 확인 (2026-11-13) : 카드 턴의 저장 글과 다음 턴의 확인·취소
 ACTION_ASK_TEMPLATE = "이렇게 할까요?\n{summary}"
@@ -183,7 +197,7 @@ VALUE_UNITS = {"체중": "kg", "식사량": "g", "음수량": "ml", "산책": "�
 ACTION_FAILED_FIX = "{names} 다시 확인해 주세요."
 ACTION_FAILED_FIX_UNNAMED = "입력값을 다시 확인해 주세요."
 ACTION_DROP_MESSAGE = "등록하지 않았어요."
-# 한 메시지 여러 명령 ② (2026-11-19) : 한 메시지 확인 카드 최대 수(READ 상한과 같음)
+# 한 메시지 여러 명령 ② (2026-11-19) : 한 메시지 확인 카드 최대 수(에이전트 ③에서 프론트 합의 뒤 8)
 ACTION_MAX_CARDS = 3
 # 쓰기 카드 뒤 이어 주는 말이 있을 때 남은 쓰기 도구를 이어 고르는 tool_result
 ACTION_CHAINED = (
@@ -281,6 +295,15 @@ def _target_missing_note(entry: "catalog.CatalogEntry") -> str:
 
 # SSE 이벤트 하나 : (이름, 내용)
 Event = tuple[str, BaseModel | dict]
+# 에이전트 루프 step 이벤트를 받는 곳 : 답변 스트림을 읽는 _search_answer가 정함
+# 도구 고르기 중 코드 안 READ(프로그래밍식 도구 호출 시험)는 이 값이 없어 안 보냄
+_STEP_SINK: ContextVar[Callable[[StepEvent], None] | None] = ContextVar("step_sink", default=None)
+
+
+def _step(entry: "catalog.CatalogEntry", kind: str) -> None:
+    sink = _STEP_SINK.get()
+    if sink is not None:
+        sink(StepEvent(tool=entry.name, label=entry.label or entry.name, kind=kind))
 
 
 async def create_conversation(
@@ -380,9 +403,13 @@ async def judge_tools(
         # 추가 요청(2026-11-06) : 키워드에 걸린 문장은 질문꼴이 아니어도 힌트와 함께 도구 고르기
         # FN-AIM-002-10 : 도구 고르기 장애·시간 초과면 그 행으로 이동(LLM 장애와 무관)
         row = rules.match_route(text)
+    # 프로그래밍식 도구 호출 시험 : 코드 안 READ와 그 뒤 READ 답변이 같은 반려동물·번호 칸을 씀
+    follow = _ptc_follow(agent, text, read)
     try:
         async with asyncio.timeout(first_token_sec):
-            decision = await agent.decide(context, max_tokens, today, hint=row)
+            decision = await agent.decide(
+                context, max_tokens, today, hint=row, **_code_kw(agent, follow)
+            )
     except (ClassifyError, TimeoutError) as error:
         if isinstance(error, TimeoutError):
             # LLM 오류(ClassifyError)는 클라이언트가 로그, 시간 초과는 취소라 여기서 한 줄
@@ -398,9 +425,10 @@ async def judge_tools(
     if decision.call is not None:
         turnlog.picked(decision.call.name)
     judged = _tool_judged(
-        text, context, agent, decision, max_tokens, today, read, prior, now, priors
+        text, context, agent, decision, max_tokens, today, read, prior, now, priors, follow
     )
-    if judged.intent.kind is IntentKind.ACTION and rules.chains_more(text):
+    several = len(decision.all_calls()) > 1
+    if judged.intent.kind is IntentKind.ACTION and (several or rules.chains_more(text)):
         judged = await _chain_cards(
             text, context, agent, decision, judged, max_tokens, today, first_token_sec, now, priors
         )
@@ -420,37 +448,46 @@ async def _chain_cards(
     priors: Sequence[ActionDraft],
 ) -> Judged:
     # 한 메시지 여러 명령 ② : 쓰기 카드 결과를 돌려주고 남은 쓰기 도구를 이어 고름(최대 3장)
+    # 한 응답에 쓰기 도구 여럿(2026-11-26 동시 도구)이면 그 응답에서 먼저 모음
     # 같은 도구·쓰기 아닌 도구·글·장애면 거기서 멈추고 모은 카드만
     # 이어 고르기 전체가 첫 글자 제한 안
     picked = [judged.tool]
     more: list[tuple[str, dict, tuple[str, ...]]] = []
     messages = context
     current = decision
+    calls = list(decision.all_calls()[1:])
+    used = [decision.call.use_id] if decision.call is not None else []
     try:
         async with asyncio.timeout(first_token_sec):
             while len(picked) < ACTION_MAX_CARDS:
-                messages = with_result(messages, current.content, current.call, ACTION_CHAINED)
-                current = await agent.decide(messages, max_tokens, today)
-                call = current.call
-                if call is not None:
+                stop = False
+                for call in calls:
+                    if len(picked) >= ACTION_MAX_CARDS:
+                        break
                     turnlog.picked(call.name)
-                if call is None:
+                    nxt = _chained_card(text, call, picked, today, now, priors)
+                    if nxt is None:
+                        stop = True
+                        break
+                    picked.append(call.name)
+                    used.append(call.use_id)
+                    more.append((call.name, nxt.action or {}, nxt.rejected))
+                if stop or len(picked) >= ACTION_MAX_CARDS or not rules.chains_more(text):
+                    break
+                messages = with_result(
+                    [*messages, *current.history],
+                    current.content,
+                    current.call,
+                    ACTION_CHAINED,
+                    dict.fromkeys(used, ACTION_CHAINED),
+                )
+                current = await agent.decide(messages, max_tokens, today)
+                calls = list(current.all_calls())
+                used = []
+                if not calls:
                     if current.text is not None:
                         await _drop_text(current.text)
                     break
-                if call.args is None or tools.card_entry(call.name) is None:
-                    logger.info("이어 고른 도구 쓰기 아님: %s", call.name)
-                    break
-                if call.name in picked:
-                    logger.info("같은 쓰기 도구 두 번 버림: %s", call.name)
-                    break
-                card = tools.card_entry(call.name)
-                nxt = _card_judged(text, call, card, today, None, now, priors)
-                if nxt.intent.kind is not IntentKind.ACTION:
-                    logger.info("이어 고른 쓰기 도구 대상 번호 없음: %s", call.name)
-                    break
-                picked.append(call.name)
-                more.append((call.name, nxt.action or {}, nxt.rejected))
     except (ClassifyError, TimeoutError) as error:
         logger.warning(
             "쓰기 이어 고르기 실패(%s): 카드 %d장으로", type(error).__name__, len(picked)
@@ -458,6 +495,30 @@ async def _chain_cards(
     if more:
         logger.info("한 메시지 쓰기 카드 %d장: %s", len(picked), ", ".join(picked))
     return replace(judged, more=tuple(more))
+
+
+def _chained_card(
+    text: str,
+    call: tools.ToolCall,
+    picked: list[str],
+    today: date,
+    now: datetime | None,
+    priors: Sequence[ActionDraft],
+) -> "Judged | None":
+    # 이어 고른(또는 같은 응답의) 쓰기 도구 -> 카드 판정
+    # 쓰기 아님·같은 도구·대상 번호 없음이면 None
+    card = tools.card_entry(call.name)
+    if call.args is None or card is None:
+        logger.info("이어 고른 도구 쓰기 아님: %s", call.name)
+        return None
+    if call.name in picked:
+        logger.info("같은 쓰기 도구 두 번 버림: %s", call.name)
+        return None
+    nxt = _card_judged(text, call, card, today, None, now, priors)
+    if nxt.intent.kind is not IntentKind.ACTION:
+        logger.info("이어 고른 쓰기 도구 대상 번호 없음: %s", call.name)
+        return None
+    return nxt
 
 
 async def _drop_text(stream: AsyncIterator[str]) -> None:
@@ -494,15 +555,20 @@ def _tool_judged(
     prior: ActionDraft | None = None,
     now: datetime | None = None,
     priors: Sequence[ActionDraft] = (),
+    follow: "_Follow | None" = None,
 ) -> Judged:
     # 도구 -> intent 값 (설계 6절). CARD 도구는 ACTION(등록 카드 2개도 ④부터)
+    # follow : 프로그래밍식 도구 호출을 켰을 때 도구 고르기 중 코드 안 READ를 실행한 것
     call = decision.call
     if call is None:
         if decision.text is not None:
             # FN-AIM-002-03 : 인사·잡담에 대한 바로 답은 고지 없음(추가 요청 2026-11-09),
             # 건강 말이 없는 바로 답("오늘 날씨 어때?")도 고지 없음(2026-11-25)
+            # 코드 안에서 고지 READ가 성공했으면 고지
             talk = rules.is_small_talk(text)
             notice = not talk and rules.is_health_topic(text)
+            if follow is not None and follow.notice_reads:
+                notice = True
             # FN-AIM-002-04 : 질문 글이 룰 키워드에 걸리면 그 행을 바로가기로, 인사·잡담 제외
             shortcut = _keyword_shortcut(text) if not talk else None
             return Judged(
@@ -533,6 +599,8 @@ def _tool_judged(
         cards: list[ActionCard] = []
         notice_reads: set[str] = set()
         shortcuts: list[Intent] = []
+        if follow is not None:
+            cards, notice_reads, shortcuts = follow.cards, follow.notice_reads, follow.shortcuts
         stream = _read_answer(
             text,
             context,
@@ -545,6 +613,7 @@ def _tool_judged(
             cards,
             notice_reads,
             shortcuts,
+            follow,
         )
         return Judged(
             Intent(kind=IntentKind.SEARCH),
@@ -573,7 +642,9 @@ def _tool_judged(
     notice_reads: set[str] = set()
     shortcuts: list[Intent] = []
     follow = _Follow(text, read, cards, notice_reads, shortcuts)
-    stream = agent.answer(context, decision, guide, max_tokens, today, follow)
+    stream = agent.answer(
+        context, decision, guide, max_tokens, today, follow, **_code_kw(agent, follow)
+    )
     return Judged(
         Intent(kind=IntentKind.SEARCH),
         shortcut,
@@ -662,7 +733,13 @@ def _route_mixed(
     shortcuts: list[Intent] = [intent]
     follow = _Follow(text, read, cards, notice_reads, shortcuts)
     answer = agent.answer(
-        context, decision, ROUTE_SHOWN.format(name=row.name), max_tokens, today, follow
+        context,
+        decision,
+        ROUTE_SHOWN.format(name=row.name),
+        max_tokens,
+        today,
+        follow,
+        **_code_kw(agent, follow),
     )
     return Judged(
         Intent(kind=IntentKind.SEARCH),
@@ -869,18 +946,50 @@ async def _read_answer(
     cards: list[ActionCard] | None = None,
     notice_reads: set[str] | None = None,
     shortcuts: list[Intent] | None = None,
+    follow: "_Follow | None" = None,
 ) -> AsyncIterator[str]:
-    follow = _Follow(text, read, cards, notice_reads, shortcuts)
+    if follow is None:
+        follow = _Follow(text, read, cards, notice_reads, shortcuts)
     # 되물음·실패만이거나 고지 READ가 아니면 notice_reads가 비어 고지 없음(FN-AIM-002-03)
-    first = await _read_once(
-        entry, decision.call, follow.pets, follow.seen, notice_reads, follow.rows
+    # 한 응답의 읽기 도구 여럿(2026-11-26) : 첫 도구와 함께 한 턴 TOOL_LIMIT까지 동시에 실행
+    # 같은 응답의 카드·이동은 실행하지 않고 결과를 본 뒤 다시 고르게(READ_LATER)
+    rest = decision.all_calls()[1:]
+    reads = [c for c in rest if tools.read_entry(c.name) is not None]
+    extra = reads[: TOOL_LIMIT - 1]
+    for call in extra:
+        turnlog.picked(call.name)
+    if len(reads) > len(extra):
+        skipped = len(reads) - len(extra)
+        logger.info("첫 응답 읽기 도구 상한(%d): %d개 실행 안 함", TOOL_LIMIT, skipped)
+        turnlog.tag(turnlog.AGENT_LIMIT)
+    if extra:
+        logger.info("첫 응답 읽기 도구 %d개 동시 실행", len(extra) + 1)
+    _step(entry, "READ")
+    for call in extra:
+        if call.args is not None:
+            _step(tools.read_entry(call.name), "READ")
+    outcomes = await asyncio.gather(
+        _read_once(entry, decision.call, follow.pets, follow.seen, notice_reads, follow.rows),
+        *(_extra_read(call, follow, notice_reads) for call in extra),
     )
+    first = outcomes[0]
     if first.ask is not None:
         yield first.ask
         return
-    follow.reads = 1
+    follow.reads = 1 + len(extra)
+    follow.calls = 1 + len(extra)
+    results: dict[str, str] = {}
+    for call in rest:
+        if tools.read_entry(call.name) is None:
+            results[call.use_id] = rules.READ_LATER
+    for call, outcome in zip(extra, outcomes[1:], strict=True):
+        results[call.use_id] = outcome.result if outcome.ask is None else rules.READ_FAILED
+    if results:
+        decision = replace(decision, results=tuple(results.items()))
 
-    answer = agent.answer(context, decision, first.result, max_tokens, today, follow)
+    answer = agent.answer(
+        context, decision, first.result, max_tokens, today, follow, **_code_kw(agent, follow)
+    )
     produced = False
     try:
         async for chunk in answer:
@@ -894,11 +1003,22 @@ async def _read_answer(
         yield _worded(READ_EMPTY_CARD_MESSAGE, cards) if cards else READ_EMPTY_MESSAGE
 
 
+async def _extra_read(
+    call: tools.ToolCall, follow: "_Follow", notice_reads: set[str] | None
+) -> "_ReadOutcome":
+    # 첫 응답의 두 번째부터 읽기 도구 : 인자 거부면 불러오지 못함
+    entry = tools.read_entry(call.name)
+    if entry is None or call.args is None:
+        logger.info("같이 고른 읽기 도구 인자 거부: %s", call.name)
+        return _ReadOutcome(result=rules.READ_FAILED)
+    return await _read_once(entry, call, follow.pets, follow.seen, notice_reads, follow.rows)
+
+
 class _Follow:
     """결과 답변 중 LLM이 고른 도구 실행(FollowRead). READ 답변·사용법 답변이 같이 쓴다
     - 쓰기 도구 : 번호 칸은 이 턴 READ 결과 값만, 카드 1개로 끝냄(목록→완료 체크)
     - 이동·사용법 : 화면을 옮기지 않고 바로가기(한 메시지 여러 일 ①)
-    - 읽기 도구 : 한 턴 최대 READ_LIMIT번, 반려동물을 못 정하면 불러오지 못함"""
+    - 읽기 도구 : 반려동물을 못 정하면 불러오지 못함. 모든 도구 합쳐 한 턴 TOOL_LIMIT번까지"""
 
     def __init__(
         self,
@@ -919,14 +1039,25 @@ class _Follow:
         self.notice_reads = notice_reads
         self.shortcuts = shortcuts
         self.reads = 0
+        # 이 턴 도구 호출 수(첫 고르기 도구 포함) : TOOL_LIMIT까지
+        self.calls = 1
+        # 코드 실행 안 도구 호출 수 : TOOL_LIMIT과 따로 PTC_CALL_LIMIT까지
+        self.code_calls = 0
 
     async def __call__(self, call: tools.ToolCall) -> str | None:
         turnlog.picked(call.name)
+        # 한 응답 읽기 여럿은 동시에 불리지만 첫 await 전에 세어 상한을 넘지 않음
+        if self.calls >= TOOL_LIMIT:
+            logger.info("한 턴 도구 상한(%d): %s 실행 안 함", TOOL_LIMIT, call.name)
+            turnlog.tag(turnlog.AGENT_LIMIT)
+            return rules.TOOL_LIMIT_REACHED
+        self.calls += 1
         card = tools.card_entry(call.name)
         if card is not None and call.args is not None and self.cards is not None:
             if self.cards:
                 logger.info("쓰기 도구 두 번째 실행 안 함: %s", call.name)
                 return None
+            _step(card, "CARD")
             found = await self.pets.pets() if _uses_pets(card) else []
             raw = call.args.model_dump(exclude_none=True)
             # 돌려받은 같은 도구 카드가 있으면 그 input에 이 턴 값을 덮어씀(검사 수치 카드 검진기록)
@@ -947,19 +1078,61 @@ class _Follow:
                 card, values, found, named, draft_pet, self.read.room_pet, rejected, target
             )
             self.cards.append(shown)
-            return _worded(ACTION_SHOWN, [shown]).format(summary=action_summary(shown))
+            shown_text = ACTION_RUN_SHOWN if self.runs_now() else ACTION_SHOWN
+            return _worded(shown_text, [shown]).format(summary=action_summary(shown))
         if call.name in (tools.NAVIGATE, tools.SEARCH_GUIDE) and call.args is not None:
             return _follow_screen(call, self.text, self.shortcuts)
         entry = tools.read_entry(call.name)
-        if entry is None or call.args is None or self.reads >= READ_LIMIT:
+        if entry is None or call.args is None:
             logger.info("결과 뒤 도구 실행 안 함: %s", call.name)
             return None
         self.reads += 1
+        _step(entry, "READ")
         outcome = await _read_once(entry, call, self.pets, self.seen, self.notice_reads, self.rows)
         if outcome.ask is not None:
             return rules.READ_FAILED
         # READ 뒤에도 쓰기 카드는 한 번 고를 수 있게 (2단계 ②, 목록 두 번 → 수정 카드)
         return ReadMore(outcome.result)
+
+    def runs_now(self) -> bool:
+        # 돌려받은 카드가 없는 턴의 명령형 문장이고 카드에 빈 칸이 없음 (_search_answer와 같은 판정)
+        return not self.read.priors and runs_now(self.cards or [], self.text)
+
+    async def code(self, call: tools.ToolCall) -> str:
+        """코드 실행 안에서 부른 도구(프로그래밍식 도구 호출 시험, 2026-11-26)
+        - 읽기 도구만 실행(지금 READ와 같은 반려동물·번호 칸 규칙). 카드·이동·사용법·decline은 거부
+        - 결과 글은 코드로 돌아감(회원에게 안 보임). 되물음 문구도 그대로 돌려줌"""
+        turnlog.code_call()
+        self.code_calls += 1
+        if self.code_calls > PTC_CALL_LIMIT:
+            logger.info("코드 안 도구 상한: %s", call.name)
+            turnlog.tag("code_limit")
+            return CODE_LIMIT.format(limit=PTC_CALL_LIMIT)
+        entry = tools.read_entry(call.name)
+        if entry is None:
+            logger.info("코드 안 도구 거부: %s", call.name)
+            turnlog.tag("code_refused")
+            return CODE_NOT_READ
+        if call.args is None:
+            logger.info("코드 안 도구 인자 거부: %s", call.name)
+            turnlog.tag(turnlog.BAD_ARGS)
+            return rules.READ_FAILED
+        outcome = await _read_once(entry, call, self.pets, self.seen, self.notice_reads, self.rows)
+        return outcome.ask if outcome.ask is not None else outcome.result
+
+
+def _ptc_follow(agent: ToolAgent, text: str, read: "ReadDeps | None") -> "_Follow | None":
+    # 프로그래밍식 도구 호출을 켠 에이전트(ptc)이고 READ를 할 수 있을 때만
+    if getattr(agent, "ptc", None) is None or read is None:
+        return None
+    return _Follow(text, read, [], set(), [])
+
+
+def _code_kw(agent: ToolAgent, follow: "_Follow | None") -> dict:
+    # ptc를 켠 에이전트에만 code를 넘김(가짜 에이전트·지금 방식은 인자 그대로)
+    if follow is None or getattr(agent, "ptc", None) is None:
+        return {}
+    return {"code": follow.code}
 
 
 def _follow_screen(call: tools.ToolCall, text: str, shortcuts: list[Intent] | None) -> str | None:
@@ -1327,6 +1500,15 @@ async def _run_turn(
             cards = await _action_reply(text, turn, judged, register)
             if reader is not None:
                 cards = [await merge_pet_lists(card, text, reader) for card in cards]
+            if not turn.priors() and runs_now(cards, text):
+                # 동사형 명령(2026-11-26) : 빈 칸이 없으면 확인 말 없이 첫 턴에 실행 지시
+                # 돌려받은 카드를 고치는 말("4.5로 바꿔 줘")은 지금처럼 확인 말을 기다림
+                logger.info("명령 바로 실행 지시: %s", ", ".join(card.tool for card in cards))
+                turnlog.tag(turnlog.RUN_NOW)
+                saved = await _save(repo, turn.room_sn, action_run_message(cards, text), True)
+                done = AnswerDone(message=saved, action=cards[0], actions=cards, execute=True)
+                emit(("done", done))
+                return
             # 카드 요약을 글로 저장 : 모달 대신 채팅으로 확인, 다음 턴 맥락에도 남음 (2026-11-13)
             saved = await _save(repo, turn.room_sn, action_ask_message(cards, text), True)
             emit(("done", AnswerDone(message=saved, action=cards[0], actions=cards)))
@@ -1371,18 +1553,34 @@ async def _search_answer(
     started_at = loop.time()
     deadline = started_at + limits.total_sec
     first_deadline = started_at + limits.first_token_sec
+    # 첫 이벤트 제한(docs/design/agent.md 3절) : step이 먼저 오면 첫 글자는 전체 제한까지만
+    waiting: list[asyncio.Timeout] = []
+    stepped = False
+
+    def on_step(event: StepEvent) -> None:
+        nonlocal stepped
+        emit(("step", event))
+        stepped = True
+        if waiting:
+            waiting.pop().reschedule(deadline)
+
+    sink = _STEP_SINK.set(on_step)
     try:
         # 첫 글자 전 실패 : 미저장·안내, 사용자 메시지는 남아 [다시 시도]로 재호출
         reason = "empty"
         try:
-            async with asyncio.timeout_at(min(deadline, first_deadline)):
+            async with asyncio.timeout_at(min(deadline, first_deadline)) as timer:
+                waiting.append(timer)
                 first = await anext(stream, None)
         except TimeoutError:
             first = None
-            reason = "total_timeout" if deadline <= first_deadline else "first_token_timeout"
+            total = deadline <= first_deadline or stepped
+            reason = "total_timeout" if total else "first_token_timeout"
         except AnswerError as error:
             first = None
             reason = error.reason
+        finally:
+            waiting.clear()
         if first is None:
             # 추가 요청 : 실패 이유 한 줄(원문 없음)
             if reason.endswith("timeout"):
@@ -1416,6 +1614,7 @@ async def _search_answer(
             )
     finally:
         await stream.aclose()
+        _STEP_SINK.reset(sink)
     body = "".join(chunks)
     text = body
     if complete and notice():
@@ -1429,7 +1628,19 @@ async def _search_answer(
     # FN-AIM-002-04 : 확인 카드가 같이 나가는 턴은 바로가기 없음
     shortcut = None if action is not None else shortcut
     actions = [action] if action is not None else None
-    done = AnswerDone(message=message, shortcut=shortcut, action=action, actions=actions)
+    # 동사형 명령(2026-11-26) : READ 뒤 카드도 빈 칸이 없으면 이 턴에 실행 지시(완료 답변만)
+    execute = (
+        complete
+        and action is not None
+        and not turn.priors()
+        and runs_now([action], turn.question.cnvrs_cn)
+    )
+    if execute:
+        logger.info("READ 뒤 카드 바로 실행 지시: %s", action.tool)
+        turnlog.tag(turnlog.RUN_NOW)
+    done = AnswerDone(
+        message=message, shortcut=shortcut, action=action, actions=actions, execute=execute
+    )
     emit(("done", done))
     return body if complete else None
 
@@ -2337,13 +2548,38 @@ async def _action_answer(
         emit(("done", AnswerDone(message=saved, action=cards[0], actions=cards)))
         return
     logger.info("확인 카드 실행 지시: %s", ", ".join(card.tool for card in cards))
-    photo = any(_photo_missing(card) for card in cards)
-    execute = (ACTION_EXECUTE_PHOTO_MESSAGE if photo else ACTION_EXECUTE_MESSAGE).replace(
-        ACTION_VERB_ADD, verb
-    )
-    saved = await _save(repo, turn.room_sn, execute, True)
+    saved = await _save(repo, turn.room_sn, _execute_line(cards), True)
     done = AnswerDone(message=saved, action=cards[0], actions=cards, execute=True)
     emit(("done", done))
+
+
+def _execute_line(cards: Sequence[ActionCard]) -> str:
+    # 실행 지시 글 : "등록할게요."(동사는 카드 종류, 사진 칸만 빈 카드가 있으면 "사진과 함께 …")
+    photo = any(_photo_missing(card) for card in cards)
+    return _worded(ACTION_EXECUTE_PHOTO_MESSAGE if photo else ACTION_EXECUTE_MESSAGE, cards)
+
+
+def runs_now(cards: Sequence[ActionCard], text: str) -> bool:
+    """동사형 명령(2026-11-26 팀 합의) : 첫 턴에 확인 말 없이 바로 실행할지
+    - 쓰기 명령형 문장이고 말로 물을 빈 칸(같은 이름 반려동물 포함)이 없을 때
+    - 삭제 카드는 삭제 동사가 든 말일 때만(섞이면 "진행"도)"""
+    if not cards or not rules.commands_now(text):
+        return False
+    return not _missing_lines(list(cards)) and _delete_confirmed(cards, text)
+
+
+def action_run_message(cards: list[ActionCard], said: str = "") -> str:
+    """바로 실행 턴의 저장 글 : 요약(여럿이면 번호 줄) + 반올림 안내 + 실행 지시 글"""
+    if len(cards) == 1:
+        lines = [action_summary(cards[0])]
+    else:
+        lines = [
+            ACTION_ASK_LINE.format(no=no, summary=action_summary(item))
+            for no, item in enumerate(cards, start=1)
+        ]
+    lines += _rounded_lines(cards, said)
+    lines.append(_execute_line(cards))
+    return "\n".join(lines)
 
 
 def _delete_confirmed(cards: Sequence[ActionCard], text: str) -> bool:

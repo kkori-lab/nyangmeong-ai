@@ -347,3 +347,51 @@ class FakeToolCatalogClient:
 @functools.cache
 def fake_catalog() -> catalog.Catalog:
     return catalog.build(catalog.ToolCatalogResponse.model_validate(fake_catalog_json()))
+
+
+# 프로그래밍식 도구 호출 평가용 가짜 Java 읽기 (scripts/tool_eval.py --ptc, 2026-11-26)
+# 테스트·평가 둘 다 외부 API 없이. 경로 말로 대충 맞춘 행을 돌려준다(값은 평가에 의미 없음)
+EVAL_PET_NAMES = ("코코", "뭉치", "초코", "까미", "보리", "두부", "콩이", "별이", "하루", "모카")
+
+
+class FakeEvalPets:
+    """양육 중인 반려동물 10마리(register-context get_pets 흉내)"""
+
+    async def get_pets(self) -> list:
+        from app.chat.repository import PetInfo
+
+        return [PetInfo(n, name, pet_se_nm="강아지") for n, name in enumerate(EVAL_PET_NAMES, 1)]
+
+
+class FakeEvalReader:
+    """READ 도구 Java 응답 흉내 : 경로 말로 가계부·일정·건강·검진 행, 나머지는 기록 한 줄
+    받은 경로·query(calls) 기록"""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+
+    async def read(self, path: str, params: dict) -> object:
+        self.calls.append((path, params))
+        pet = params.get("petSn", 1)
+        if "expense" in path:
+            return [
+                {
+                    "expndSn": 10 + n,
+                    "petSn": pet,
+                    "expndYmd": f"2026-1{n}-05",
+                    "expndAmt": 30000 * n,
+                }
+                for n in (0, 1)
+            ]
+        if "schedule" in path:
+            return [
+                {"schdlSn": 5, "petSn": pet, "schdlNm": "병원", "schdlBgngDt": "2026-11-28 15:00"}
+            ]
+        if "checkup" in path:
+            return [{"ckupRcdSn": 7, "petSn": pet, "ckupYmd": "2026-10-02", "hsptlNm": "메이병원"}]
+        if "health" in path or "daily" in path:
+            return [
+                {"dailyRcdSn": 20 + n, "rcdYmd": f"2026-11-{20 + n}", "bdwg": round(4 + n * 0.1, 2)}
+                for n in range(3)
+            ]
+        return [{"sn": 1, "petSn": pet, "memo": "기록"}]

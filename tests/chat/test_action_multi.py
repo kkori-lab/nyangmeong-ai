@@ -38,7 +38,7 @@ HOSPITAL = {
     "schdl_ymd": "2026-10-06",
     "schdl_tm": "15:00",
 }
-CHAINED = "초코 오늘 8시 반 체중 4.2kg 기록하고 10월 6일 3시 병원 일정도 잡아줘"
+CHAINED = "초코 오늘 8시 반 체중 4.2kg 기록하고 10월 6일 3시 병원 일정도 잡을까?"
 
 
 async def _chunks(texts) -> AsyncIterator[str]:
@@ -105,7 +105,7 @@ def two_cards(client, java) -> tuple[int, dict]:
         (CHAINED, True),
         ("몸무게 기록하고 일정 잡아줘", True),
         ("체중이랑 일정 넣어줘", True),
-        ("초코 오늘 8시 반 체중 4.2kg 기록해줘", False),
+        ("초코 오늘 8시 반 체중 4.2kg 기록할까?", False),
         ("내일 3시 병원 일정 잡아줘", False),
     ],
 )
@@ -141,7 +141,7 @@ def test_이어_주는_말이_없으면_LLM_한_번에_카드_하나다(client, 
     use_agent(client, agent)
     room = room_of(client, java, pet_sn=CHOCO)
 
-    done = done_of(send(client, room, "초코 오늘 8시 반 체중 4.2kg 기록해줘"))
+    done = done_of(send(client, room, "초코 오늘 8시 반 체중 4.2kg 기록할까?"))
 
     assert len(agent.decides) == 1
     assert [card["tool"] for card in done["actions"]] == [HEALTH]
@@ -279,7 +279,7 @@ def test_등록과_수정_카드가_섞이면_진행해_줘로_확인을_안내�
     room = room_of(client, java, pet_sn=CHOCO)
 
     done = done_of(
-        send(client, room, "초코 오늘 8시 반 체중 4.2kg 기록하고 목표 체중도 4kg로 바꿔줘")
+        send(client, room, "초코 오늘 8시 반 체중 4.2kg 기록하고 목표 체중도 4kg로 바꿀까?")
     )
 
     assert [card["tool"] for card in done["actions"]] == [HEALTH, "draft_pet_update"]

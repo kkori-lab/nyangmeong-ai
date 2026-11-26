@@ -88,3 +88,9 @@
 {"id": "T88", "type": "지식", "q": "코코 요즘 물 잘 마셔?", "intent": "최근 추이 : get_health_indicators (겹치는 READ 갈림, 2026-11-18)", "tool": "get_health_indicators"}
 {"id": "T89", "type": "섞임", "q": "코코 오늘 몸무게 4.2kg 기록하고 내일 오후 3시 병원 일정도 잡아줘", "intent": "쓰기 둘 : 앞의 체중 기록 카드 먼저, 일정은 이어 고르기 (여러 명령 ②, 2026-11-19)", "tool": "draft_daily_health_record", "args": {"daily_rcd_idct_cd": "HLTC0014"}}
 {"id": "T90", "type": "섞임", "q": "모레 뭉치 미용 일정 넣고 오늘 코코 몸무게 4.5kg도 기록해줘", "intent": "쓰기 둘 : 앞의 미용 일정 카드 먼저, 체중은 이어 고르기 (여러 명령 ②, 2026-11-19)", "tool": "draft_schedule", "args": {"schdl_knd_cd": "HLTC0058"}}
+{"id":"T91","type":"조합","q":"우리 애들 체중 최신으로 다 알려줘","intent":"10마리 최신 체중 모으기 (PTC 시험, 2026-11-26)","tool":["get_health_indicators","list_daily_health_records","list_pets"]}
+{"id":"T92","type":"조합","q":"코코 검진 기록 전부 상세까지 정리해줘","intent":"목록 뒤 상세 N건 (PTC 시험, 2026-11-26)","tool":["list_checkups","get_checkup"]}
+{"id":"T93","type":"조합","q":"이번 달 지출이랑 이번 주 병원 일정 같이 알려줘","intent":"두 도메인 합치기 (PTC 시험, 2026-11-26)","tool":["get_expense_total","list_expenses","get_expense_statistics","list_my_care_schedules"]}
+{"id":"T94","type":"조합","q":"이번 달 지출이 지난달보다 늘었어?","intent":"기간 비교 (PTC 시험, 2026-11-26)","tool":["get_expense_total","list_expenses","get_expense_statistics","list_expense_months"]}
+{"id":"T95","type":"조합","q":"뭉치랑 코코 중에 최근 3달 체중이 더 많이 는 애는 누구야?","intent":"두 마리 기간 비교 계산 (PTC 시험, 2026-11-26)","tool":["get_health_indicators","list_daily_health_records"]}
+{"id":"T96","type":"조합","history":["이번 달 지출 얼마야?"],"q":"코코 몸무게 최신으로 알려줘","intent":"답 없는 질문이 이력에 둘 : 지금 질문만 (disable_parallel_tool_use 없음, 2026-11-26)","tool":["get_health_indicators","list_daily_health_records"]}

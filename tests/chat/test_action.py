@@ -50,7 +50,7 @@ def test_건강_일지_요청은_ACTION_카드에_Java_칸과_검증한_값을_�
     agent = use_agent(client, weight_agent(rcd_tm="08:30"))
     room = room_of(client, java)
 
-    evs = events(send(client, room, "초코 오늘 아침 8시 반 체중 4.2kg 기록해줘"))
+    evs = events(send(client, room, "초코 오늘 아침 8시 반 체중 4.2kg 기록할까?"))
 
     assert names(evs) == ["intent", "done"]
     assert evs[0][1]["kind"] == "ACTION"
@@ -82,7 +82,7 @@ def test_건강_일지_요청은_ACTION_카드에_Java_칸과_검증한_값을_�
     assert evs[1][1]["card"] is None
     assert evs[1][1]["message"]["cnvrsCn"].startswith("이렇게 할까요?")  # 2026-11-13 채팅으로 확인
     assert len(java.ai_messages(room)) == 1
-    assert agent.decides[0][2] == rules.match_route("초코 오늘 아침 8시 반 체중 4.2kg 기록해줘")
+    assert agent.decides[0][2] == rules.match_route("초코 오늘 아침 8시 반 체중 4.2kg 기록할까?")
 
 
 def test_월_지출_한도_요청은_반려동물_없이_ACTION_카드여야_한다(client, java):
@@ -226,7 +226,7 @@ def test_케어_목록을_읽은_뒤_고른_완료_체크는_목록에_나온_�
     reader = use_reader(client, FakeToolReader([{"careArtclSn": 7, "careArtclNm": "산책"}]))
     room = room_of(client, java, pet_sn=CHOCO)
 
-    evs = events(send(client, room, "오늘 산책 완료 체크해줘"))
+    evs = events(send(client, room, "오늘 산책 완료 체크할까?"))
 
     assert evs[0][1]["kind"] == "SEARCH"
     assert len(reader.calls) == 1
