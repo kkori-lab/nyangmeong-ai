@@ -143,6 +143,17 @@ ANSWER_ERROR_MESSAGE = "일시적으로 답변할 수 없어요"
 # READ 도구 : 반려동물을 못 정하면 Java 미호출, 고정 문구로 되물음 (2026-11-06 LJS 결정)
 READ_PET_ASK = "어느 아이의 기록을 볼까요? {names} 중에서 이름을 넣어 다시 물어봐 주세요."
 READ_NO_PET = "등록된 반려동물이 없어요. 반려동물을 먼저 등록해 주세요."
+# 문장에 쓴 이름이 반려동물 목록에 없음 (2026-11-26 추가-2) : 카드·READ 없이 안내
+PET_UNKNOWN = "'{names}'라는 아이는 등록돼 있지 않아요. {pets} 중에서 이름을 넣어 다시 말해 주세요."
+# 여럿 중 일부만 없음(READ) : 있는 아이는 읽고, 없는 아이는 LLM이 답에서 알림
+READ_PET_UNKNOWN_NOTE = (
+    "'{names}'라는 아이는 등록돼 있지 않음(이 아이 기록은 없음). 답에서 그렇게 알린다."
+)
+# 결과 뒤 고른 쓰기 도구의 이름이 목록에 없음 : 카드를 만들지 않고 LLM이 안내
+CARD_PET_UNKNOWN_NOTE = (
+    "'{names}'라는 아이는 등록돼 있지 않아 카드를 만들지 않음. "
+    "등록된 아이({pets}) 중에서 이름을 넣어 다시 말해 달라고 한다."
+)
 # READ 도구 : 한 번에 읽는 반려동물 상한과 Java 동시 호출 수 (2026-11-09 LJS 결정)
 READ_MAX_PETS = 10
 READ_CONCURRENCY = 4
@@ -379,6 +390,8 @@ class Judged:
     # ACTION 고치기 : 돌려받은 같은 도구 카드가 여럿(반려동물별로 나눈 카드)일 때
     # 그 카드마다 (목록 번호, 검증한 input, 비운 칸). 어느 카드를 고칠지는 _action_reply가 정함
     per_prior: tuple[tuple[int, dict, tuple[str, ...]], ...] = ()
+    # ACTION : 도구 인자 pet_name(문장에 쓴 반려동물 이름, 추가-2). 목록에 없으면 안내 글로
+    pet_names: tuple[str, ...] = ()
 
 
 def _guide_shortcut(chunk_id: str) -> Intent | None:
@@ -468,6 +481,9 @@ async def _chain_cards(
     # 같은 도구·쓰기 아닌 도구·글·장애면 거기서 멈추고 모은 카드만
     # 이어 고르기 전체가 첫 글자 제한 안
     picked = [judged.tool]
+    # 고른 카드 (도구, input) : 같은 도구를 값만 달리 다시 고를 때 비교 (에이전트 ④)
+    chosen: list[dict] = [{"tool": judged.tool, "input": judged.action or {}}]
+    names = list(judged.pet_names)
     more: list[tuple[str, dict, tuple[str, ...]]] = []
     messages = context
     current = decision
@@ -481,11 +497,13 @@ async def _chain_cards(
                     if len(picked) >= ACTION_MAX_CARDS:
                         break
                     turnlog.picked(call.name)
-                    nxt = _chained_card(text, call, picked, today, now, priors)
+                    nxt = _chained_card(text, call, picked, chosen, today, now, priors)
                     if nxt is None:
                         stop = True
                         break
                     picked.append(call.name)
+                    chosen.append({"tool": call.name, "input": nxt.action or {}})
+                    names.extend(nxt.pet_names)
                     used.append(call.use_id)
                     more.append((call.name, nxt.action or {}, nxt.rejected))
                 if stop or len(picked) >= ACTION_MAX_CARDS or not rules.chains_more(text):
@@ -510,29 +528,35 @@ async def _chain_cards(
         )
     if more:
         logger.info("한 메시지 쓰기 카드 %d장: %s", len(picked), ", ".join(picked))
-    return replace(judged, more=tuple(more))
+    return replace(judged, more=tuple(more), pet_names=tuple(dict.fromkeys(names)))
 
 
 def _chained_card(
     text: str,
     call: tools.ToolCall,
     picked: list[str],
+    chosen: Sequence[dict],
     today: date,
     now: datetime | None,
     priors: Sequence[ActionDraft],
 ) -> "Judged | None":
     # 이어 고른(또는 같은 응답의) 쓰기 도구 -> 카드 판정
-    # 쓰기 아님·같은 도구·대상 번호 없음이면 None
+    # 쓰기 아님·대상 번호 없음이면 None
+    # 같은 도구는 새 명령(돌려받은 카드 없음)이고 쓰기 동사 수가 남았고 값이 다를 때만 (에이전트 ④)
     card = tools.card_entry(call.name)
     if call.args is None or card is None:
         logger.info("이어 고른 도구 쓰기 아님: %s", call.name)
         return None
-    if call.name in picked:
+    again = call.name in picked
+    if again and (priors or len(picked) >= rules.write_count(text)):
         logger.info("같은 쓰기 도구 두 번 버림: %s", call.name)
         return None
     nxt = _card_judged(text, call, card, today, None, now, priors)
     if nxt.intent.kind is not IntentKind.ACTION:
         logger.info("이어 고른 쓰기 도구 대상 번호 없음: %s", call.name)
+        return None
+    if again and _repeats(chosen, call.name, nxt.action or {}):
+        logger.info("같은 쓰기 도구 같은 값 버림: %s", call.name)
         return None
     return nxt
 
@@ -548,6 +572,21 @@ async def _drop_text(stream: AsyncIterator[str]) -> None:
         aclose = getattr(stream, "aclose", None)
         if aclose is not None:
             await aclose()
+
+
+async def _unknown_pet_judged(
+    judged: Judged, text: str, contexts: RegisterContextRepository
+) -> Judged:
+    # 쓰기 카드의 pet_name이 목록에 없음(추가-2) : 카드 없이 안내 글(SEARCH), 고지 없음
+    pets = await contexts.get_pets()
+    unknown = unknown_pets(judged.pet_names, pets, text)
+    if not unknown:
+        return judged
+    logger.info("쓰기 카드 반려동물 이름 목록에 없음: %d개", len(unknown))
+    turnlog.tag(PET_UNKNOWN_TAG)
+    names = "', '".join(unknown)
+    message = PET_UNKNOWN.format(names=names, pets=_pet_names(pets)) if pets else READ_NO_PET
+    return Judged(Intent(kind=IntentKind.SEARCH), stream=_fixed(message), notice=False)
 
 
 def _prior_for(
@@ -720,6 +759,7 @@ def _card_judged(
         action=values,
         rejected=rejected,
         per_prior=per_prior,
+        pet_names=tuple(catalog.said_pet_names(args)),
     )
 
 
@@ -903,6 +943,29 @@ class _ReadPets:
         return tagged or pets
 
 
+PET_UNKNOWN_TAG = "pet_unknown"
+
+
+def unknown_pets(said: Sequence[str], pets: Sequence[PetInfo], text: str) -> list[str]:
+    """문장에 쓴 이름 중 반려동물 목록에 없는 것 (2026-11-26 추가-2)
+    - 문장에 없는 이름(LLM이 지어냄)은 버림. "탄이"·"탄"처럼 한쪽이 다른 쪽을 품으면 있는 이름"""
+    compact = re.sub(r"\s+", "", text)
+    known = [re.sub(r"\s+", "", pet.pet_nm) for pet in pets if pet.pet_nm]
+    found: list[str] = []
+    for name in said:
+        key = re.sub(r"\s+", "", name)
+        if not key or key not in compact or key in found:
+            continue
+        if any(key in pet or pet in key for pet in known):
+            continue
+        found.append(key)
+    return found
+
+
+def _pet_names(pets: Sequence[PetInfo]) -> str:
+    return ", ".join(dict.fromkeys(pet.pet_nm for pet in pets))
+
+
 def _same_name_kind(pet: PetInfo, pets: list[PetInfo]) -> str:
     """같은 이름 반려동물 READ 구별 (2026-11-23) : 이름이 또 있는 아이만 "강아지·말티즈".
     종·품종이 없으면 빈 글자(이름만)"""
@@ -937,6 +1000,15 @@ async def _read_once(
     today = pets.read.now.date() if pets.read.now is not None else rules.today_kst()
     values = catalog.fill_default_period(entry, values, today)
     targets: list[PetInfo | None] = [None]
+    unknown: list[str] = []
+    if catalog.PET_HOOKS & set(entry.hooks):
+        # 문장에 쓴 이름이 목록에 없음(추가-2) : 아는 이름이 하나도 없으면 Java 미호출 안내
+        found = await pets.pets()
+        unknown = unknown_pets(catalog.said_pet_names(values), found, pets.compact)
+        if unknown and not pets.named(found):
+            turnlog.tag(PET_UNKNOWN_TAG)
+            names = "', '".join(unknown)
+            return _ReadOutcome(ask=PET_UNKNOWN.format(names=names, pets=_pet_names(found)))
     if "pet" in entry.hooks:
         # 읽을 반려동물 : 이름 > 펫 태그 > 모두. 상한을 넘으면 Java 미호출·이름 되물음
         found = await pets.pets()
@@ -1022,6 +1094,8 @@ async def _read_once(
         blocks.append(text)
     if notice_reads is not None and entry.notice:
         notice_reads.add(entry.name)
+    if unknown:
+        blocks.insert(0, READ_PET_UNKNOWN_NOTE.format(names="', '".join(unknown)))
     return _ReadOutcome(result="\n\n".join(blocks))
 
 
@@ -1177,6 +1251,13 @@ class _Follow:
                 logger.info("쓰기 도구 대상 번호 없음: %s", call.name)
                 turnlog.tag("target_missing")
                 return _target_missing_note(card)
+            unknown = unknown_pets(catalog.said_pet_names(raw), found, self.text)
+            if unknown and _uses_pets(card):
+                logger.info("쓰기 도구 반려동물 이름 목록에 없음: %s", call.name)
+                turnlog.tag(PET_UNKNOWN_TAG)
+                return CARD_PET_UNKNOWN_NOTE.format(
+                    names="', '".join(unknown), pets=_pet_names(found)
+                )
             named = self.pets.named(found)
             rejected = _rejected(card, raw, values)
             draft_pet = base.get(catalog.PET_SN) if base else None
@@ -1222,7 +1303,10 @@ class _Follow:
     def _continues(self) -> bool:
         # 바로 실행한 뒤 이어 가는 카드인지(_pending과 같은 문장 판정) : 키 있음 + 카드 뒤 할 일
         trace = self.read.trace
-        return trace is not None and bool(trace.key) and rules.agent_more(self.text)
+        if trace is None or not trace.key:
+            return False
+        # _pending과 같은 판정 : 이 턴 실행 끝난 카드 + 지금까지 보인 카드
+        return rules.agent_pending(self.text, len(trace.done) + len(self.cards or []))
 
     async def code(self, call: tools.ToolCall) -> str:
         """코드 실행 안에서 부른 도구(프로그래밍식 도구 호출 시험, 2026-11-26)
@@ -1619,6 +1703,8 @@ async def _run_turn(
                 priors,
                 carry,
             )
+            if judged.intent.kind is IntentKind.ACTION and judged.pet_names:
+                judged = await _unknown_pet_judged(judged, text, register.contexts)
         emit(("intent", judged.intent))
         kind = judged.intent.kind
         if kind is IntentKind.SEARCH:
@@ -1884,7 +1970,7 @@ def _pending(
     if not key or not cards:
         return None
     said = turn.question.cnvrs_cn
-    if not rules.agent_more(said):
+    if not rules.agent_pending(said, len(trace.done) + len(cards)):
         return None
     left = TOOL_LIMIT - calls
     if left <= 0:

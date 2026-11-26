@@ -788,7 +788,7 @@ _AGENT_MORE = re.compile(
 )
 # 쓰기 동사 : 원래 문장에 쓰기가 몇 개 있는지(말하지 않은 쓰기 막기)
 _WRITE_VERB = re.compile(
-    r"기록|등록|추가|넣|만들|수정|바꾸|바꿔|변경|고쳐|삭제|지워|지우|체크|저장|잡아"
+    r"기록|등록|추가|넣|만들|수정|바꾸|바꿔|변경|고쳐|삭제|지워|지우|체크|저장|잡아|잡고"
 )
 
 
@@ -797,6 +797,23 @@ def agent_more(text: str) -> bool:
     - "체중 4.2kg 기록하고 지난주보다 늘었는지 알려 줘"·"검진기록 만들고 수치도 넣어 줘" : 참
     - "산책 30분 기록해 줘" 같은 단순 명령 하나 : 거짓(지금 흐름과 같음)"""
     return _AGENT_MORE.search(text) is not None
+
+
+# 쓰기 뒤 묻는 말 : 카드를 실행한 뒤 읽기·답이 남음 (에이전트 ④)
+_AGENT_ASK = re.compile(
+    r"(하고|한\s*뒤|한\s*다음|하고\s*나서|그리고|고\s*나서|만들고|넣고|바꾸고|고치고|지우고|잡고)"
+    r".*(알려|확인|비교|보여|봐|어때|어떤지|얼마|늘었|줄었)"
+)
+
+
+def agent_pending(text: str, executed: int) -> bool:
+    """done.pending을 줄 문장인지 (에이전트 ④, 2026-11-26)
+    - executed : 이 턴에서 실행이 끝났거나 이번에 실행할 카드 수
+    - 쓰기 뒤 묻는 말이 있거나(읽기·답이 남음) 문장의 쓰기 동사가 executed보다 많을 때만 참
+    - "체중 기록하고 산책도 기록해 줘"를 카드 두 장으로 실행하면 거짓(남은 일 없음)"""
+    if not agent_more(text):
+        return False
+    return _AGENT_ASK.search(text) is not None or write_count(text) > executed
 
 
 # 쓰기 동사 + 이어 주는 말("기록하고"·"만들고") : 카드 뒤 다른 일이 이어지는 명령

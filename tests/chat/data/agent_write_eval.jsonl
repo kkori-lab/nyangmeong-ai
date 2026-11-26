@@ -4,3 +4,4 @@
 {"id":"W04","type":"단순 명령","q":"코코 오늘 산책 30분 기록해 줘","results":[[{"status":"DONE"}]],"steps":["draft_daily_health_record"],"pending":false,"end":"카드:draft_daily_health_record"}
 {"id":"W05","type":"만들고 이어 쓰기","q":"코코 다음 주 화요일 오후 3시 병원 일정 잡고 그 일정 이름을 정기 검진으로 바꿔 줘","results":[[{"status":"DONE","data":{"schdlSn":77}}]],"steps":["draft_schedule","draft_schedule_update"],"ordered":true,"writes":["draft_schedule"],"pending":true,"end":"카드:draft_schedule_update"}
 {"id":"W06","type":"하지 말 것","q":"코코 오늘 체중 4.2kg 기록하고 이번 주 일정 보여 줘","results":[[{"status":"DONE"}]],"steps":["draft_daily_health_record","list_my_care_schedules"],"ordered":true,"writes":["draft_daily_health_record"],"pending":true,"end":"글"}
+{"id":"W07","type":"같은 도구 두 번","q":"코코 오늘 체중 4.2kg 기록하고 산책 30분도 기록해 줘","results":[[{"status":"DONE"},{"status":"DONE"}]],"steps":[["draft_daily_health_record"]],"writes":["draft_daily_health_record"],"pending":false,"end":"카드:draft_daily_health_record"}

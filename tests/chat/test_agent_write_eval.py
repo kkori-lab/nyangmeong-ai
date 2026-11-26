@@ -50,10 +50,10 @@ def test_pending_기대가_다르면_오답이어야_한다():
     assert not score_agent(ROW, run)["ok"]
 
 
-def test_쓰기_꼴은_6개이고_id가_겹치지_않아야_한다():
+def test_쓰기_꼴은_7개이고_id가_겹치지_않아야_한다():
     rows = _rows()
 
-    assert len(rows) == 6
+    assert len(rows) == 7
     assert len({row["id"] for row in rows}) == len(rows)
     assert all(row["id"].startswith("W") for row in rows)
 
@@ -74,5 +74,6 @@ def test_쓰기_꼴_문항의_도구_끝_결과가_맞는_모양이어야_한다
         for result in stop:
             parsed = AgentResult.model_validate({"tool": "draft_schedule", **result})
             assert parsed.status in ActionStatus
-    # pending 기대는 rules.agent_more와 같아야(평가가 pending을 이 규칙으로 봄)
-    assert rules.agent_more(row["q"]) is row["pending"]
+    # pending 기대는 rules.agent_pending(첫 멈춤 카드 수)과 같아야 (에이전트 ④)
+    first = len(row["results"][0]) if row["results"] else 1
+    assert rules.agent_pending(row["q"], first) is row["pending"]

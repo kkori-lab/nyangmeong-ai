@@ -32,6 +32,8 @@ TEXT_TAGS: dict[str, tuple[str, ...]] = {
     "error": ("ANSWER_ERROR_MESSAGE",),
     "pet_ask": ("READ_PET_ASK",),
     "no_pet": ("READ_NO_PET",),
+    # 문장에 쓴 이름이 목록에 없음(2026-11-26 추가-2). LLM에 주는 글 둘은 그 자리에서 태그(tag)
+    "pet_unknown": ("PET_UNKNOWN", "READ_PET_UNKNOWN_NOTE", "CARD_PET_UNKNOWN_NOTE"),
     "target_missing": (
         "TARGET_MISSING_MESSAGE",
         "ADD_TARGET_MISSING_MESSAGE",
