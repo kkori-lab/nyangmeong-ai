@@ -12,7 +12,7 @@
   가짜 Java 읽기로 루프를 끝까지 돌려 고른 도구 차례·끝(글·카드)·상한 걸림을 잰다
   ③ 쓰기 꼴 : 행의 results(멈춤마다 카드 결과 DONE·FAILED+errors·data)로 카드에서 멈춘 루프를
   service.agent_carry -> judge_tools(carry)로 이어 간다(agent-continue와 같은 길). pending은
-  rules.agent_more로 보고, 이어 갈 일이 없으면 끝은 "멈춤"
+  rules.agent_pending(첫 멈춤 카드 수)으로 보고(④), 이어 갈 일이 없으면 끝은 "멈춤"
 pytest 수집 제외(tests/ 밖), 테스트·CI에서 미호출(AGENTS.md 5번)
 """
 
@@ -436,7 +436,7 @@ class AgentRun:
     ms: float = 0.0
     usage: Usage = field(default_factory=Usage)
     error: str | None = None
-    # ③ : 첫 멈춤에 done.pending을 줄 문장인지(rules.agent_more), 이어 간 횟수
+    # ③ : 첫 멈춤에 done.pending을 줄지(rules.agent_pending), 이어 간 횟수
     pending: bool = False
     continued: int = 0
 
@@ -473,7 +473,7 @@ async def run_agent(client, model: str, row: dict, today: date) -> AgentRun:
     started = time.monotonic()
     error = None
     end = "오류"
-    pending = rules.agent_more(row["q"])
+    pending = False
     continued = 0
     sec = limits.answer_first_token_sec
     try:
@@ -482,6 +482,9 @@ async def run_agent(client, model: str, row: dict, today: date) -> AgentRun:
         )
         await _drain(judged)
         end = agent_end(judged)
+        # 에이전트 ④ : 첫 멈춤 카드 수로 남은 일 판정(service._pending과 같은 규칙)
+        first = agent_cards(judged)
+        pending = bool(first) and rules.agent_pending(row["q"], len(first))
         notes: list[str] = []
         fixed = False
         for stop in row.get("results", []) if pending else []:
