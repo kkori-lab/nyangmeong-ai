@@ -443,7 +443,59 @@ Python이 Java 내부 GET을 쿠키와 함께 불러 결과를 LLM에 돌려주�
   - `tools`: LLM이 고른 도구 이름(결과 뒤 고른 것까지 순서대로), `reads`·`java`: READ 도구 실행 횟수와 Java 호출 수
   - `result`: `ok`·`card`(확인 카드)·`execute`(실행 지시)·`error`, `cards`: 카드 수
   - `tags`: 실패 종류. 회원에게 보이는 고정 문구는 `TEXT_TAGS`(service 문구 상수 이름 → 태그)로 `done` 글에서, LLM이 다시 쓰는 실패(`read_failed`·`read_no_args`·`bad_args`·`timeout`·`incomplete`·`exception` 등)는 그 코드 자리에서 붙인다. 새 문구 상수는 `TEXT_TAGS`나 `QUIET`에 넣어야 테스트가 통과한다
+  - `code`: 코드 실행 안 도구 호출 수(프로그래밍식 도구 호출 시험, 10절). 0이면 칸을 쓰지 않는다. 태그 `text_then_code`(글 뒤 코드 실행)·`code_refused`(코드에서 부른 읽기 아닌 도구)·`code_limit`(호출 상한)·`code_rounds`(왕복 상한)
   - `prev`·`retry`: 바로 앞 AI 메시지에 실패 태그가 있고 이번 글이 "아니…"·"여기서 해"·"대화창에서 해"·"그게 아니라"면 재요청 후보
 - 확인 카드 결과(`action-result`)마다: `카드 결과 room=7 tool=draft_expense_limit status=FAILED errors=1`
 - 회원 문장·답변 글·도구 인자 값은 남기지 않는다. 날짜는 로그 파일 이름(`ai_YYYY-MM-DD.log`)
 - 집계: `uv run python -m scripts.turn_stats <LOG_DIR> [--weeks 4]` → ISO 주별 턴 수·종류·결과·도구·READ 횟수·실패 태그 비율·재요청 후보·카드 결과
+
+## 10. 프로그래밍식 도구 호출 시험 (2026-11-26, 읽기만)
+
+읽기 도구를 코드 실행(`code_execution_20260120`) 안에서 부르게 하는 시험. 기본은 꺼짐(`LLM_PTC=false`), 응답 계약은 그대로.
+
+- 켜면: 읽기 도구 정의에만 `allowed_callers: ["code_execution_20260120"]`(`tool_eval --ptc both`는 direct도), 도구 끝에 코드 실행 도구, system `TOOL_RULES` 뒤에 `PTC_RULES`. `tool_choice`는 `{"type": "auto"}`(`disable_parallel_tool_use`와 같이 못 씀)
+- 루프(`AnthropicToolAgent`): 응답의 `tool_use` 중 `caller`가 코드 실행인 것을 모두 실행해 tool_result만 담은 user 턴으로 돌려주고 `container` id·같은 tools로 다시 요청(`pause_turn`도 다시). 코드 왕복은 READ 라운드(`FOLLOW_ROUNDS`)에 세지 않고 왕복 상한 `PTC_ROUNDS`
+- 서버가 막는 것(`_Follow.code`): `allowed_callers`는 보안 경계가 아니므로 코드에서 부른 쓰기·navigate·search_guide·decline은 실행하지 않고 `CODE_NOT_READ`. 코드 안 호출 상한 `PTC_CALL_LIMIT = 20`(넘으면 `CODE_LIMIT`). 읽기는 지금 READ와 같은 `_read_once`(반려동물 고르기·번호 칸·고지 공유)
+- 글 뒤 코드: 흘린 글 뒤에 이어 가고 태그 `text_then_code`
+- 턴 기록: `code=<코드 안 호출 수>`(9절)
+
+### 10-1. 평가 (`tool_eval --ptc`, Haiku 5.5, 96문항, 가짜 Java 읽기·반려동물 10마리, 1회)
+
+| 흐름 | 도구 정확 | 쓰기 잘못 | T01~T44 | 판정 지연 중앙값 | T01~T44 지연 중앙값 | 첫 글자 중앙값 | 입력(캐시)/출력 토큰 평균 | 코드 쓴 문항 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 지금 방식 | 95/96 | 0 | 44/44 | 2,815ms | 2,037ms | 2,193ms | 104,680(103,142) / 406 | 0 |
+| PTC(code) | 94/96 | 0 | 44/44 | 2,959ms | 2,366ms | 2,257ms | 106,378(104,810) / 436 | 1 |
+
+조합형 문항(T91~T96, 이번에 더함):
+
+| 문항 | 지금 방식 | PTC(code) |
+| --- | --- | --- |
+| T91 애들 체중 최신으로 | O list_pets → 6,262ms | O get_health_indicators(direct) 4,376ms |
+| T92 검진 상세까지 | O 5,986ms | O(direct) 5,881ms |
+| T93 지출+병원 일정 | O 4,491ms | O(direct) 3,387ms |
+| T94 이번 달·지난달 지출 | O 5,988ms | O(direct) 1,771ms |
+| T95 두 마리 3달 체중 비교 | O 3,839ms | O 코드 2번(get_health_indicators·list_daily_health_records) 10,810ms·첫 글자 9,199ms |
+| T96 답 없는 질문 이력 둘 | X get_expense_total(이전 질문) | X get_expense_total(이전 질문) |
+
+- 코드 실행은 96문항 중 1문항(T95)만 썼다. `allowed_callers`가 코드 전용인데도 Haiku는 읽기 도구를 거의 다 direct로 불렀다(문서대로 강제가 아님). direct READ는 지금 경로로 실행돼 답은 맞았다
+- 코드를 쓴 T95는 전체 10.8초·첫 글자 9.2초로 첫 글자 제한 10초에 거의 닿았다(컨테이너·코드 작성·왕복 부담)
+- 지금 방식과 정확도·토큰은 거의 같고(오차 범위, 1회), PTC 쪽 T80 하나 틀림
+- T96(답 없는 질문이 이력에 둘)은 두 방식 다 이전 질문 도구를 골랐다. PTC 때문에 생긴 문제가 아니라 지금도 있는 문제(`disable_parallel_tool_use`로도 못 막음, 핸드오프 기록과 같음)
+- 판단은 사람에게: 이번 결과로는 켤 이득이 보이지 않는다(코드를 거의 안 씀, 쓰면 느림). 다시 본다면 ① 문항을 더 무거운 조합(상세 10건 이상)으로 ② `PTC_RULES`를 더 세게 ③ Sonnet 5.5로 — 각각 실제 API 비용
+- 문항별 결과: `.cache/tool_eval/20261126-112042-764438.jsonl`(git 제외)
+
+### 10-2. Sonnet 5.5 (추가-1, `tool_eval --ptc --sonnet`, 96문항, 1회)
+
+| 흐름 | 도구 정확 | T01~T44 | 판정 지연 중앙값 | 첫 글자 중앙값 | 코드 쓴 문항 | 글 뒤 도구 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 지금 방식 Haiku 5.5 | 95/96 | 44/44 | 2,835ms | 2,349ms | 0 | 2 |
+| PTC Haiku 5.5 | 95/96 | 44/44 | 2,985ms | 2,306ms | 2 | 0 |
+| 지금 방식 Sonnet 5.5 | 89/96 | 43/44 | 3,608ms | 4,003ms | 0 | 5 |
+| PTC Sonnet 5.5 | 81/96 | 41/44 | 4,096ms | 4,803ms | 22 | 11 |
+
+- Sonnet은 PTC에서 코드를 22문항 썼다(Haiku 1~2문항). 대부분 READ 하나를 코드로 감싼 것(T17·T57~T64 등)이라 같은 문항 지금 방식보다 느렸다(코드 쓴 문항 전체 지연 중앙값 6,713ms 대 4,098ms)
+- 조합형 T83·T92·T94는 코드 안에서 읽기 도구를 3~5번 부르다 첫 글자 제한 10초에 걸려 행 이동(navigate)으로 끝났다(지금 방식은 셋 다 정답). T93(지출+일정)·T95는 코드로 맞음
+- PTC Sonnet은 코드 없이도 쓰기·읽기 요청에 글로만 답한 문항이 늘었다(T22·T25·T46·T47·T55, 지금 방식은 정답)
+- Sonnet은 지금 방식에서도 Haiku보다 덜 정확하고 느리다(89/96, 3.6초)
+- 판단(사람에게): Sonnet으로 올려도 PTC는 느리고 정확도가 떨어져 켤 이득이 없다. 대화창 모델은 Haiku 5.5, PTC는 꺼 둔다
+- 문항별 결과: `.cache/tool_eval/20261126-114632-078227.jsonl`(git 제외)

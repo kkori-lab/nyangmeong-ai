@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     # FN-AIM-002-07 : 답변 첫 글자 제한·전체 제한(초)
     answer_first_token_sec: float = 10.0
     answer_total_sec: float = 60.0
+    # 프로그래밍식 도구 호출 시험(2026-11-26) : 켜면 읽기 도구를 코드 실행 안에서 부름. 기본 꺼짐
+    llm_ptc: bool = False
 
 
 @lru_cache

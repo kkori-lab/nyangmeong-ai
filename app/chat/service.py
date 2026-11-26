@@ -14,6 +14,7 @@ from pydantic.alias_generators import to_camel
 
 from app.chat import catalog, rules, tools, turnlog
 from app.chat.clients import (
+    PTC_CALL_LIMIT,
     READ_LIMIT,
     AnswerError,
     ClassifyError,
@@ -140,6 +141,12 @@ READ_MAX_PETS = 10
 READ_CONCURRENCY = 4
 # READ 결과 글의 마리별 머리줄 : LLM이 "선택된 반려동물 기준" 같은 말을 지어내지 않게
 READ_PET_LABEL = "조회한 반려동물: {name}"
+# 프로그래밍식 도구 호출 시험 (2026-11-26) : 코드에 돌려주는 tool_result 글(회원에게 안 보임)
+# allowed_callers는 보안 경계가 아니라 서버가 막음(문서). 읽기 도구만 코드에서
+CODE_NOT_READ = (
+    "이 도구는 코드에서 부를 수 없음. 읽기 도구만 코드에서 부르고 나머지는 코드 밖에서 부른다."
+)
+CODE_LIMIT = "코드 안 도구 호출 상한({limit}번)을 넘어 실행하지 않음. 받은 결과로 답한다."
 # READ 결과를 본 LLM이 쓰기 도구를 고른 경우의 tool_result : 카드는 done.action으로
 # 결과 뒤 navigate의 결과 글 : 화면은 옮기지 않고 답 아래 바로가기 버튼(done.shortcut)
 ROUTE_SHOWN = (
@@ -380,9 +387,13 @@ async def judge_tools(
         # 추가 요청(2026-11-06) : 키워드에 걸린 문장은 질문꼴이 아니어도 힌트와 함께 도구 고르기
         # FN-AIM-002-10 : 도구 고르기 장애·시간 초과면 그 행으로 이동(LLM 장애와 무관)
         row = rules.match_route(text)
+    # 프로그래밍식 도구 호출 시험 : 코드 안 READ와 그 뒤 READ 답변이 같은 반려동물·번호 칸을 씀
+    follow = _ptc_follow(agent, text, read)
     try:
         async with asyncio.timeout(first_token_sec):
-            decision = await agent.decide(context, max_tokens, today, hint=row)
+            decision = await agent.decide(
+                context, max_tokens, today, hint=row, **_code_kw(agent, follow)
+            )
     except (ClassifyError, TimeoutError) as error:
         if isinstance(error, TimeoutError):
             # LLM 오류(ClassifyError)는 클라이언트가 로그, 시간 초과는 취소라 여기서 한 줄
@@ -398,7 +409,7 @@ async def judge_tools(
     if decision.call is not None:
         turnlog.picked(decision.call.name)
     judged = _tool_judged(
-        text, context, agent, decision, max_tokens, today, read, prior, now, priors
+        text, context, agent, decision, max_tokens, today, read, prior, now, priors, follow
     )
     if judged.intent.kind is IntentKind.ACTION and rules.chains_more(text):
         judged = await _chain_cards(
@@ -429,7 +440,9 @@ async def _chain_cards(
     try:
         async with asyncio.timeout(first_token_sec):
             while len(picked) < ACTION_MAX_CARDS:
-                messages = with_result(messages, current.content, current.call, ACTION_CHAINED)
+                messages = with_result(
+                    [*messages, *current.history], current.content, current.call, ACTION_CHAINED
+                )
                 current = await agent.decide(messages, max_tokens, today)
                 call = current.call
                 if call is not None:
@@ -494,15 +507,20 @@ def _tool_judged(
     prior: ActionDraft | None = None,
     now: datetime | None = None,
     priors: Sequence[ActionDraft] = (),
+    follow: "_Follow | None" = None,
 ) -> Judged:
     # 도구 -> intent 값 (설계 6절). CARD 도구는 ACTION(등록 카드 2개도 ④부터)
+    # follow : 프로그래밍식 도구 호출을 켰을 때 도구 고르기 중 코드 안 READ를 실행한 것
     call = decision.call
     if call is None:
         if decision.text is not None:
             # FN-AIM-002-03 : 인사·잡담에 대한 바로 답은 고지 없음(추가 요청 2026-11-09),
             # 건강 말이 없는 바로 답("오늘 날씨 어때?")도 고지 없음(2026-11-25)
+            # 코드 안에서 고지 READ가 성공했으면 고지
             talk = rules.is_small_talk(text)
             notice = not talk and rules.is_health_topic(text)
+            if follow is not None and follow.notice_reads:
+                notice = True
             # FN-AIM-002-04 : 질문 글이 룰 키워드에 걸리면 그 행을 바로가기로, 인사·잡담 제외
             shortcut = _keyword_shortcut(text) if not talk else None
             return Judged(
@@ -533,6 +551,8 @@ def _tool_judged(
         cards: list[ActionCard] = []
         notice_reads: set[str] = set()
         shortcuts: list[Intent] = []
+        if follow is not None:
+            cards, notice_reads, shortcuts = follow.cards, follow.notice_reads, follow.shortcuts
         stream = _read_answer(
             text,
             context,
@@ -545,6 +565,7 @@ def _tool_judged(
             cards,
             notice_reads,
             shortcuts,
+            follow,
         )
         return Judged(
             Intent(kind=IntentKind.SEARCH),
@@ -573,7 +594,9 @@ def _tool_judged(
     notice_reads: set[str] = set()
     shortcuts: list[Intent] = []
     follow = _Follow(text, read, cards, notice_reads, shortcuts)
-    stream = agent.answer(context, decision, guide, max_tokens, today, follow)
+    stream = agent.answer(
+        context, decision, guide, max_tokens, today, follow, **_code_kw(agent, follow)
+    )
     return Judged(
         Intent(kind=IntentKind.SEARCH),
         shortcut,
@@ -662,7 +685,13 @@ def _route_mixed(
     shortcuts: list[Intent] = [intent]
     follow = _Follow(text, read, cards, notice_reads, shortcuts)
     answer = agent.answer(
-        context, decision, ROUTE_SHOWN.format(name=row.name), max_tokens, today, follow
+        context,
+        decision,
+        ROUTE_SHOWN.format(name=row.name),
+        max_tokens,
+        today,
+        follow,
+        **_code_kw(agent, follow),
     )
     return Judged(
         Intent(kind=IntentKind.SEARCH),
@@ -869,8 +898,10 @@ async def _read_answer(
     cards: list[ActionCard] | None = None,
     notice_reads: set[str] | None = None,
     shortcuts: list[Intent] | None = None,
+    follow: "_Follow | None" = None,
 ) -> AsyncIterator[str]:
-    follow = _Follow(text, read, cards, notice_reads, shortcuts)
+    if follow is None:
+        follow = _Follow(text, read, cards, notice_reads, shortcuts)
     # 되물음·실패만이거나 고지 READ가 아니면 notice_reads가 비어 고지 없음(FN-AIM-002-03)
     first = await _read_once(
         entry, decision.call, follow.pets, follow.seen, notice_reads, follow.rows
@@ -880,7 +911,9 @@ async def _read_answer(
         return
     follow.reads = 1
 
-    answer = agent.answer(context, decision, first.result, max_tokens, today, follow)
+    answer = agent.answer(
+        context, decision, first.result, max_tokens, today, follow, **_code_kw(agent, follow)
+    )
     produced = False
     try:
         async for chunk in answer:
@@ -919,6 +952,8 @@ class _Follow:
         self.notice_reads = notice_reads
         self.shortcuts = shortcuts
         self.reads = 0
+        # 코드 실행 안 도구 호출 수 : READ_LIMIT과 따로 PTC_CALL_LIMIT까지
+        self.code_calls = 0
 
     async def __call__(self, call: tools.ToolCall) -> str | None:
         turnlog.picked(call.name)
@@ -960,6 +995,42 @@ class _Follow:
             return rules.READ_FAILED
         # READ 뒤에도 쓰기 카드는 한 번 고를 수 있게 (2단계 ②, 목록 두 번 → 수정 카드)
         return ReadMore(outcome.result)
+
+    async def code(self, call: tools.ToolCall) -> str:
+        """코드 실행 안에서 부른 도구(프로그래밍식 도구 호출 시험, 2026-11-26)
+        - 읽기 도구만 실행(지금 READ와 같은 반려동물·번호 칸 규칙). 카드·이동·사용법·decline은 거부
+        - 결과 글은 코드로 돌아감(회원에게 안 보임). 되물음 문구도 그대로 돌려줌"""
+        turnlog.code_call()
+        self.code_calls += 1
+        if self.code_calls > PTC_CALL_LIMIT:
+            logger.info("코드 안 도구 상한: %s", call.name)
+            turnlog.tag("code_limit")
+            return CODE_LIMIT.format(limit=PTC_CALL_LIMIT)
+        entry = tools.read_entry(call.name)
+        if entry is None:
+            logger.info("코드 안 도구 거부: %s", call.name)
+            turnlog.tag("code_refused")
+            return CODE_NOT_READ
+        if call.args is None:
+            logger.info("코드 안 도구 인자 거부: %s", call.name)
+            turnlog.tag(turnlog.BAD_ARGS)
+            return rules.READ_FAILED
+        outcome = await _read_once(entry, call, self.pets, self.seen, self.notice_reads, self.rows)
+        return outcome.ask if outcome.ask is not None else outcome.result
+
+
+def _ptc_follow(agent: ToolAgent, text: str, read: "ReadDeps | None") -> "_Follow | None":
+    # 프로그래밍식 도구 호출을 켠 에이전트(ptc)이고 READ를 할 수 있을 때만
+    if getattr(agent, "ptc", None) is None or read is None:
+        return None
+    return _Follow(text, read, [], set(), [])
+
+
+def _code_kw(agent: ToolAgent, follow: "_Follow | None") -> dict:
+    # ptc를 켠 에이전트에만 code를 넘김(가짜 에이전트·지금 방식은 인자 그대로)
+    if follow is None or getattr(agent, "ptc", None) is None:
+        return {}
+    return {"code": follow.code}
 
 
 def _follow_screen(call: tools.ToolCall, text: str, shortcuts: list[Intent] | None) -> str | None:

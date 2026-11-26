@@ -51,6 +51,9 @@ TEXT_TAGS: dict[str, tuple[str, ...]] = {
         "ACTION_ASK_MISSING_REST_NO",
     ),
     "same_pet": ("ACTION_ASK_SAME_PET", "ACTION_ASK_SAME_PET_CHIP"),
+    # 프로그래밍식 도구 호출 : 코드에 주는 tool_result 글이라 그 자리에서 태그(tag)
+    "code_refused": ("CODE_NOT_READ",),
+    "code_limit": ("CODE_LIMIT",),
     "action_failed": (
         "ACTION_FAILED_MESSAGE",
         "ACTION_FAILED_DELETE_MESSAGE",
@@ -131,6 +134,9 @@ TIMEOUT = "timeout"
 INCOMPLETE = "incomplete"
 EXCEPTION = "exception"
 ERROR = "error"
+# 프로그래밍식 도구 호출 : 글을 흘린 뒤 코드 실행이 이어짐, 코드 실행 왕복 상한
+TEXT_THEN_CODE = "text_then_code"
+CODE_ROUNDS = "code_rounds"
 
 # 재요청 말 : 앞이 "아니", 또는 띄어쓰기를 뺀 글에 이 말
 RETRY_HEAD = "아니"
@@ -186,6 +192,8 @@ class TurnRecord:
     tools: list[str] = field(default_factory=list)
     reads: int = 0
     java: int = 0
+    # 코드 실행 안 도구 호출 수(프로그래밍식 도구 호출, 0이면 줄에 안 씀)
+    code: int = 0
     result: str = "ok"
     cards: int = 0
     tags: list[str] = field(default_factory=list)
@@ -266,6 +274,13 @@ def read(java_calls: int) -> None:
         record.java += java_calls
 
 
+def code_call() -> None:
+    # 코드 실행 안 도구 호출 한 번(READ면 그 실행은 read()로도 셈)
+    record = _current.get()
+    if record is not None:
+        record.code += 1
+
+
 def _joined(values: list[str]) -> str:
     return ",".join(values) if values else EMPTY
 
@@ -277,6 +292,7 @@ def format_turn(record: TurnRecord) -> str:
         f" tools={_joined(record.tools)} reads={record.reads} java={record.java}"
         f" result={record.result} cards={record.cards} tags={_joined(record.tags)}"
         f" prev={record.prev} retry={int(record.retry)} ms={ms}"
+        + (f" code={record.code}" if record.code else "")
     )
 
 
@@ -314,7 +330,7 @@ def parse_line(line: str) -> tuple[str, dict[str, str]] | None:
     need = TURN_FIELDS if head == TURN_HEAD else RESULT_FIELDS
     if any(name not in fields for name in need):
         return None
-    numbers = ("room", "reads", "java", "retry", "ms", "errors", "cards")
+    numbers = ("room", "reads", "java", "retry", "ms", "errors", "cards", "code")
     if any(name in fields and not fields[name].isdigit() for name in numbers):
         return None
     return head, fields
@@ -332,6 +348,9 @@ class WeekStats:
     reads: int = 0
     reads_max: int = 0
     java: int = 0
+    # 코드 실행 안 도구 호출 : 합계와 그런 턴 수
+    code: int = 0
+    code_turns: int = 0
     results: Counter = field(default_factory=Counter)
     tags: Counter = field(default_factory=Counter)
     # 실패 태그가 하나라도 붙은 턴
@@ -355,6 +374,10 @@ class WeekStats:
         self.reads += reads
         self.reads_max = max(self.reads_max, reads)
         self.java += int(fields["java"])
+        code = int(fields.get("code", "0"))
+        self.code += code
+        if code:
+            self.code_turns += 1
         self.results[fields["result"]] += 1
         tags = _split(fields["tags"])
         self.tags.update(tags)
@@ -431,6 +454,11 @@ def render(weeks: dict[str, WeekStats]) -> str:
             f"- 결과: {_top(stats.results)}",
             f"- 도구: {_top(stats.tools)}",
             f"- READ: 턴당 평균 {avg:.2f}번, 최대 {stats.reads_max}번, Java {stats.java}번",
+            *(
+                [f"- 코드 안 도구 호출: {stats.code}번 ({_rate(stats.code_turns, stats.turns)} 턴)"]
+                if stats.code
+                else []
+            ),
             f"- 실패 태그 붙은 턴: {_rate(stats.failed, stats.turns)}",
             *(
                 f"  - {name}: {_rate(count, stats.turns)}"

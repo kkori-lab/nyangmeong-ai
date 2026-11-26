@@ -20,6 +20,10 @@ DRAFT_SCHEDULE = "draft_schedule"
 DRAFT_CARE_ITEM = "draft_care_item"
 DECLINE = "decline"
 REGISTER_TOOLS = frozenset({DRAFT_SCHEDULE, DRAFT_CARE_ITEM})
+# 프로그래밍식 도구 호출 시험 (2026-11-26) : 코드 실행 도구 버전, 읽기 도구를 코드에서만·둘 다
+CODE_CALLER = "code_execution_20260120"
+PTC_CODE = "code"
+PTC_BOTH = "both"
 
 
 class Navigate(BaseModel):
@@ -80,15 +84,26 @@ def _builtin_definition(name: str, table: tuple[rules.RouteRow, ...]) -> dict:
     return {"name": name, "description": catalog.builtin_description(name), "input_schema": schema}
 
 
-def tool_definitions() -> tuple[dict, ...]:
+def tool_definitions(ptc: str | None = None) -> tuple[dict, ...]:
     # 순서 고정(캐시 앞부분) : navigate, search_guide, Java 목록 도구, decline
+    # ptc : 프로그래밍식 도구 호출 시험(2026-11-26). 읽기 도구에만 allowed_callers, 끝에 코드 실행
     entries = _catalog.entries.values() if _catalog is not None else ()
     table = rules.routing_table()
-    return (
+    base = (
         _builtin_definition(NAVIGATE, table),
         _builtin_definition(SEARCH_GUIDE, table),
         *(entry.definition for entry in entries),
         _builtin_definition(DECLINE, table),
+    )
+    if ptc is None:
+        return base
+    callers = [CODE_CALLER] if ptc == PTC_CODE else ["direct", CODE_CALLER]
+    return (
+        *(
+            {**d, "allowed_callers": callers} if read_entry(d["name"]) is not None else d
+            for d in base
+        ),
+        {"type": CODE_CALLER, "name": "code_execution"},
     )
 
 
