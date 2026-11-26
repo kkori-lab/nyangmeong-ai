@@ -12,7 +12,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel
 from pydantic.alias_generators import to_camel
 
-from app.chat import catalog, rules, tools
+from app.chat import catalog, rules, tools, turnlog
 from app.chat.clients import (
     READ_LIMIT,
     AnswerError,
@@ -386,6 +386,7 @@ async def judge_tools(
     except (ClassifyError, TimeoutError) as error:
         if isinstance(error, TimeoutError):
             # LLM 오류(ClassifyError)는 클라이언트가 로그, 시간 초과는 취소라 여기서 한 줄
+            turnlog.tag(turnlog.TIMEOUT)
             logger.warning(
                 "도구 고르기 시간 초과(%g초): %s",
                 first_token_sec,
@@ -394,6 +395,8 @@ async def judge_tools(
         if row is not None:
             return Judged(row.to_intent())
         raise ClassifyError("tool_decide") from None
+    if decision.call is not None:
+        turnlog.picked(decision.call.name)
     judged = _tool_judged(
         text, context, agent, decision, max_tokens, today, read, prior, now, priors
     )
@@ -429,6 +432,8 @@ async def _chain_cards(
                 messages = with_result(messages, current.content, current.call, ACTION_CHAINED)
                 current = await agent.decide(messages, max_tokens, today)
                 call = current.call
+                if call is not None:
+                    turnlog.picked(call.name)
                 if call is None:
                     if current.text is not None:
                         await _drop_text(current.text)
@@ -506,6 +511,7 @@ def _tool_judged(
         return Judged(Intent(kind=IntentKind.FALLBACK))
     if call.args is None:
         logger.info("도구 인자 거부: %s", call.name)
+        turnlog.tag(turnlog.BAD_ARGS)
         return Judged(Intent(kind=IntentKind.FALLBACK))
     if call.name == tools.NAVIGATE:
         row = tools.route_row(call)
@@ -521,6 +527,7 @@ def _tool_judged(
     if entry is not None:
         if read is None:
             logger.info("READ 도구 실행 불가: %s", call.name)
+            turnlog.tag(turnlog.READ_UNAVAILABLE)
             return Judged(Intent(kind=IntentKind.FALLBACK))
         # Java 호출은 답변 스트림 안 : 첫 글자 제한이 Java 호출까지 덮음
         cards: list[ActionCard] = []
@@ -768,6 +775,7 @@ async def _read_once(
         chosen = pets.targets(found)
         if not chosen or len(chosen) > READ_MAX_PETS:
             names = ", ".join(p.pet_nm for p in found)
+            turnlog.tag("pet_ask" if found else "no_pet")
             return _ReadOutcome(ask=READ_PET_ASK.format(names=names) if found else READ_NO_PET)
         # 앞 결과의 번호로 상세를 읽을 때는 그 번호가 나온 아이만
         owners = {
@@ -786,6 +794,7 @@ async def _read_once(
         # 여러 아이 일정 : Java 1번 호출. 모두면 petSns를 비워 Java가 양육 중인 전체를 준다
         found = await pets.pets()
         if not found:
+            turnlog.tag("no_pet")
             return _ReadOutcome(ask=READ_NO_PET)
         chosen = pets.targets(found)
         if len(chosen) < len(found):
@@ -798,6 +807,7 @@ async def _read_once(
     ]
     if any(request is None for request in requests):
         logger.info("READ 도구 필수 칸 없음: %s", entry.name)
+        turnlog.tag(turnlog.READ_NO_ARGS)
         return _ReadOutcome(result=rules.READ_FAILED)
     gate = asyncio.Semaphore(READ_CONCURRENCY)
 
@@ -811,6 +821,9 @@ async def _read_once(
 
     started = time.perf_counter()
     datas = await asyncio.gather(*(fetch(r) for r in requests if r is not None))
+    turnlog.read(len(requests))
+    if any(data is None for data in datas):
+        turnlog.tag(turnlog.READ_FAILED)
     logger.info(
         "READ 도구 시간: %s Java %d번 %dms",
         entry.name,
@@ -908,6 +921,7 @@ class _Follow:
         self.reads = 0
 
     async def __call__(self, call: tools.ToolCall) -> str | None:
+        turnlog.picked(call.name)
         card = tools.card_entry(call.name)
         if card is not None and call.args is not None and self.cards is not None:
             if self.cards:
@@ -923,6 +937,7 @@ class _Follow:
                 values = _carry_lesion(card, values, self.read.priors)
             if catalog.missing_target_ids(card, values):
                 logger.info("쓰기 도구 대상 번호 없음: %s", call.name)
+                turnlog.tag("target_missing")
                 return _target_missing_note(card)
             named = self.pets.named(found)
             rejected = _rejected(card, raw, values)
@@ -1222,6 +1237,10 @@ async def _run_turn(
     titles: TitleGenerator | None = None,
     reader: ToolReader | None = None,
 ) -> None:
+    # 추가 요청(2026-11-26) : 턴 기록 한 줄. 이벤트를 보며 종류·결과·고정 문구 태그를 모음
+    record = turnlog.start(turn.room_sn, turn.question.cnvrs_cn, _previous_ai_text(turn))
+    forward = emit
+    emit = record.wrap(emit)
     try:
         text = turn.question.cnvrs_cn
         card = None
@@ -1236,6 +1255,7 @@ async def _run_turn(
                 if DELETE not in {method.upper() for method in methods}:
                     reply = None
             if reply is not None:
+                record.reply = reply
                 await _action_answer(reply, turn, priors, repo, register, emit)
                 return
         if register is not None and turn.draft is not None:
@@ -1318,9 +1338,19 @@ async def _run_turn(
         emit(("error", StreamError(code="EXTERNAL_API_ERROR", message=ANSWER_ERROR_MESSAGE)))
     except Exception:
         logger.exception("대화 응답 처리 실패")
+        record.tag(turnlog.EXCEPTION)
         emit(("error", StreamError(code="EXTERNAL_API_ERROR", message=ANSWER_ERROR_MESSAGE)))
     finally:
-        emit(None)
+        turnlog.finish(record)
+        forward(None)
+
+
+def _previous_ai_text(turn: Turn) -> str | None:
+    # 이번 질문 바로 앞 AI 메시지 글 : 직전 실패 태그(재요청 후보)용, 로그에는 태그만
+    before = [m for m in turn.messages if m.msg_seq < turn.question.msg_seq]
+    if not before or before[-1].role_cd != ROLE_AI:
+        return None
+    return before[-1].cnvrs_cn
 
 
 async def _search_answer(
@@ -1355,6 +1385,8 @@ async def _search_answer(
             reason = error.reason
         if first is None:
             # 추가 요청 : 실패 이유 한 줄(원문 없음)
+            if reason.endswith("timeout"):
+                turnlog.tag(turnlog.TIMEOUT)
             logger.warning(
                 "답변 실패: 첫 글자 전 %s room=%d (%.0fms)",
                 reason,
@@ -1374,6 +1406,7 @@ async def _search_answer(
             complete = True
         except (TimeoutError, AnswerError) as error:
             # 전체 시간 초과·도중 오류 : 부분 답변을 미완료로 저장
+            turnlog.tag(turnlog.INCOMPLETE)
             logger.warning(
                 "답변 미완료: 도중 %s room=%d %d자 (%.0fms)",
                 error.reason if isinstance(error, AnswerError) else "total_timeout",
@@ -2469,6 +2502,7 @@ async def save_action_result(
     if entry.name == INSPECTION_TOOL:
         head = await _inspection_head(reader, contexts, values)
     errors = _error_fields(request)
+    turnlog.card_result(room_sn, entry.name, request.status.value, len(errors))
     text = _result_text(request.status, entry, values, head, errors, request.target_text)
     return await repo.add_message(room_sn, ROLE_AI, text)
 

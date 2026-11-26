@@ -433,3 +433,17 @@ Python이 Java 내부 GET을 쿠키와 함께 불러 결과를 LLM에 돌려주�
 | `scripts/tool_eval.py`·`tests/chat/data/tool_eval.jsonl` | 7-1절 평가 |
 
 `service-guide-search.md`의 "M1과 목차 선택 합치기"는 1단계에서 `search_guide` 도구 인자로 바뀌므로 따로 고치지 않는다. 안내서 빈칸(대화창 영수증 task `C-7`)은 그대로 필요하다.
+
+## 9. 턴 기록 한 줄·주 단위 집계 (2026-11-26, 실패 기준선)
+
+사례별로 고치기 전에 실패가 어디에 몰리는지 센다. 코드는 `app/chat/turnlog.py` 한 곳(줄 만들기·읽기·집계).
+
+- 턴마다 `app.chat.turnlog` INFO 한 줄: `턴 room=7 kind=SEARCH reply=- tools=get_health_indicators,navigate reads=2 java=3 result=ok cards=0 tags=read_failed prev=fallback retry=1 ms=1850`
+  - `kind`: `intent.kind`(`-`는 판정 전 실패), `reply`: 확인·취소 말 턴이면 `confirm`·`cancel`
+  - `tools`: LLM이 고른 도구 이름(결과 뒤 고른 것까지 순서대로), `reads`·`java`: READ 도구 실행 횟수와 Java 호출 수
+  - `result`: `ok`·`card`(확인 카드)·`execute`(실행 지시)·`error`, `cards`: 카드 수
+  - `tags`: 실패 종류. 회원에게 보이는 고정 문구는 `TEXT_TAGS`(service 문구 상수 이름 → 태그)로 `done` 글에서, LLM이 다시 쓰는 실패(`read_failed`·`read_no_args`·`bad_args`·`timeout`·`incomplete`·`exception` 등)는 그 코드 자리에서 붙인다. 새 문구 상수는 `TEXT_TAGS`나 `QUIET`에 넣어야 테스트가 통과한다
+  - `prev`·`retry`: 바로 앞 AI 메시지에 실패 태그가 있고 이번 글이 "아니…"·"여기서 해"·"대화창에서 해"·"그게 아니라"면 재요청 후보
+- 확인 카드 결과(`action-result`)마다: `카드 결과 room=7 tool=draft_expense_limit status=FAILED errors=1`
+- 회원 문장·답변 글·도구 인자 값은 남기지 않는다. 날짜는 로그 파일 이름(`ai_YYYY-MM-DD.log`)
+- 집계: `uv run python -m scripts.turn_stats <LOG_DIR> [--weeks 4]` → ISO 주별 턴 수·종류·결과·도구·READ 횟수·실패 태그 비율·재요청 후보·카드 결과
