@@ -388,7 +388,7 @@ def test_반려동물_목록을_못_받으면_error_이벤트여야_한다(clien
 
     evs = events(send(client, room, "체중 어때?"))
 
-    assert [name for name, _ in evs] == ["intent", "error"]
+    assert [name for name, _ in evs] == ["intent", "step", "error"]
     assert reader.calls == []
 
 

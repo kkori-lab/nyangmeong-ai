@@ -4,6 +4,7 @@ import logging
 import re
 import time
 from collections.abc import AsyncIterator, Callable, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
@@ -15,7 +16,7 @@ from pydantic.alias_generators import to_camel
 from app.chat import catalog, rules, tools, turnlog
 from app.chat.clients import (
     PTC_CALL_LIMIT,
-    READ_LIMIT,
+    TOOL_LIMIT,
     AnswerError,
     ClassifyError,
     ConversationSummarizer,
@@ -70,6 +71,7 @@ from app.chat.schemas import (
     RegisterDraft,
     RegisterResult,
     RegisterResultRequest,
+    StepEvent,
     StreamError,
 )
 from app.core.backend import BackendError, external_error, failure_reason
@@ -195,7 +197,7 @@ VALUE_UNITS = {"체중": "kg", "식사량": "g", "음수량": "ml", "산책": "�
 ACTION_FAILED_FIX = "{names} 다시 확인해 주세요."
 ACTION_FAILED_FIX_UNNAMED = "입력값을 다시 확인해 주세요."
 ACTION_DROP_MESSAGE = "등록하지 않았어요."
-# 한 메시지 여러 명령 ② (2026-11-19) : 한 메시지 확인 카드 최대 수(READ 상한과 같음)
+# 한 메시지 여러 명령 ② (2026-11-19) : 한 메시지 확인 카드 최대 수(에이전트 ③에서 프론트 합의 뒤 8)
 ACTION_MAX_CARDS = 3
 # 쓰기 카드 뒤 이어 주는 말이 있을 때 남은 쓰기 도구를 이어 고르는 tool_result
 ACTION_CHAINED = (
@@ -293,6 +295,15 @@ def _target_missing_note(entry: "catalog.CatalogEntry") -> str:
 
 # SSE 이벤트 하나 : (이름, 내용)
 Event = tuple[str, BaseModel | dict]
+# 에이전트 루프 step 이벤트를 받는 곳 : 답변 스트림을 읽는 _search_answer가 정함
+# 도구 고르기 중 코드 안 READ(프로그래밍식 도구 호출 시험)는 이 값이 없어 안 보냄
+_STEP_SINK: ContextVar[Callable[[StepEvent], None] | None] = ContextVar("step_sink", default=None)
+
+
+def _step(entry: "catalog.CatalogEntry", kind: str) -> None:
+    sink = _STEP_SINK.get()
+    if sink is not None:
+        sink(StepEvent(tool=entry.name, label=entry.label or entry.name, kind=kind))
 
 
 async def create_conversation(
@@ -940,14 +951,23 @@ async def _read_answer(
     if follow is None:
         follow = _Follow(text, read, cards, notice_reads, shortcuts)
     # 되물음·실패만이거나 고지 READ가 아니면 notice_reads가 비어 고지 없음(FN-AIM-002-03)
-    # 한 응답의 읽기 도구 여럿(2026-11-26) : 첫 도구와 함께 한 턴 READ_LIMIT까지 동시에 실행
+    # 한 응답의 읽기 도구 여럿(2026-11-26) : 첫 도구와 함께 한 턴 TOOL_LIMIT까지 동시에 실행
     # 같은 응답의 카드·이동은 실행하지 않고 결과를 본 뒤 다시 고르게(READ_LATER)
     rest = decision.all_calls()[1:]
-    extra = [c for c in rest if tools.read_entry(c.name) is not None][: READ_LIMIT - 1]
+    reads = [c for c in rest if tools.read_entry(c.name) is not None]
+    extra = reads[: TOOL_LIMIT - 1]
     for call in extra:
         turnlog.picked(call.name)
+    if len(reads) > len(extra):
+        skipped = len(reads) - len(extra)
+        logger.info("첫 응답 읽기 도구 상한(%d): %d개 실행 안 함", TOOL_LIMIT, skipped)
+        turnlog.tag(turnlog.AGENT_LIMIT)
     if extra:
         logger.info("첫 응답 읽기 도구 %d개 동시 실행", len(extra) + 1)
+    _step(entry, "READ")
+    for call in extra:
+        if call.args is not None:
+            _step(tools.read_entry(call.name), "READ")
     outcomes = await asyncio.gather(
         _read_once(entry, decision.call, follow.pets, follow.seen, notice_reads, follow.rows),
         *(_extra_read(call, follow, notice_reads) for call in extra),
@@ -957,6 +977,7 @@ async def _read_answer(
         yield first.ask
         return
     follow.reads = 1 + len(extra)
+    follow.calls = 1 + len(extra)
     results: dict[str, str] = {}
     for call in rest:
         if tools.read_entry(call.name) is None:
@@ -997,7 +1018,7 @@ class _Follow:
     """결과 답변 중 LLM이 고른 도구 실행(FollowRead). READ 답변·사용법 답변이 같이 쓴다
     - 쓰기 도구 : 번호 칸은 이 턴 READ 결과 값만, 카드 1개로 끝냄(목록→완료 체크)
     - 이동·사용법 : 화면을 옮기지 않고 바로가기(한 메시지 여러 일 ①)
-    - 읽기 도구 : 한 턴 최대 READ_LIMIT번, 반려동물을 못 정하면 불러오지 못함"""
+    - 읽기 도구 : 반려동물을 못 정하면 불러오지 못함. 모든 도구 합쳐 한 턴 TOOL_LIMIT번까지"""
 
     def __init__(
         self,
@@ -1018,16 +1039,25 @@ class _Follow:
         self.notice_reads = notice_reads
         self.shortcuts = shortcuts
         self.reads = 0
-        # 코드 실행 안 도구 호출 수 : READ_LIMIT과 따로 PTC_CALL_LIMIT까지
+        # 이 턴 도구 호출 수(첫 고르기 도구 포함) : TOOL_LIMIT까지
+        self.calls = 1
+        # 코드 실행 안 도구 호출 수 : TOOL_LIMIT과 따로 PTC_CALL_LIMIT까지
         self.code_calls = 0
 
     async def __call__(self, call: tools.ToolCall) -> str | None:
         turnlog.picked(call.name)
+        # 한 응답 읽기 여럿은 동시에 불리지만 첫 await 전에 세어 상한을 넘지 않음
+        if self.calls >= TOOL_LIMIT:
+            logger.info("한 턴 도구 상한(%d): %s 실행 안 함", TOOL_LIMIT, call.name)
+            turnlog.tag(turnlog.AGENT_LIMIT)
+            return rules.TOOL_LIMIT_REACHED
+        self.calls += 1
         card = tools.card_entry(call.name)
         if card is not None and call.args is not None and self.cards is not None:
             if self.cards:
                 logger.info("쓰기 도구 두 번째 실행 안 함: %s", call.name)
                 return None
+            _step(card, "CARD")
             found = await self.pets.pets() if _uses_pets(card) else []
             raw = call.args.model_dump(exclude_none=True)
             # 돌려받은 같은 도구 카드가 있으면 그 input에 이 턴 값을 덮어씀(검사 수치 카드 검진기록)
@@ -1053,10 +1083,11 @@ class _Follow:
         if call.name in (tools.NAVIGATE, tools.SEARCH_GUIDE) and call.args is not None:
             return _follow_screen(call, self.text, self.shortcuts)
         entry = tools.read_entry(call.name)
-        if entry is None or call.args is None or self.reads >= READ_LIMIT:
+        if entry is None or call.args is None:
             logger.info("결과 뒤 도구 실행 안 함: %s", call.name)
             return None
         self.reads += 1
+        _step(entry, "READ")
         outcome = await _read_once(entry, call, self.pets, self.seen, self.notice_reads, self.rows)
         if outcome.ask is not None:
             return rules.READ_FAILED
@@ -1522,18 +1553,34 @@ async def _search_answer(
     started_at = loop.time()
     deadline = started_at + limits.total_sec
     first_deadline = started_at + limits.first_token_sec
+    # 첫 이벤트 제한(docs/design/agent.md 3절) : step이 먼저 오면 첫 글자는 전체 제한까지만
+    waiting: list[asyncio.Timeout] = []
+    stepped = False
+
+    def on_step(event: StepEvent) -> None:
+        nonlocal stepped
+        emit(("step", event))
+        stepped = True
+        if waiting:
+            waiting.pop().reschedule(deadline)
+
+    sink = _STEP_SINK.set(on_step)
     try:
         # 첫 글자 전 실패 : 미저장·안내, 사용자 메시지는 남아 [다시 시도]로 재호출
         reason = "empty"
         try:
-            async with asyncio.timeout_at(min(deadline, first_deadline)):
+            async with asyncio.timeout_at(min(deadline, first_deadline)) as timer:
+                waiting.append(timer)
                 first = await anext(stream, None)
         except TimeoutError:
             first = None
-            reason = "total_timeout" if deadline <= first_deadline else "first_token_timeout"
+            total = deadline <= first_deadline or stepped
+            reason = "total_timeout" if total else "first_token_timeout"
         except AnswerError as error:
             first = None
             reason = error.reason
+        finally:
+            waiting.clear()
         if first is None:
             # 추가 요청 : 실패 이유 한 줄(원문 없음)
             if reason.endswith("timeout"):
@@ -1567,6 +1614,7 @@ async def _search_answer(
             )
     finally:
         await stream.aclose()
+        _STEP_SINK.reset(sink)
     body = "".join(chunks)
     text = body
     if complete and notice():

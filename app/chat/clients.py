@@ -330,13 +330,14 @@ class ReadMore(str):
 
 # 결과 답변 중 LLM이 고른 도구 실행 : 결과 글, 실행하지 않은 도구면 None
 FollowRead = Callable[[tools.ToolCall], Awaitable[str | None]]
-# 한 턴 READ 최대 횟수(첫 고르기 포함) : 첫 글자 제한 10초가 고르기·Java·라운드마다 LLM을 덮음
-READ_LIMIT = 3
-# 결과 답변에서 도구를 고르는 최대 횟수 : 두 번째부터는 follow가 ReadMore를 줄 때만
-# READ_LIMIT번 읽은 뒤에도 쓰기 카드를 한 번 고를 수 있게 READ_LIMIT과 같음
-FOLLOW_ROUNDS = READ_LIMIT
+# 한 턴 도구 호출 상한(첫 고르기·한 응답 여럿·결과 뒤 도구 합쳐) : 맴도는 루프 끊기
+# 단계당 약 2초라 8번이면 15~20초, 평가·turnlog agent_limit을 보고 조정
+TOOL_LIMIT = 8
+# 결과 답변에서 도구를 고르는 최대 바퀴 : 두 번째부터는 follow가 ReadMore를 줄 때만
+# 바퀴마다 도구 한 번 이상이라 보통 TOOL_LIMIT이 먼저 막음
+FOLLOW_ROUNDS = TOOL_LIMIT
 # 프로그래밍식 도구 호출 시험 (2026-11-26) : 코드 실행 안 읽기 도구 호출 상한(한 턴)
-# READ_LIMIT과 따로 센다. 넘는 호출은 서버가 오류 글로 답함
+# TOOL_LIMIT과 따로 셈. 넘는 호출은 서버가 오류 글로 답함
 PTC_CALL_LIMIT = 20
 # 코드 실행 왕복 상한(한 턴) : 상한 넘는 호출도 오류 글로 왕복하므로 끝없는 반복 막기
 PTC_ROUNDS = PTC_CALL_LIMIT + 2
@@ -347,7 +348,7 @@ CodeRun = Callable[[tools.ToolCall], Awaitable[str]]
 class ToolAgent(Protocol):
     # docs/design/tool-calling.md 4절 : 분류·목차 선택·등록 칸 추출을 도구 고르기 한 번으로
     # decide 장애면 ClassifyError, 글 스트림 장애면 AnswerError
-    # answer의 follow : 있으면 결과를 본 LLM이 도구를 더 고름(한 턴 READ 최대 READ_LIMIT번)
+    # answer의 follow : 있으면 결과를 본 LLM이 도구를 더 고름(한 턴 도구 최대 TOOL_LIMIT번)
     # code : 프로그래밍식 도구 호출을 켠 에이전트(ptc)에만 넘김. 코드 안 읽기 도구 실행
     async def decide(
         self,
@@ -866,6 +867,9 @@ class AnthropicToolAgent:
             current = with_result(current, content, calls[0], results[calls[0].use_id], results)
             if not all(isinstance(out, ReadMore) for out in outs):
                 break
+        else:
+            logger.info("결과 뒤 도구 바퀴 상한(%d): 지금까지 결과로 답", FOLLOW_ROUNDS)
+            turnlog.tag(turnlog.AGENT_LIMIT)
         request = self._request(current, max_tokens, self._system(today), container)
         request["tool_choice"] = TOOL_CHOICE_NONE
         async for text in self._texts(self._events(request), time.monotonic(), "도구 결과 답변"):

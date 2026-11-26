@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 import pytest
 
 from app.chat import rules, tools
-from app.chat.clients import AnthropicToolAgent, ReadMore, ToolDecision
+from app.chat.clients import FOLLOW_ROUNDS, TOOL_LIMIT, AnthropicToolAgent, ReadMore, ToolDecision
 from app.chat.service import ACTION_SHOWN, READ_EMPTY_CARD_MESSAGE, READ_EMPTY_MESSAGE
 from tests.chat.test_action import send
 from tests.chat.test_llm_clients import MODEL, FakeAnthropic, sse
@@ -82,23 +82,18 @@ def test_READ_두_번_뒤에도_수정_카드를_고를_수_있어야_한다(cli
     assert action["input"]["schdlSn"] == 31
 
 
-def test_네_번째_READ는_실행하지_않아야_한다(client, java):
-    # 한 턴 READ 상한 2 → 3번(2026-11-13, 한 메시지 여러 일 ①)
-    agent = use_agent(
-        client,
-        ChainAgent(
-            "list_my_care_schedules",
-            [("list_my_care_schedules", {}), ("list_care_items", {}), ("list_checkups", {})],
-            ("일정이에요.",),
-        ),
-    )
+def test_도구_상한_뒤의_READ는_실행하지_않아야_한다(client, java):
+    # 한 턴 READ 상한 3번 → 도구 상한 TOOL_LIMIT번(에이전트 ②, 2026-11-26)
+    names = ("list_my_care_schedules", "list_care_items", "list_checkups")
+    follows = [(names[no % len(names)], {}) for no in range(TOOL_LIMIT)]
+    agent = use_agent(client, ChainAgent("list_my_care_schedules", follows, ("일정이에요.",)))
     reader = use_reader(client, FakeToolReader(SCHEDULES))
     room = room_of(client, java, pet_sn=CHOCO)
 
     events(send(client, room, "일정 알려 줘"))
 
-    assert len(reader.calls) == 3
-    assert agent.results[3] is None
+    assert len(reader.calls) == TOOL_LIMIT
+    assert agent.results[TOOL_LIMIT] == rules.TOOL_LIMIT_REACHED
 
 
 def test_카드를_띄운_뒤_고른_쓰기_도구는_실행하지_않아야_한다(client, java):
@@ -181,14 +176,11 @@ def test_follow가_ReadMore를_주면_한_번_더_도구를_고를_수_있어야
     assert third["tool_choice"] == {"type": "none"}
 
 
-def test_ReadMore가_계속_와도_결과_뒤_도구는_세_번까지만_고른다():
-    # 결과 뒤 도구 고르기 2 → 3라운드(2026-11-13, READ 상한 3번)
-    bodies = [
-        tool_sse("list_my_care_schedules", {}),
-        tool_sse("list_care_items", {}),
-        tool_sse("list_checkups", {}),
-        sse(["답이에요."]),
-    ]
+def test_ReadMore가_계속_와도_결과_뒤_도구는_FOLLOW_ROUNDS번까지만_고른다():
+    # 결과 뒤 도구 고르기 3 → FOLLOW_ROUNDS바퀴(에이전트 ②, 2026-11-26)
+    names = ("list_my_care_schedules", "list_care_items", "list_checkups")
+    bodies = [tool_sse(names[no % len(names)], {}) for no in range(FOLLOW_ROUNDS)]
+    bodies.append(sse(["답이에요."]))
     fake = FakeAnthropic(lambda _: sse_response(bodies[len(fake.requests) - 1]))
 
     async def follow(call: tools.ToolCall) -> str | None:
@@ -200,6 +192,7 @@ def test_ReadMore가_계속_와도_결과_뒤_도구는_세_번까지만_고른�
         return [t async for t in stream]
 
     assert asyncio.run(run()) == ["답이에요."]
-    assert len(fake.requests) == 4
-    assert [r["tool_choice"]["type"] for r in fake.requests[:3]] == ["auto"] * 3
-    assert fake.requests[3]["tool_choice"] == {"type": "none"}
+    assert len(fake.requests) == FOLLOW_ROUNDS + 1
+    auto = [r["tool_choice"]["type"] for r in fake.requests[:FOLLOW_ROUNDS]]
+    assert auto == ["auto"] * FOLLOW_ROUNDS
+    assert fake.requests[FOLLOW_ROUNDS]["tool_choice"] == {"type": "none"}

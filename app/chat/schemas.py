@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -243,6 +243,13 @@ class ActionCard(_Camel):
     # 삭제 카드(call.method DELETE)의 대상 글 : 이 턴 READ 결과 행으로 Python이 만듦 (2026-11-25)
     # React는 보여 주고 다음 메시지·action-result에 그대로 돌려보낸다. 없으면 null
     target_text: str | None = None
+
+
+class StepEvent(_Camel):
+    # SSE step 이벤트(에이전트 루프 진행, 저장 안 함). kind : READ(읽기 직전)·CARD(카드 만들 때)
+    tool: str
+    label: str
+    kind: Literal["READ", "CARD"]
 
 
 class AnswerDone(_Camel):

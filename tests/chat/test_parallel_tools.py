@@ -1,5 +1,5 @@
 """한 번에 도구 하나 제한 풀기 (SCR-AIM-004·012, 2026-11-26 팀 합의)
-- 한 응답의 읽기 도구 여럿은 한 턴 READ_LIMIT까지 동시에 실행하고 결과를 tool_use id마다
+- 한 응답의 읽기 도구 여럿은 한 턴 TOOL_LIMIT까지 동시에 실행하고 결과를 tool_use id마다
 - 같은 응답의 카드·이동은 읽은 뒤 다시 고르게(READ_LATER), 쓰기 도구 여럿은 카드 목록으로
 - 결과 답변 라운드의 도구 여럿도 실행"""
 
@@ -10,7 +10,7 @@ import pytest
 
 from app.chat import rules, tools
 from app.chat.clients import (
-    READ_LIMIT,
+    TOOL_LIMIT,
     AnthropicToolAgent,
     ToolDecision,
     follow_all,
@@ -91,17 +91,18 @@ def test_한_응답의_읽기_도구_둘은_둘_다_실행하고_결과를_id마
 
 
 def test_한_응답의_읽기_도구가_상한을_넘으면_넘는_것은_실행하지_않는다(client, java):
-    picks = ((CARE, {}), (CHECKUPS, {}), (RECORDS, {}), (EXPENSES, {}))
+    names = (CARE, CHECKUPS, RECORDS, EXPENSES)
+    picks = tuple((names[no % len(names)], {}) for no in range(TOOL_LIMIT + 1))
     agent = use_agent(client, ManyAgent(*picks))
     reader = use_reader(client, FakeToolReader([]))
     room = room_of(client, java, pet_sn=CHOCO)
 
     events(send(client, room, "산책 항목이랑 검진이랑 일지랑 지출 다 알려줘"))
 
-    assert len(reader.calls) == READ_LIMIT
+    assert len(reader.calls) == TOOL_LIMIT
     results = sent_results(agent.decisions[0], agent.results[0])
-    assert results["toolu_4"] == rules.READ_NOT_RUN
-    assert all(results[f"toolu_{no}"] != rules.READ_NOT_RUN for no in (1, 2, 3))
+    assert results[f"toolu_{TOOL_LIMIT + 1}"] == rules.READ_NOT_RUN
+    assert all(results[f"toolu_{no}"] != rules.READ_NOT_RUN for no in range(1, TOOL_LIMIT + 1))
 
 
 def test_읽기_도구와_같이_고른_카드는_실행하지_않고_다시_고르게_한다(client, java):

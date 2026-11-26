@@ -1,7 +1,7 @@
 import pytest
 
 from app.chat import rules
-from app.chat.clients import READ_LIMIT, ReadMore
+from app.chat.clients import TOOL_LIMIT, ReadMore
 from app.chat.service import ACTION_SHOWN, DISCLAIMER, ROUTE_SHOWN
 from tests.chat.fakes import FakeToolAgent
 from tests.chat.test_messages import MessageJava, deltas, events, send
@@ -9,7 +9,8 @@ from tests.chat.test_read_tools import ANSWER, FakeToolReader, payload, use_read
 from tests.chat.test_register import CHOCO
 from tests.chat.test_tools import room_of, row_of, use_agent
 
-# 한 메시지 여러 일 ① (2026-11-13) : 한 턴 READ 최대 3번, 결과 뒤 이동·사용법은 바로가기
+# 한 메시지 여러 일 ① (2026-11-13) : 한 턴 도구 최대 TOOL_LIMIT번(에이전트 ②)
+# 결과 뒤 이동·사용법은 바로가기
 
 CHECKUPS = "/api/pets/1/checkups"
 
@@ -26,11 +27,11 @@ def _send(client, java: MessageJava, agent: FakeToolAgent, text: str, reader: Fa
     return room, events(send(client, room, text))
 
 
-# READ 상한
+# 도구 상한
 
 
-def test_한_턴_READ_상한은_3번이어야_한다():
-    assert READ_LIMIT == 3
+def test_한_턴_도구_상한은_8번이어야_한다():
+    assert TOOL_LIMIT == 8
 
 
 def test_결과를_보고_읽기_도구를_두_번_더_고르면_READ_3번_결과로_답해야_한다(client, java):
@@ -58,22 +59,17 @@ def test_결과를_보고_읽기_도구를_두_번_더_고르면_READ_3번_결�
     assert evs[0][1]["kind"] == "SEARCH"
 
 
-def test_READ_3번_뒤의_네_번째_읽기_도구는_실행하지_않아야_한다(client, java):
-    agent = FakeToolAgent(
-        "list_checkups",
-        {},
-        follows=(
-            ("get_checkup", {"ckup_rcd_sn": 7}),
-            ("list_expenses", {}),
-            ("list_inspection_values", {}),
-        ),
-    )
+def test_도구_8번_뒤의_아홉_번째_읽기_도구는_실행하지_않아야_한다(client, java):
+    names = ("list_expenses", "list_inspection_values", "list_care_items", "list_checkups")
+    follows = tuple((names[no % len(names)], {}) for no in range(TOOL_LIMIT))
+    agent = FakeToolAgent("list_checkups", {}, follows=follows)
     reader = FakeToolReader([{"ckupRcdSn": 7}])
 
     _, evs = _send(client, java, agent, "검진이랑 병원비랑 피검사 다 알려 줘", reader)
 
-    assert len(reader.calls) == 3
-    assert agent.results[3] is None
+    assert len(reader.calls) == TOOL_LIMIT
+    assert all(isinstance(result, ReadMore) for result in agent.results[1:TOOL_LIMIT])
+    assert agent.results[TOOL_LIMIT] == rules.TOOL_LIMIT_REACHED
     assert evs[-1][0] == "done"
 
 
