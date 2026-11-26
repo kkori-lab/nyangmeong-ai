@@ -75,7 +75,7 @@ def test_카드_턴은_요약과_확인_말_안내를_저장한다(client, java)
     )
     room = room_of(client, java, pet_sn=CHOCO)
 
-    done = done_of(send(client, room, "초코 오늘 8시 반 체중 4.2kg 기록해줘"))
+    done = done_of(send(client, room, "초코 오늘 8시 반 체중 4.2kg 기록할까?"))
 
     text = done["message"]["cnvrsCn"]
     assert text.startswith("이렇게 할까요?\n초코 건강 일지 기록 — 체중 · 09-29(화) 08:30 · 4.2")

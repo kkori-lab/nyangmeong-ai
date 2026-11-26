@@ -39,7 +39,7 @@ def test_병원_일정_요청은_일정_등록_API를_부르는_확인_카드여
     use_agent(client, FakeToolAgent("draft_schedule", HOSPITAL))
     room = room_of(client, java, pet_sn=CHOCO)
 
-    evs = events(send(client, room, "다음 주 화요일 3시 메이 동물병원 예방접종 등록해 줘"))
+    evs = events(send(client, room, "다음 주 화요일 3시 메이 동물병원 예방접종 등록할까?"))
 
     assert evs[0][1]["kind"] == "ACTION"
     done = evs[-1][1]

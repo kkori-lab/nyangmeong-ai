@@ -94,7 +94,7 @@ def test_READ_결과로_삭제_카드와_대상_글을_만든다(client, java):
     use_reader(client, FakeToolReader(RECORDS))
     room = room_of(client, java, pet_sn=CHOCO)
 
-    done = done_of(send(client, room, "초코 어제 체중 기록 지워 줘"))
+    done = done_of(send(client, room, "초코 어제 체중 기록 지울까?"))
 
     action = done["action"]
     assert action["tool"] == DELETE_RECORD
@@ -242,7 +242,7 @@ def test_건강_일지_수정은_말한_칸만_보낸다(client, java):
     use_reader(client, FakeToolReader(RECORDS))
     room = room_of(client, java, pet_sn=CHOCO)
 
-    done = done_of(send(client, room, "어제 체중 4.57로 바꿔줘"))
+    done = done_of(send(client, room, "어제 체중 4.57로 바꿀까?"))
 
     action = done["action"]
     assert action["tool"] == "draft_daily_health_record_update"

@@ -2,7 +2,7 @@ import asyncio
 import base64
 import logging
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import date
 from functools import lru_cache
@@ -313,6 +313,15 @@ class ToolDecision:
     # 프로그래밍식 도구 호출 : content 앞의 코드 실행 왕복(assistant·user 턴)과 그 컨테이너
     history: tuple[dict, ...] = ()
     container: str | None = None
+    # 한 응답의 direct 도구 전부(첫 번째가 call, 2026-11-26 동시 도구). 비면 (call,)
+    calls: tuple[tools.ToolCall, ...] = ()
+    # call 말고 실행한 도구의 결과(tool_use id, 결과 글) : answer가 tool_result로 같이 보냄
+    results: tuple[tuple[str, str], ...] = ()
+
+    def all_calls(self) -> tuple[tools.ToolCall, ...]:
+        if self.calls:
+            return self.calls
+        return (self.call,) if self.call is not None else ()
 
 
 class ReadMore(str):
@@ -376,8 +385,11 @@ CHAT_CONFIRM_RULE = (
 )
 TOOL_RULES = (
     "도구\n"
-    "- 회원의 말에 맞는 도구가 있으면 그 도구 하나만 부른다. "
+    "- 회원의 말에 맞는 도구가 있으면 그 도구를 부른다. "
     "도구를 부를 때는 앞에 글을 쓰지 않는다.\n"
+    # 한 응답 도구 여럿 (2026-11-26) : 읽기 도구는 동시에 실행. T96 : 이력의 답 없는 질문은 빼고
+    "- 한 메시지에 서로 다른 기록을 함께 물으면 읽기 도구를 한 번에 여럿 부를 수 있다. "
+    "지금 질문에 필요한 도구만 부르고, 이력의 앞 질문은 다시 조회하지 않는다.\n"
     "- 서비스 범위 안의 반려동물 건강·생활 정보 질문은 도구 없이 바로 답한다.\n"
     "- 두 도구가 다 맞아 보이면 도구 없이 무엇을 원하는지 짧게 되묻는다.\n"
     "- 도구 인자는 회원이 말한 것만 채우고 모르는 칸은 비운다.\n"
@@ -482,12 +494,12 @@ def tool_system_blocks(
     return blocks
 
 
-# 도구는 한 번에 하나 : 답 없는 질문이 이력에 둘이면 tool_use를 여럿 냄(2026-11-06 방 143 재현)
-# none에는 붙일 수 없음(400 Extra inputs)
-TOOL_CHOICE_AUTO = {"type": "auto", "disable_parallel_tool_use": True}
+# 한 응답에 도구 여럿(2026-11-26 팀 합의, disable_parallel_tool_use 뺌) : READ는 동시에 실행
+# 답 없는 질문이 이력에 둘일 때 여럿 내던 문제(2026-11-06 방 143)는 TOOL_RULES "지금 질문만"으로
+TOOL_CHOICE_AUTO = {"type": "auto"}
 TOOL_CHOICE_NONE = {"type": "none"}
-# 프로그래밍식 도구 호출은 disable_parallel_tool_use와 같이 못 씀(문서 Feature incompatibilities)
-TOOL_CHOICE_PTC = {"type": "auto"}
+# 프로그래밍식 도구 호출(LLM_PTC) : 이제 같은 값(disable_parallel_tool_use와 같이 못 쓰던 것)
+TOOL_CHOICE_PTC = TOOL_CHOICE_AUTO
 
 
 def _is_code_call(block: object) -> bool:
@@ -502,10 +514,14 @@ def _code_calls(final: Message) -> list:
     return [block for block in final.content if _is_code_call(block)]
 
 
-def _direct_use(final: Message) -> object | None:
-    return next(
-        (b for b in final.content if b.type == "tool_use" and not _is_code_call(b)),
-        None,
+def _direct_uses(final: Message) -> list:
+    return [b for b in final.content if b.type == "tool_use" and not _is_code_call(b)]
+
+
+def _parsed(uses: list) -> tuple[tools.ToolCall, ...]:
+    return tuple(
+        tools.parse(use.name, use.input if isinstance(use.input, dict) else {}, use.id)
+        for use in uses
     )
 
 
@@ -569,7 +585,7 @@ class AnthropicToolAgent:
         return tool_system_blocks(today, hint, ptc=self.ptc is not None)
 
     def _auto(self) -> dict:
-        return TOOL_CHOICE_PTC if self.ptc is not None else TOOL_CHOICE_AUTO
+        return TOOL_CHOICE_AUTO
 
     async def _events(self, request: dict) -> AsyncIterator[object]:
         # 원시 이벤트 뒤에 마지막으로 완성 메시지 : 글 스트림이 같은 호출을 이어 읽게
@@ -641,17 +657,18 @@ class AnthropicToolAgent:
             if code is not None and _code_pending(final):
                 current = await self._continue(current, final, code)
                 continue
-            use = _direct_use(final)
-            if use is None:
+            calls = _parsed(_direct_uses(final))
+            if not calls:
                 return ToolDecision()
-            call = tools.parse(use.name, use.input if isinstance(use.input, dict) else {}, use.id)
             content = tuple(block.model_dump(exclude_none=True) for block in final.content)
-            logger.info("LLM 도구: %s 인자 %s", call.name, "통과" if call.args else "거부")
+            for call in calls:
+                logger.info("LLM 도구: %s 인자 %s", call.name, "통과" if call.args else "거부")
             return ToolDecision(
-                call=call,
+                call=calls[0],
                 content=content,
                 history=tuple(current[len(messages) :]),
                 container=container,
+                calls=calls,
             )
         logger.warning("코드 실행 왕복 상한(%d): 도구 고르기 끝", PTC_ROUNDS)
         turnlog.tag(turnlog.CODE_ROUNDS)
@@ -778,7 +795,11 @@ class AnthropicToolAgent:
         # code 있음 : 코드 실행 왕복은 라운드에 세지 않음(호출 수는 code가 PTC_CALL_LIMIT로 셈)
         container = decision.container
         current = with_result(
-            [*messages, *decision.history], decision.content, decision.call, result
+            [*messages, *decision.history],
+            decision.content,
+            decision.call,
+            result,
+            dict(decision.results),
         )
         if follow is None:
             request = self._request(current, max_tokens, self._system(today), container)
@@ -827,21 +848,23 @@ class AnthropicToolAgent:
                 current = await self._continue(current, final, code)
                 continue
             round_no += 1
-            use = _direct_use(final)
-            if use is None:
+            calls = _parsed(_direct_uses(final))
+            if not calls:
                 _log_failure("도구 결과 답변", started, "no_output")
                 raise AnswerError("no_output")
-            call = tools.parse(use.name, use.input if isinstance(use.input, dict) else {}, use.id)
-            logger.info(
-                "LLM 결과 뒤 도구(%d): %s 인자 %s",
-                round_no,
-                call.name,
-                "통과" if call.args else "거부",
-            )
-            second = await follow(call)
+            for call in calls:
+                logger.info(
+                    "LLM 결과 뒤 도구(%d): %s 인자 %s",
+                    round_no,
+                    call.name,
+                    "통과" if call.args else "거부",
+                )
+            outs = await follow_all(follow, calls)
             content = tuple(block.model_dump(exclude_none=True) for block in final.content)
-            current = with_result(current, content, call, second or rules.READ_NOT_RUN)
-            if not isinstance(second, ReadMore):
+            pairs = zip(calls, outs, strict=True)
+            results = {call.use_id: out or rules.READ_NOT_RUN for call, out in pairs}
+            current = with_result(current, content, calls[0], results[calls[0].use_id], results)
+            if not all(isinstance(out, ReadMore) for out in outs):
                 break
         request = self._request(current, max_tokens, self._system(today), container)
         request["tool_choice"] = TOOL_CHOICE_NONE
@@ -875,25 +898,46 @@ def _is_direct_block(block: dict) -> bool:
     return block.get("type") == "tool_use" and caller.get("type", "direct") == "direct"
 
 
+async def follow_all(follow: FollowRead, calls: Sequence[tools.ToolCall]) -> list[str | None]:
+    """한 응답의 도구 여럿 실행 (2026-11-26) : 읽기 도구는 동시에, 나머지(카드·이동)는 차례로
+    결과는 calls 순서. 카드 1장·READ 횟수 규칙은 follow가 그대로 지킴"""
+    outs: dict[int, str | None] = {}
+    reads = [no for no, call in enumerate(calls) if tools.read_entry(call.name) is not None]
+    if len(reads) > 1:
+        logger.info("한 응답 읽기 도구 %d개 동시 실행", len(reads))
+    done = await asyncio.gather(*(follow(calls[no]) for no in reads))
+    outs.update(zip(reads, done, strict=True))
+    for no, call in enumerate(calls):
+        if no not in outs:
+            outs[no] = await follow(call)
+    return [outs[no] for no in range(len(calls))]
+
+
 def with_result(
-    messages: list[dict], content: tuple[dict, ...], call: tools.ToolCall | None, result: str
+    messages: list[dict],
+    content: tuple[dict, ...],
+    call: tools.ToolCall | None,
+    result: str,
+    results: dict[str, str] | None = None,
 ) -> list[dict]:
     # tool_use마다 tool_result 필수(없으면 Anthropic 400) : 실행한 도구만 결과, 나머지는 실행 안 함
+    # results : call 말고 결과가 있는 도구(tool_use id -> 결과 글, 한 응답 도구 여럿)
     # 코드 실행이 부른 tool_use는 그 왕복에서 이미 결과를 줬으므로 direct만
     use_id = call.use_id if call is not None else ""
+    given = {**(results or {}), use_id: result}
     ids = [block["id"] for block in content if _is_direct_block(block)] or [use_id]
-    results = [
+    results_ = [
         {
             "type": "tool_result",
             "tool_use_id": block_id,
-            "content": result if block_id == use_id else rules.READ_NOT_RUN,
+            "content": given.get(block_id, rules.READ_NOT_RUN),
         }
         for block_id in ids
     ]
     return [
         *messages,
         {"role": "assistant", "content": list(content)},
-        {"role": "user", "content": results},
+        {"role": "user", "content": results_},
     ]
 
 

@@ -45,7 +45,7 @@ def today(monkeypatch):
 def two_cards(client, java) -> tuple[int, dict]:
     use_agent(client, FakeToolAgent(HEALTH, RAW))
     room = room_of(client, java)
-    return room, done_of(send(client, room, "오늘 아침 8시 봄이랑 누리 체중 30 기록해줘"))
+    return room, done_of(send(client, room, "오늘 아침 8시 봄이랑 누리 체중 30 기록할까?"))
 
 
 def test_다른_이름이_둘이면_이름마다_같은_값의_카드를_한_장씩_줘야_한다(client, java):

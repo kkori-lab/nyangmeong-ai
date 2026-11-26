@@ -49,13 +49,13 @@ def card_text(client, java, said: str, **raw) -> str:
     ],
 )
 def test_일지_카드_요약에_항목별_단위가_붙는다(client, java, code, value, expected):
-    text = card_text(client, java, "기록해 줘", daily_rcd_idct_cd=code, rcd_nvl=value)
+    text = card_text(client, java, "기록할까?", daily_rcd_idct_cd=code, rcd_nvl=value)
 
     assert text.splitlines()[1].endswith(expected)
 
 
 def test_말한_수를_반올림했으면_카드_턴_글에_알린다(client, java):
-    text = card_text(client, java, "탄이 체중 4.567kg로 바꿔줘", rcd_nvl=4.567)
+    text = card_text(client, java, "탄이 체중 4.567kg로 바꿀까?", rcd_nvl=4.567)
 
     lines = text.splitlines()
     assert lines[1].endswith("· 4.57kg")
@@ -67,7 +67,7 @@ def test_반려동물_정보_수정_몸무게에도_kg와_반올림_알림이_�
     use_agent(client, FakeToolAgent("draft_pet_update", {"pet_bdwg": 4.567}))
     room = room_of(client, java, pet_sn=CHOCO)
 
-    text = done_of(send(client, room, "초코 체중 4.567kg로 바꿔줘"))["message"]["cnvrsCn"]
+    text = done_of(send(client, room, "초코 체중 4.567kg로 바꿀까?"))["message"]["cnvrsCn"]
 
     lines = text.splitlines()
     assert lines[1].endswith("— 4.57kg")

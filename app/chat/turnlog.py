@@ -71,6 +71,7 @@ QUIET = frozenset(
         "ROUTE_SHOWN",
         "ROUTE_EMPTY_MESSAGE",
         "ACTION_SHOWN",
+        "ACTION_RUN_SHOWN",
         "ACTION_ASK_TEMPLATE",
         "PET_LABEL",
         "ACTION_ASK_CONFIRM",
@@ -137,6 +138,8 @@ ERROR = "error"
 # 프로그래밍식 도구 호출 : 글을 흘린 뒤 코드 실행이 이어짐, 코드 실행 왕복 상한
 TEXT_THEN_CODE = "text_then_code"
 CODE_ROUNDS = "code_rounds"
+# 동사형 명령 : 첫 턴에 확인 말 없이 실행 지시 (2026-11-26)
+RUN_NOW = "run_now"
 
 # 재요청 말 : 앞이 "아니", 또는 띄어쓰기를 뺀 글에 이 말
 RETRY_HEAD = "아니"

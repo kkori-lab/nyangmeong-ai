@@ -166,7 +166,7 @@ def test_꺼짐이면_요청이_지금과_같아야_한다():
     fake = scripted(tool_sse("decline", {}))
     asyncio.run(AnthropicToolAgent(fake.client(), MODEL).decide(CONTEXT, 4500, TODAY))
     body = fake.requests[0]
-    assert body["tool_choice"] == {"type": "auto", "disable_parallel_tool_use": True}
+    assert body["tool_choice"] == {"type": "auto"}  # 2026-11-26 한 응답 도구 여럿
     assert "container" not in body
     assert PTC_RULES not in body["system"][0]["text"]
     assert all(t.get("type") != tools.CODE_CALLER for t in body["tools"])

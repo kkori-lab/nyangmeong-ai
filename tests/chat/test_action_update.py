@@ -311,7 +311,7 @@ def test_수정_카드_턴은_수정해_줘로_확인을_안내해야_한다(cli
     use_agent(client, FakeToolAgent(PET_UPDATE, {"goal_bdwg": 4}))
     room = room_of(client, java, pet_sn=CHOCO)
 
-    events(send(client, room, "초코 목표 체중 4kg로 바꿔 줘"))
+    events(send(client, room, "초코 목표 체중 4kg로 바꿀까?"))
 
     saved = java.ai_messages(room)[-1]["cnvrsCn"]
     assert "'수정해 줘'" in saved

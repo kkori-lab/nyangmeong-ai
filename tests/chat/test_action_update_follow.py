@@ -114,7 +114,7 @@ def test_카드를_띄운_뒤_고른_쓰기_도구는_실행하지_않아야_한
     use_reader(client, FakeToolReader(SCHEDULES))
     room = room_of(client, java, pet_sn=CHOCO)
 
-    evs = events(send(client, room, "일정 이름 바꿔 줘"))
+    evs = events(send(client, room, "일정 이름 바꿀까?"))
 
     assert agent.results[1].startswith(ACTION_SHOWN.split("{summary}")[0])
     assert agent.results[2:] == [None]
