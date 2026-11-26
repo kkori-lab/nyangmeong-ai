@@ -169,7 +169,7 @@ ACTION_ASK_CONFIRM = "맞으면 '등록해 줘'라고 말해 주세요. 바꿀 �
 ACTION_EXECUTE_MESSAGE = "등록할게요."
 # 사진(file) 칸만 빈 카드의 확인 말 (2026-11-24 LJS 결정) : 버튼을 말하지 않고 사진은 카드에서
 # lesion-card(React가 분석한 사진을 붙임)와 대화로 만든 관찰 카드(회원이 올림)에 같이 맞는 글
-ACTION_EXECUTE_PHOTO_MESSAGE = "사진과 함께 등록할게요. 사진이 없으면 카드에서 올려 주세요."
+ACTION_EXECUTE_PHOTO_MESSAGE = "사진과 함께 등록할게요."
 # 카드 턴 : 사진 칸이 빈 카드의 안내 줄(카드 여럿이면 번호)
 ACTION_ASK_PHOTO = "사진은 카드에서 올려 주세요."
 ACTION_ASK_PHOTO_NO = "{no}번 사진은 카드에서 올려 주세요."
@@ -919,6 +919,8 @@ class _Follow:
             prior = next((d for d in self.read.priors if d.tool == call.name), None)
             base = prior.values if prior is not None else None
             values = catalog.card_input(card, raw, self.read.now, self.seen, base, self.rows)
+            if prior is None:
+                values = _carry_lesion(card, values, self.read.priors)
             if catalog.missing_target_ids(card, values):
                 logger.info("쓰기 도구 대상 번호 없음: %s", call.name)
                 return _target_missing_note(card)
@@ -1858,6 +1860,8 @@ async def _action_reply(
     cards: list[ActionCard] = []
     for (item, values, rejected), group in zip(picked, groups, strict=True):
         prior = next((draft for draft in priors if draft.tool == item.name), None)
+        if prior is None:
+            values = _carry_lesion(item, values, priors)
         draft_pet = prior.values.get(catalog.PET_SN) if prior is not None else None
         target = prior.target_text if prior is not None else None
         for pets_of in group or [named]:
@@ -1867,6 +1871,26 @@ async def _action_reply(
     if len(cards) > len(picked):
         logger.info("반려동물별 쓰기 카드 %d장", len(cards))
     return cards
+
+
+# 분석 카드 뒤 이미 관찰 중인 항목에 더하기 (SCR-AIM-013, 2026-11-26)
+# 돌려받은 관찰 항목 카드(lesion-card) -> 관찰 기록 카드 : LLM이 주지 않은 메모·관찰 일시를 옮김
+OBSERVATION_CYCLE_TOOL = "draft_observation_cycle"
+LESION_CARRY_FIELDS = ("memoCn", "obsrvDt")
+
+
+def _carry_lesion(entry: "catalog.CatalogEntry", values: dict, priors: list[ActionDraft]) -> dict:
+    if entry.name != OBSERVATION_CYCLE_TOOL:
+        return values
+    source = next((draft for draft in priors if draft.tool == OBSERVATION_TOOL), None)
+    if source is None:
+        return values
+    carried = dict(values)
+    for name in LESION_CARRY_FIELDS:
+        value = source.values.get(name)
+        if name in entry.params and carried.get(name) is None and value not in (None, ""):
+            carried[name] = value
+    return carried
 
 
 def _pet_groups(entry: "catalog.CatalogEntry", named: list[PetInfo]) -> list[list[PetInfo]]:
@@ -2774,6 +2798,13 @@ LESION_MESSAGES = {
 LESION_ASK = "{pet}지속 관찰 항목으로 남길까요? 카드에 분석한 사진을 붙여 저장해요."
 LESION_EYE_REGION = "부위는 얼굴로 골라 두었어요. 왼쪽 눈인지 오른쪽 눈인지 말해 주시면 적을게요."
 LESION_NO_TOOL = "건강기록의 지속 관찰에서 직접 남길 수 있어요."
+# 이미 관찰 중인 항목 (2026-11-26) : 자동으로 바꾸지 않고 회원이 이름으로 고른다
+OBSERVATION_LIST_TOOL = "list_observation_items"
+OBSERVATION_STATUS = "obsrvSttsCd"
+OBSERVATION_ONGOING = "관찰중"
+OBSERVATION_SHOW_ITEMS = 3
+LESION_ONGOING_HEAD = "이미 관찰 중인 항목이 있어요."
+LESION_ONGOING_ASK = "이미 관찰 중인 항목에 기록을 더하려면 '{name}에 추가해 줘'처럼 말해 주세요."
 
 
 def _lesion_memo(request: LesionCardRequest, title: str, limit: int | None) -> str:
@@ -2796,8 +2827,60 @@ def _region_code(entry: "catalog.CatalogEntry", name: str) -> str | None:
     return next((c.cd for c in codes or [] if c.nm == name), None)
 
 
+def _ongoing_text(item: dict) -> str:
+    # "흰자 충혈 (얼굴 왼쪽 눈·11월 24일)" : 부위·최근 관찰일이 없으면 뺌
+    region = " ".join(
+        str(item[key]) for key in ("obsrvRegnCdNm", "obsrvRegnDtlNm") if item.get(key)
+    )
+    parts = [region] if region else []
+    last = item.get("lastCycle")
+    seen = last.get("obsrvDt") if isinstance(last, dict) else None
+    try:
+        day = datetime.fromisoformat(str(seen))
+        parts.append(f"{day.month}월 {day.day}일")
+    except ValueError:
+        pass
+    name = str(item["obsrvArtclNm"])
+    return f"{name} ({'·'.join(parts)})" if parts else name
+
+
+async def _ongoing_items(reader: ToolReader, pet_sn: int) -> list[dict]:
+    """그 아이의 관찰 중인 항목(list_observation_items). 도구 없음·읽기 실패면 빈 목록"""
+    entry = tools.read_entry(OBSERVATION_LIST_TOOL)
+    if entry is None:
+        return []
+    request = catalog.read_request(entry, {}, pet_sn)
+    if request is None:
+        return []
+    path, query = request
+    status = entry.params.get(OBSERVATION_STATUS)
+    code = next(
+        (c.cd for c in (status.codes if status else None) or [] if c.nm == OBSERVATION_ONGOING),
+        None,
+    )
+    if code is not None:
+        query = query | {OBSERVATION_STATUS: code}
+    try:
+        data = await reader.read(path, query)
+    except (AppError, BackendError) as error:
+        logger.info("관찰 중인 항목 읽기 실패: %s", type(error).__name__)
+        return []
+    rows = data.get("content") if isinstance(data, dict) else data
+    if not isinstance(rows, list):
+        return []
+    return [
+        row
+        for row in rows
+        if isinstance(row, dict)
+        and isinstance(row.get("obsrvArtclNm"), str)
+        and row["obsrvArtclNm"].strip()
+        and (code is None or row.get(OBSERVATION_STATUS) in (None, code))
+    ]
+
+
 async def save_lesion_card(
     repo: ConversationRepository,
+    reader: ToolReader,
     contexts: RegisterContextRepository,
     room_sn: int,
     request: LesionCardRequest,
@@ -2843,6 +2926,11 @@ async def save_lesion_card(
         lines.append(LESION_ASK.format(pet=pet))
         if region is not None:
             lines.append(LESION_EYE_REGION)
+        ongoing = await _ongoing_items(reader, request.pet_sn)
+        if ongoing:
+            lines.append(LESION_ONGOING_HEAD)
+            lines += [f"- {_ongoing_text(item)}" for item in ongoing[:OBSERVATION_SHOW_ITEMS]]
+            lines.append(LESION_ONGOING_ASK.format(name=ongoing[0]["obsrvArtclNm"]))
         # 사진 칸 : 카드에서 분석한 사진을 붙이므로 말로 묻지 않음(_missing_lines가 뺌)
         lines += _missing_lines([card]) or [ACTION_ASK_CONFIRM]
         logger.info(

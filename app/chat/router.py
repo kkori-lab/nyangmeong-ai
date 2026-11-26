@@ -213,10 +213,11 @@ async def save_checkup_card(
 async def save_lesion_card(
     body: LesionCardRequest,
     repo: Repo,
+    reader: Annotated[ToolReader, Depends(get_tool_reader)],
     contexts: Annotated[RegisterContextRepository, Depends(get_register_context_repository)],
     room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
 ) -> JSONResponse:
-    result = await service.save_lesion_card(repo, contexts, room_sn, body)
+    result = await service.save_lesion_card(repo, reader, contexts, room_sn, body)
     return response.success(result.model_dump(by_alias=True, mode="json"), http_code=201)
 
 
