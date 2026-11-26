@@ -192,6 +192,25 @@ class Hook:
     roles: frozenset[str] = frozenset()
 
 
+# 문장에 나온 반려동물 이름 (2026-11-26 추가-2) : 반려동물 hook이 있는 도구에 Python이 덧붙이는 칸
+# 목록에 없는 이름이면 카드·READ 없이 안내. Java 칸이 아니라 to_java에서 빠진다
+PET_NAME = "pet_name"
+PET_NAME_DESCRIPTION = (
+    "회원이 이 문장에 직접 쓴 반려동물 이름 그대로(여럿이면 쉼표로). "
+    "문장에 이름이 없으면 비운다. 대화방 반려동물이나 이전 대화의 이름을 넣지 않는다"
+)
+PET_HOOKS = frozenset({"pet", "pet_filter", "pet_list", "line_pet"})
+
+
+def said_pet_names(values: dict) -> list[str]:
+    """pet_name 칸 값 -> 이름 목록(쉼표·'랑'·'와'·'과' 앞뒤 공백 정리, 빈 값 뺌)"""
+    raw = values.get(PET_NAME)
+    if not isinstance(raw, str):
+        return []
+    parts = re.split(r"\s*[,·/]\s*|\s+(?:랑|와|과|하고|and)\s+", raw.strip())
+    return [part.strip() for part in parts if part.strip()]
+
+
 HOOKS: dict[str, Hook] = {
     "pet": Hook(makes=frozenset({"petSn"})),
     # 도구의 datetime 칸(schdlDt·rcdDt)을 만듦. hrInptYn이 있는 도구만 시간 입력 여부도
@@ -386,6 +405,8 @@ def _entry(tool: CatalogTool, prompt: ToolPrompt) -> CatalogEntry:
             code_names[name] = ", ".join(f"{code.cd} {code.nm}" for code in java.codes)
         if java is not None and (java.min_value is not None or java.max_value is not None):
             bounds[name] = (java.min_value, java.max_value)
+    if PET_HOOKS & set(prompt.hooks) and PET_NAME not in fields:
+        fields[PET_NAME] = (str | None, Field(None, description=PET_NAME_DESCRIPTION))
     model = create_model(_model_name(tool.name), **fields)
     definition = {
         "name": tool.name,
