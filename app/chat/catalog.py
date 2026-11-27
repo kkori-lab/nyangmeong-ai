@@ -177,6 +177,8 @@ class ToolPrompt(BaseModel):
     # 삭제 카드 : 대상 글(targetText)에 쓸 READ 결과 행의 Java 칸 (2026-11-25)
     # "칸:단위"는 값 뒤 단위, "번호칸>칸"은 그 번호의 다른 READ 행에서 칸을 읽음
     target_fields: list[str] = []
+    # CARD : 확인 문구 동사(지정·구매·수락·거절·종료·진행). 없으면 HTTP 메서드로 (2026-11-27)
+    verb: str | None = None
 
     @model_validator(mode="after")
     def _needs_description(self) -> "ToolPrompt":
@@ -269,6 +271,7 @@ class CatalogEntry:
     result_drop: tuple[str, ...] = ()
     default_days: int | None = None
     target_fields: tuple[str, ...] = ()
+    verb: str | None = None
 
 
 @dataclass(frozen=True)
@@ -438,6 +441,7 @@ def _entry(tool: CatalogTool, prompt: ToolPrompt) -> CatalogEntry:
         result_drop=tuple(prompt.result_drop),
         default_days=prompt.default_days,
         target_fields=tuple(prompt.target_fields),
+        verb=prompt.verb,
     )
 
 

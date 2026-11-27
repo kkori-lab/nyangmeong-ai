@@ -209,11 +209,11 @@ def test_설명의_hook_이름과_역할은_Python에_있어야_한다():
 
 
 def test_navigate만_쓰는_API는_스냅샷에_없어야_한다():
-    # ③ 설계 2-3절 : 반려동물 등록·삭제·회원정보·공동양육·관리자·인증·내부 API
+    # ③ 설계 2-3절 : 반려동물 삭제·회원정보(PUT)·공동양육 해제·관리자·인증·내부 API
     # 삭제는 2026-11-25부터 확인 카드(DELETES 11개)만. 반려동물 삭제·지출 전체 삭제는 navigate
+    # 프로필 사진 수정(PATCH /api/members/me, 휴대전화번호 칸 없음)은 2026-11-27부터 확인 카드
     navigate_only = (
         ("PUT", "/api/members/me"),
-        ("PATCH", "/api/members/me"),
         ("DELETE", "/api/pets/{petSn}"),
         ("DELETE", "/api/expenses"),
     )

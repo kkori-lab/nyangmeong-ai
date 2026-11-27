@@ -40,6 +40,12 @@ NEW_ACTION_WITHOUT_CODES = {
     "draft_item_purchase",
     "draft_equipped_items",
 }
+# 2026-11-27 ② : 8080 백엔드에 설명 없이 있던 카드 3개
+NEW_ACTION_WITHOUT_CODES |= {
+    "draft_member_nickname_update",
+    "draft_member_profile_update",
+    "draft_place_bookmark",
+}
 NEW_ACTION = NEW_ACTION_WITHOUT_CODES | {
     "draft_checkup",
     "draft_prescription",

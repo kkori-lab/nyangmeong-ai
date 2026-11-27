@@ -267,6 +267,14 @@ ACTION_DELETE_TARGET_MISSING = (
 DELETE_TARGET_MISSING_MESSAGE = (
     "지울 {target}을 찾지 못했어요. 이름이나 날짜를 넣어 다시 말해 주세요."
 )
+# 도구별 동사 (2026-11-27) : tool_prompts.yaml verb(지정·구매·수락·거절·종료·진행), 없으면 메서드로
+# 위 문구의 "등록"을 그 동사로 바꾼다. 번호를 못 정했을 때 글도 그 동사로("진행"이면 동사 없이)
+VERB_TARGET_MISSING_MESSAGE = "{verb}할 {target}을 찾지 못했어요. 이름을 넣어 다시 말해 주세요."
+PROCEED_TARGET_MISSING_MESSAGE = "{target}을 찾지 못했어요. 이름을 넣어 다시 말해 주세요."
+ACTION_VERB_TARGET_MISSING = (
+    "{verb}할 대상을 이 턴 읽기 결과에서 찾지 못해 카드를 띄우지 않음. "
+    "어떤 것을 {verb}할지 이름을 넣어 다시 말해 달라고 한두 문장으로 안내한다."
+)
 
 
 def _method_verb(method: str) -> str:
@@ -280,7 +288,24 @@ def _method_verb(method: str) -> str:
 
 def action_verb(methods: Sequence[str]) -> str:
     """카드 call.method 목록 -> 확인 문구 동사(등록·수정·삭제·진행)"""
-    kinds = {_method_verb(method) for method in methods}
+    return _joined_verb([_method_verb(method) for method in methods])
+
+
+def entry_verb(entry: "catalog.CatalogEntry") -> str:
+    """도구 하나의 확인 문구 동사 : tool_prompts.yaml verb, 없으면 HTTP 메서드로"""
+    return entry.verb or _method_verb(entry.call.method)
+
+
+def _card_verb(card: ActionCard) -> str:
+    entry = tools.card_entry(card.tool)
+    if entry is not None and entry.verb:
+        return entry.verb
+    return _method_verb(card.call.method)
+
+
+def _joined_verb(verbs: Sequence[str]) -> str:
+    # 카드 여럿의 동사가 다르면 "진행"
+    kinds = set(verbs)
     if len(kinds) == 1:
         return next(iter(kinds))
     return ACTION_VERB_MIXED if len(kinds) > 1 else ACTION_VERB_ADD
@@ -292,7 +317,7 @@ def is_delete(card: "ActionCard | catalog.CatalogEntry") -> bool:
 
 def _worded(message: str, cards: Sequence[ActionCard]) -> str:
     # 등록 기준 문구를 카드 종류의 동사로
-    verb = action_verb([card.call.method for card in cards])
+    verb = _joined_verb([_card_verb(card) for card in cards])
     return message.replace(ACTION_VERB_ADD, verb)
 
 
@@ -304,6 +329,10 @@ def _target_missing(entry: "catalog.CatalogEntry") -> str:
     target = entry.target or entry.label or "대상"
     if is_delete(entry):
         return DELETE_TARGET_MISSING_MESSAGE.format(target=target)
+    if entry.verb == ACTION_VERB_MIXED:
+        return PROCEED_TARGET_MISSING_MESSAGE.format(target=target)
+    if entry.verb:
+        return VERB_TARGET_MISSING_MESSAGE.format(verb=entry.verb, target=target)
     if entry.call.method == "PATCH":
         return TARGET_MISSING_MESSAGE.format(target=target)
     return ADD_TARGET_MISSING_MESSAGE.format(target=target)
@@ -313,6 +342,8 @@ def _target_missing_note(entry: "catalog.CatalogEntry") -> str:
     # 읽기 결과를 본 LLM에 주는 tool_result 글
     if is_delete(entry):
         return ACTION_DELETE_TARGET_MISSING
+    if entry.verb and entry.verb != ACTION_VERB_MIXED:
+        return ACTION_VERB_TARGET_MISSING.format(verb=entry.verb)
     return ACTION_TARGET_MISSING if entry.call.method == "PATCH" else ACTION_ADD_TARGET_MISSING
 
 
@@ -1740,6 +1771,12 @@ async def _run_turn(
                 methods = [e.call.method for d in priors if (e := tools.card_entry(d.tool))]
                 if DELETE not in {method.upper() for method in methods}:
                     reply = None
+            said = rules.says_card_verb(text) if reply is None else None
+            if said is not None:
+                # "수락해 줘"·"구매해 줘" 등 도구별 동사는 그 동사 카드가 있을 때만 확인 말
+                verbs = {entry_verb(e) for d in priors if (e := tools.card_entry(d.tool))}
+                if said in verbs:
+                    reply = rules.ACTION_CONFIRM
             if reply is not None:
                 record.reply = reply
                 await _action_answer(reply, turn, priors, repo, register, emit)
@@ -3080,7 +3117,7 @@ async def _action_answer(
     # 여러 명령 ② : 카드가 여럿이면 모두 빈 칸이 없을 때만 실행 지시, 취소 말은 모두 버림
     entries = [e for draft in priors if (e := tools.card_entry(draft.tool)) is not None]
     emit(("intent", Intent(kind=IntentKind.ACTION)))
-    verb = action_verb([entry.call.method for entry in entries])
+    verb = _joined_verb([entry_verb(entry) for entry in entries])
     if reply == rules.ACTION_CANCEL or not entries:
         drop = ACTION_DROP_MESSAGE.replace(ACTION_VERB_ADD, verb)
         saved = await _save(repo, turn.room_sn, drop, True)

@@ -398,6 +398,27 @@
       "rules": []
     },
     {
+      "name": "draft_member_nickname_update",
+      "domain": "member",
+      "kind": "CARD",
+      "call": {"method": "PATCH", "path": "/api/members/me/nickname"},
+      "params": {
+        "mbrNcnm": {"in": "body", "type": "string", "required": true, "maxLength": 10, "pattern": "^[가-힣A-Za-z0-9]*$"}
+      },
+      "rules": []
+    },
+    {
+      "name": "draft_member_profile_update",
+      "domain": "member",
+      "kind": "CARD",
+      "call": {"method": "PATCH", "path": "/api/members/me", "contentType": "multipart/form-data"},
+      "params": {
+        "profilePhoto": {"in": "body", "type": "file"},
+        "profilePhotoReset": {"in": "body", "type": "boolean"}
+      },
+      "rules": []
+    },
+    {
       "name": "draft_observation_cycle",
       "domain": "health",
       "kind": "CARD",
@@ -504,6 +525,16 @@
         "algyCn": {"in": "body", "type": "string", "maxLength": 1000},
         "dssCn": {"in": "body", "type": "string", "maxLength": 1000},
         "goalBdwgReset": {"in": "body", "type": "boolean"}
+      },
+      "rules": []
+    },
+    {
+      "name": "draft_place_bookmark",
+      "domain": "place",
+      "kind": "CARD",
+      "call": {"method": "POST", "path": "/api/place-bookmarks"},
+      "params": {
+        "plcSn": {"in": "body", "type": "long", "required": true}
       },
       "rules": []
     },
