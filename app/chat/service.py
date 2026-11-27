@@ -1589,7 +1589,8 @@ async def answer_turn(
     summarizer: ConversationSummarizer | None = None,
     agent_key: str = "",
 ) -> AsyncIterator[Event]:
-    # agent_key : 에이전트 이어 가기 서명 키(AGENT_STATE_KEY). 비면 done.pending 없음
+    # agent_key : 에이전트 이어 가기 서명 키(라우터가 agentstate.key_of로 늘 줌)
+    # 비면 done.pending 없음
     queue: asyncio.Queue[Event | None] = asyncio.Queue()
     task = asyncio.create_task(
         _run_and_compact(

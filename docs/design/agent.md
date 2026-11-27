@@ -68,7 +68,7 @@ React ─▶ 카드마다 call 실행 → action-result (지금 그대로)
 Python은 상태를 갖지 않으므로(AGENTS.md 2번) 멈춘 루프를 React가 들고 있다가 돌려준다.
 
 - 모양: `base64url(JSON 본문) + "." + base64url(HMAC-SHA256(본문))`. 표준 라이브러리 `hmac`·`hashlib`만 쓴다(새 의존성 없음).
-- 키: 새 설정 키 `AGENT_STATE_KEY`(③에서 `.env.local.example`·디스코드 `.env.local`에 추가). 없으면 에이전트 이어 가기를 끄고 지금 흐름(`pending` 없음)으로 동작한다.
+- 키: 새 설정 키 `AGENT_STATE_KEY`(③에서 `.env.local.example`·디스코드 `.env.local`에 추가). 없으면 프로세스마다 무작위 키로 켠다(2026-11-27 결정, 재시작 때 진행 중 토큰만 무효, 서버 여러 대면 같은 값을 넣는다).
 - 담는 것: `v`(형식 버전), `room`(`aiCnvrsRoomSn`), `exp`(만료, 발급 뒤 10분), `said`(원래 사용자 메시지), `messages`(LLM 메시지 기록: 도구 호출·READ 결과 글·카드), `left`(남은 도구 호출 수), `seen`(번호 칸에 쓸 수 있는 이 턴 READ 번호), `cards`(이 멈춤에서 낸 카드의 `tool`·`input`). ③ 구현(`app/chat/agentstate.py`): `messages` 대신 `q`(그 사용자 메시지 msgSeq)·`notes`(진행 기록 글 목록), 그리고 `done`(이 턴에서 실행이 끝난 카드, 반복 막기)·`fixed`(칸 오류를 고친 적 있음)를 담는다.
 - 크기 상한 48KB(READ 결과 6000자 × 3 + 기록). 넘으면 `pending` 없이 지금 흐름으로 끝낸다.
 - 검사(`agent-continue`): 서명 틀림·만료·`room`이 경로와 다름·`v` 다름이면 400 `INVALID_REQUEST`. `results`의 `tool`은 토큰 `cards`에 있는 것만 받는다.
@@ -114,7 +114,7 @@ Python은 상태를 갖지 않으므로(AGENTS.md 2번) 멈춘 루프를 React�
 | --- | --- | --- |
 | ① | 이 문서 + `chat.md` 초안 | 초안만 |
 | ② | 읽기 루프 엔진(`_Follow` 도구 상한 8번), `step` 이벤트, 단계별·전체 시간, `turnlog` `agent_limit`, `tool_eval` 다단계 세트(읽기 꼴, `--agent`·`tests/chat/data/agent_eval.jsonl`). 구현됨(2026-11-26) | `step`만 더함(모르는 이벤트는 프론트가 무시) |
-| ③ | 서명 토큰·`AGENT_STATE_KEY`·`done.pending`·`agent-continue`, 칸 오류 고치기, 같은 쓰기 반복 막기, 결과 `data`의 새 번호, 다단계 세트(쓰기 꼴, `agent_write_eval.jsonl`). 구현됨(2026-11-26, 키가 없으면 꺼짐). 카드 최대 3장 → 8장은 남음 | 카드 8장·`data` 칸은 프론트 합의 뒤(`actions` 최대 개수 변경 포함) |
+| ③ | 서명 토큰·`AGENT_STATE_KEY`·`done.pending`·`agent-continue`, 칸 오류 고치기, 같은 쓰기 반복 막기, 결과 `data`의 새 번호, 다단계 세트(쓰기 꼴, `agent_write_eval.jsonl`). 구현됨(2026-11-26, 키가 없으면 무작위 키로 켜짐 2026-11-27). 카드 최대 3장 → 8장은 남음 | 카드 8장·`data` 칸은 프론트 합의 뒤(`actions` 최대 개수 변경 포함) |
 | ④ | 안전 규칙 점검(6절 테스트), 사람 확인 피드백 | 그대로 |
 
 ## 9. 결정 남음

@@ -105,14 +105,16 @@ def user_count(java: MessageJava, room: int) -> int:
 # A1·A4 done.pending
 
 
-def test_키가_없으면_pending이_없고_지금_흐름이어야_한다(client, java, monkeypatch):
+def test_키가_없어도_pending을_주고_같은_프로세스에서_이어_가야_한다(client, java, monkeypatch):
     monkeypatch.setenv("AGENT_STATE_KEY", "")
     get_settings.cache_clear()
 
-    _, done = first_turn(client, java, ContinueAgent((HEALTH, WEIGHT_RAW)))
+    room, done = first_turn(client, java, ContinueAgent((HEALTH, WEIGHT_RAW)))
+    res = cont(client, room, done["pending"]["agentToken"], [{"tool": HEALTH, "status": "DONE"}])
 
-    assert done["pending"] is None
-    assert done["execute"] is False
+    assert done["execute"] is True
+    assert done["pending"]["agentToken"]
+    assert res.status_code == 200
 
 
 def test_쓰기_뒤_할_일이_남은_명령이면_바로_실행하고_pending을_줘야_한다(client, java):
@@ -237,7 +239,8 @@ def test_토큰에_없는_도구와_개수_초과는_400이어야_한다(client,
     assert twice.status_code == 400
 
 
-def test_키가_없으면_이어_가기는_400이어야_한다(client, java, monkeypatch):
+def test_env_키가_바뀌면_이전_토큰은_400이어야_한다(client, java, monkeypatch):
+    # 키를 비우면 프로세스 무작위 키로 바뀌어 KEY로 서명한 토큰은 서명 틀림(재시작과 같음)
     room, done = first_turn(client, java, ContinueAgent((HEALTH, WEIGHT_RAW)))
     monkeypatch.setenv("AGENT_STATE_KEY", "")
     get_settings.cache_clear()

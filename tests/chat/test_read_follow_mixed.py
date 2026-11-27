@@ -2,7 +2,7 @@ import pytest
 
 from app.chat import rules
 from app.chat.clients import TOOL_LIMIT, ReadMore
-from app.chat.service import ACTION_SHOWN, DISCLAIMER, ROUTE_SHOWN
+from app.chat.service import DISCLAIMER, ROUTE_SHOWN
 from tests.chat.fakes import FakeToolAgent
 from tests.chat.test_messages import MessageJava, deltas, events, send
 from tests.chat.test_read_tools import ANSWER, FakeToolReader, payload, use_reader
@@ -88,7 +88,8 @@ def test_READ_3번_뒤에도_쓰기_카드는_한_번_고를_수_있어야_한�
     _, evs = _send(client, java, agent, "산책 완료 체크하고 병원비랑 검진도 알려 줘", reader)
 
     assert len(reader.calls) == 3
-    assert agent.results[3].startswith(ACTION_SHOWN.split("{summary}")[0])
+    # 키가 늘 있어 동사형 명령은 바로 실행 안내(ACTION_RUN_SHOWN), 두 흐름 공통 앞부분만 본다
+    assert agent.results[3].startswith("확인 카드를 만듦")
     action = evs[-1][1]["action"]
     assert action["tool"] == "draft_care_completion"
     assert action["input"] == {"petSn": CHOCO, "careArtclSn": 7}
