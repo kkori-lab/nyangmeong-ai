@@ -191,6 +191,9 @@ class ActionItemParam(_Camel):
     item_type: str | None = None
     # "uuid" : React가 [확인] 때 카드 하나에 한 번 만든다
     generated: str | None = None
+    # 값 목록(Java enum 상수 이름, 선언 순서, 2026-11-27) : string 칸이면 그중 하나,
+    # array(itemType string) 칸이면 그중 여럿
+    values: list[str] | None = None
 
 
 class ActionParam(ActionItemParam):

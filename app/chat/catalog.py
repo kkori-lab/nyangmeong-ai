@@ -10,7 +10,7 @@ import asyncio
 import json
 import logging
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
@@ -99,6 +99,9 @@ class CatalogItemParam(BaseModel):
     item_type: str | None = Field(None, alias="itemType")
     # "uuid" : React가 [확인] 때 카드 하나에 한 번 만든다(Python은 채우지 않고 필수로 세지 않음)
     generated: str | None = None
+    # 값 목록(Java enum 상수 이름, 선언 순서, 2026-11-27) : string 칸이면 그중 하나,
+    # array + itemType string 칸이면 그중 여럿. 카드 params에 그대로 싣는다
+    values: list[str] | None = None
 
 
 class CatalogParam(CatalogItemParam):
@@ -203,7 +206,7 @@ PET_NAME_DESCRIPTION = (
     "회원이 이 문장에 직접 쓴 반려동물 이름 그대로(여럿이면 쉼표로). "
     "문장에 이름이 없으면 비운다. 대화방 반려동물이나 이전 대화의 이름을 넣지 않는다"
 )
-PET_HOOKS = frozenset({"pet", "pet_filter", "pet_list", "line_pet"})
+PET_HOOKS = frozenset({"pet", "pet_filter", "pet_list", "line_pet", "pet_optional"})
 
 
 def said_pet_names(values: dict) -> list[str]:
@@ -228,6 +231,9 @@ HOOKS: dict[str, Hook] = {
     "pet_list": Hook(makes=frozenset({"petSns"})),
     # 배열 줄의 petSn(지출 등록 lines[0].petSn) : 문장 속 이름이 하나면 그 번호, 아니면 비움(공용)
     "line_pet": Hook(),
+    # 고르지 않아도 되는 카드 petSn(지출 조건 삭제, 2026-11-27) : 문장 속 이름이 하나면 그 번호,
+    # 아니면 비움(모든 아이). 이름 칩으로 되묻지 않는다
+    "pet_optional": Hook(),
 }
 
 # LLM 칸 타입 : 날짜·시간은 글자로 받아 다시 검증
@@ -272,6 +278,8 @@ class CatalogEntry:
     default_days: int | None = None
     target_fields: tuple[str, ...] = ()
     verb: str | None = None
+    # LLM 칸 -> 값 목록 칸(array + values)의 고를 수 있는 값(선언 순서)
+    value_lists: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -368,7 +376,8 @@ def _problem(tool: CatalogTool, prompt: ToolPrompt, source: str) -> str | None:
     for name, param in prompt.params.items():
         if param.java is not None:
             java = _java_param(tool.params, param.java)
-            if java is None or java.type == FILE or (java.type == ARRAY and not is_id_list(java)):
+            listed = is_id_list(java) or is_value_list(java) if java is not None else False
+            if java is None or java.type == FILE or (java.type == ARRAY and not listed):
                 return f"Java에 없는 칸 {name}->{param.java}"
             made.add(param.java.partition(ITEM_MARK)[0])
         if param.hook is not None:
@@ -396,6 +405,7 @@ def _entry(tool: CatalogTool, prompt: ToolPrompt) -> CatalogEntry:
     codes: dict[str, frozenset[str]] = {}
     code_names: dict[str, str] = {}
     bounds: dict[str, tuple[int | None, int | None]] = {}
+    value_lists: dict[str, tuple[str, ...]] = {}
     for name, param in prompt.params.items():
         java = _java_param(tool.params, param.java) if param.java else None
         py_type = _py_type(java) if java else str
@@ -408,6 +418,12 @@ def _entry(tool: CatalogTool, prompt: ToolPrompt) -> CatalogEntry:
         if java is not None and java.codes:
             codes[name] = frozenset(code.cd for code in java.codes)
             code_names[name] = ", ".join(f"{code.cd} {code.nm}" for code in java.codes)
+        elif java is not None and java.values and java.type == "string":
+            # enum 칸 : 코드 칸처럼 그 값만(enum)
+            codes[name] = frozenset(java.values)
+            code_names[name] = ", ".join(java.values)
+        if java is not None and is_value_list(java):
+            value_lists[name] = tuple(java.values or ())
         if java is not None and (java.min_value is not None or java.max_value is not None):
             bounds[name] = (java.min_value, java.max_value)
     if PET_HOOKS & set(prompt.hooks) and PET_NAME not in fields:
@@ -416,7 +432,7 @@ def _entry(tool: CatalogTool, prompt: ToolPrompt) -> CatalogEntry:
     definition = {
         "name": tool.name,
         "description": _description(prompt),
-        "input_schema": _schema(model, codes, code_names, bounds),
+        "input_schema": _schema(model, codes, code_names, bounds, value_lists),
     }
     rules = tuple(rule.required_if for rule in tool.rules if rule.required_if is not None)
     return CatalogEntry(
@@ -442,6 +458,7 @@ def _entry(tool: CatalogTool, prompt: ToolPrompt) -> CatalogEntry:
         default_days=prompt.default_days,
         target_fields=tuple(prompt.target_fields),
         verb=prompt.verb,
+        value_lists=value_lists,
     )
 
 
@@ -483,6 +500,7 @@ def _schema(
     codes: dict[str, frozenset[str]],
     code_names: dict[str, str],
     bounds: dict[str, tuple[int | None, int | None]],
+    value_lists: dict[str, tuple[str, ...]] | None = None,
 ) -> dict:
     # 설명은 description 칸에만 : 스키마 안 제목·기본값 제거
     # 코드 칸은 enum + 코드 이름, 숫자 칸은 minimum·maximum
@@ -504,6 +522,11 @@ def _schema(
                 value["minimum"] = low
             if high is not None:
                 value["maximum"] = high
+        if value_lists and name in value_lists:
+            # 값 목록 칸 : 항목마다 그 값만(선언 순서)
+            value = next(item for item in prop["anyOf"] if item.get("type") != "null")
+            value.setdefault("items", {"type": "string"})["enum"] = list(value_lists[name])
+            prop["description"] = f"{prop['description']}: {', '.join(value_lists[name])}"
     return schema
 
 
@@ -531,7 +554,20 @@ def clean_codes(entry: CatalogEntry, args: BaseModel) -> BaseModel:
             continue
         if (low is not None and value < low) or (high is not None and value > high):
             wrong[name] = None
+    for name, allowed in entry.value_lists.items():
+        # 값 목록 칸 : 목록 밖 값만 버리고, 준 값이 모두 틀리면 칸을 비움(되물음)
+        value = getattr(args, name)
+        if isinstance(value, list):
+            kept = _known_values(allowed, value)
+            if kept != value:
+                wrong[name] = kept if kept or not value else None
     return args.model_copy(update=wrong) if wrong else args
+
+
+def _known_values(allowed: Sequence[str], value: list) -> list[str]:
+    # 목록 안 값만, 중복 없이 선언 순서로
+    given = set(item for item in value if isinstance(item, str))
+    return [item for item in allowed if item in given]
 
 
 def to_java(entry: CatalogEntry, values: dict, now: datetime | None = None) -> dict:
@@ -614,8 +650,16 @@ def is_id_list(param: CatalogItemParam) -> bool:
     return param.type == ARRAY and param.item_type in ("long", "int") and not param.items
 
 
+def is_value_list(param: CatalogItemParam) -> bool:
+    # 값 목록 칸(List<enum>, 2026-11-27 알림 사전 시점 leadTimes) : 값마다 values 안의 것만
+    listed = param.type == ARRAY and param.item_type == "string"
+    return listed and bool(param.values) and not param.items
+
+
 def _py_type(param: CatalogItemParam) -> type:
-    return list[int] if is_id_list(param) else _PY_TYPES[param.type]
+    if is_id_list(param):
+        return list[int]
+    return list[str] if is_value_list(param) else _PY_TYPES[param.type]
 
 
 def id_list_key(name: str) -> str:
@@ -669,11 +713,12 @@ def read_request(
     pet_sn: int | None,
     seen: dict[str, set[int]] | None = None,
     pet_sns: str | None = None,
-) -> tuple[str, dict] | None:
+) -> tuple[str, dict] | tuple[str, dict, dict] | None:
     """READ 도구 인자 -> Java 경로·query (필수 칸이 비면 None)
+    - POST READ(저장 전 확인, 2026-11-27) : 본문 칸을 셋째 값(JSON 본문)으로. 고정 값(fixed)도 넣음
     - 번호 칸은 같은 턴 앞 READ 결과(seen)에 나온 값만 : LLM이 지어낸 번호면 그 칸을 비움
     - pet_sns : pet_list hook이 고른 번호들(쉼표). None이면 petSns를 보내지 않는다(모든 아이)"""
-    java = to_java(entry, values)
+    java = to_java(entry, values) | entry.fixed
     if pet_sn is not None and PET_SN in entry.params:
         java[PET_SN] = pet_sn
     java.pop(PET_SNS, None)
@@ -707,6 +752,13 @@ def read_request(
         for name, value in java.items()
         if name in entry.params and entry.params[name].loc == "query"
     }
+    if entry.call.method.upper() == "POST":
+        body = {
+            name: value
+            for name, value in java.items()
+            if name in entry.params and entry.params[name].loc == "body"
+        }
+        return path, query, body
     return path, query
 
 
@@ -728,8 +780,8 @@ def _missing_in(params: dict, values: dict, prefix: str, files: bool) -> list[st
         value = values.get(name)
         if param.generated or (param.type == FILE and not files):
             continue
-        if is_id_list(param):
-            # 번호 목록 : 필수면 목록이 있어야 하고(빈 목록 = 다 벗기기 등), 최소 개수는 minItems만
+        if is_id_list(param) or is_value_list(param):
+            # 번호·값 목록 : 필수면 목록이 있어야 하고(빈 목록 = 다 벗기기 등), 최소 수는 minItems만
             ids = value if isinstance(value, list) else None
             empty = ids is None and param.required
             if empty or (ids is not None and len(ids) < (param.min_items or 0)):
@@ -775,6 +827,8 @@ def _valid(param: CatalogItemParam, value: object) -> bool:
     if kind == ARRAY:
         if is_id_list(param):
             return _clean_ids(param, value, "") == value
+        if is_value_list(param):
+            return _clean_values(param, value) == value
         return _clean_array(param, value) == value
     if kind in ("date", "datetime", "time"):
         parse = {"date": date, "datetime": datetime, "time": time}[kind].fromisoformat
@@ -789,6 +843,8 @@ def _valid(param: CatalogItemParam, value: object) -> bool:
         return isinstance(value, bool)
     if kind == "string":
         if not isinstance(value, str) or not value.strip():
+            return False
+        if param.values and value not in param.values:
             return False
         if param.pattern is not None and re.fullmatch(param.pattern, value) is None:
             return False
@@ -847,6 +903,17 @@ def _clean_ids(
     return list(dict.fromkeys(value))
 
 
+def _clean_values(param: CatalogItemParam, value: object) -> list[str] | None:
+    """값 목록 칸 : 글자 목록이면 목록 안 값만(선언 순서). 준 값이 모두 틀리면 None
+    - 빈 목록은 그대로(사전 알림 시점 없음)"""
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        return None
+    kept = _known_values(param.values or (), value)
+    if value and not kept:
+        return None
+    return kept
+
+
 def _usable(
     param: CatalogParam,
     value: object,
@@ -856,6 +923,8 @@ def _usable(
     # 카드 input에 쓸 값(배열은 틀린 항목 칸만 뺌). 쓸 수 없으면 None
     if is_id_list(param):
         return _clean_ids(param, value, name, seen)
+    if is_value_list(param):
+        return _clean_values(param, value)
     if param.type == ARRAY:
         return _clean_array(param, value, seen)
     return _rounded(param, value) if _valid(param, value) else None
@@ -910,7 +979,7 @@ def card_input(
         if name in params
         and name != PET_SN
         and _usable(params[name], value, seen, name) is not None
-        and (not is_id(name) or value in seen.get(name, set()))
+        and (not is_id(name) or is_id_list(params[name]) or value in seen.get(name, set()))
     }
     merged = base | new
     for name in mapped_arrays(entry):

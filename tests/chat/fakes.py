@@ -399,9 +399,14 @@ class FakeEvalReader:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict]] = []
+        # POST READ(저장 전 확인)의 본문 : (경로, 본문)
+        self.bodies: list[tuple[str, dict]] = []
 
-    async def read(self, path: str, params: dict) -> object:
+    async def read(self, path: str, params: dict, body: dict | None = None) -> object:
         self.calls.append((path, params))
+        if body is not None:
+            self.bodies.append((path, body))
+            return []
         pet = params.get("petSn", 1)
         if "expense" in path:
             return [

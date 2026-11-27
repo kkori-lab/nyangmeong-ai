@@ -46,7 +46,20 @@ NEW_ACTION_WITHOUT_CODES |= {
     "draft_member_profile_update",
     "draft_place_bookmark",
 }
+# 2026-11-27 ③ : 백엔드 #326 (사람 결정 "전부 다 추가"). 삭제 4개는 test_catalog DELETES에도
+NEW_READ_WITHOUT_CODES |= {"check_receipt_save"}
+NEW_READ |= {"check_receipt_save", "check_expense_duplicates"}
+NEW_ACTION_WITHOUT_CODES |= {
+    "delete_pet",
+    "unlink_caregiver",
+    "delete_caregiver_invitation",
+    "delete_expenses",
+    "draft_notification_settings",
+    "mark_service_tutorial_viewed",
+}
 NEW_ACTION = NEW_ACTION_WITHOUT_CODES | {
+    "draft_receipt_checkup",
+    "delete_expenses_by_condition",
     "draft_checkup",
     "draft_prescription",
     "draft_repeat_prevention",

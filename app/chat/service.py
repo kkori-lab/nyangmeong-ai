@@ -318,7 +318,11 @@ def _joined_verb(verbs: Sequence[str]) -> str:
 
 
 def is_delete(card: "ActionCard | catalog.CatalogEntry") -> bool:
-    return card.call.method.upper() == DELETE
+    # DELETE이거나 동사가 "삭제"인 카드(지출 조건 삭제는 POST, 2026-11-27)
+    if card.call.method.upper() == DELETE:
+        return True
+    entry = card if isinstance(card, catalog.CatalogEntry) else tools.card_entry(card.tool)
+    return entry is not None and entry.verb == ACTION_VERB_DELETE
 
 
 def _worded(message: str, cards: Sequence[ActionCard]) -> str:
@@ -1367,6 +1371,7 @@ class _Follow:
             shown = action_card(
                 card, values, found, named, draft_pet, self.read.room_pet, rejected, target
             )
+            shown = await fill_current_values(shown, self.read.reader)
             self.cards.append(shown)
             shown_text = ACTION_SHOWN
             if self.runs_now():
@@ -1861,6 +1866,7 @@ async def _run_turn(
             cards = await _action_reply(text, turn, judged, register)
             if reader is not None:
                 cards = [await merge_pet_lists(card, text, reader) for card in cards]
+                cards = [await fill_current_values(card, reader) for card in cards]
             runs = (
                 _fills_only_blanks(turn.priors(), cards)
                 and _runs(turn, cards, agent_key)
@@ -2929,6 +2935,17 @@ def action_card(
             values[catalog.PET_SN] = pet.pet_sn
         else:
             choices = pet_choices(pets, named)
+    elif "pet_optional" in entry.hooks:
+        # 지출 조건 삭제 : 문장 속 이름이 하나면 그 아이, 아니면 모든 아이(돌려받은 카드 값 그대로)
+        if len(named) == 1:
+            pet = named[0]
+            values[catalog.PET_SN] = pet.pet_sn
+        elif draft_pet is not None:
+            values[catalog.PET_SN] = draft_pet
+            pet = next((p for p in pets if p.pet_sn == draft_pet), None)
+    if is_delete(entry) and target_text is None and pet is not None and _pet_target(entry):
+        # 반려동물 삭제 : 경로 번호가 petSn뿐이라 READ 행 대신 고른 아이 이름·종·품종
+        target_text = " · ".join(p for p in (pet.pet_nm, pet.pet_se_nm, pet.vrty_nm) if p)
     notice = None
     name = values.get("careArtclNm")
     warn = "same_name_warning" in entry.hooks and pet is not None and isinstance(name, str)
@@ -2982,6 +2999,35 @@ async def merge_pet_lists(card: ActionCard, text: str, reader: ToolReader) -> Ac
     now = current if isinstance(current, dict) else {}
     merged = {name: rules.merge_list(now.get(name), value, mode) for name, value in said.items()}
     return card.model_copy(update={"values": card.values | merged})
+
+
+# 칸 전체를 보내는 PUT 카드 : 말하지 않은 칸은 지금 값(이 READ)으로 채움 (2026-11-27 알림 설정)
+CURRENT_VALUE_READS = {"draft_notification_settings": "get_notification_settings"}
+
+
+async def fill_current_values(card: ActionCard, reader: ToolReader) -> ActionCard:
+    """빈 칸을 지금 설정값으로 : 읽기 실패·도구 없음이면 카드 그대로(빈 칸은 되물음)"""
+    entry = tools.card_entry(card.tool)
+    read_name = CURRENT_VALUE_READS.get(card.tool)
+    read = tools.read_entry(read_name) if read_name else None
+    if entry is None or read is None:
+        return card
+    blank = [name for name in entry.params if card.values.get(name) is None]
+    request = catalog.read_request(read, {}, None) if blank else None
+    if request is None:
+        return card
+    try:
+        current = await reader.read(*request)
+    except (AppError, BackendError) as error:
+        logger.info("지금 값 읽기 실패: %s %s", read.name, type(error).__name__)
+        return card
+    if not isinstance(current, dict):
+        return card
+    found = {name: current[name] for name in blank if current.get(name) is not None}
+    wrong = set(catalog.invalid_input(entry, found))
+    filled = {name: value for name, value in found.items() if name not in wrong}
+    missing = [name for name in card.missing if name not in filled]
+    return card.model_copy(update={"values": card.values | filled, "missing": missing})
 
 
 async def _action_reply(
@@ -3139,9 +3185,42 @@ def delete_target_text(
         for name, param in entry.params.items()
         if param.loc == "path" and catalog.is_id(name) and name != catalog.PET_SN
     ]
-    row = rows.get((ids[0], values.get(ids[0]))) if ids else None
-    if row is None:
+    if ids:
+        row = rows.get((ids[0], values.get(ids[0])))
+        return _target_row_text(entry, row, rows) if row is not None else None
+    lists = [
+        name for name, param in entry.params.items() if catalog.is_id_list(param) and param.required
+    ]
+    if lists:
+        # 여러 건 삭제(지출 번호 목록, 2026-11-27) : 번호마다 READ 행 글을 " / "로
+        key = catalog.id_list_key(lists[0])
+        found = [rows.get((key, sn)) for sn in values.get(lists[0]) or []]
+        texts = [_target_row_text(entry, row, rows) for row in found if row is not None]
+        return " / ".join(text for text in texts if text) or None
+    if _pet_target(entry):
+        # 반려동물 삭제 : action_card가 고른 아이 이름으로
         return None
+    # 번호 없는 삭제(지출 조건 삭제) : 카드 값 요약 + 공용 + 지울 건수
+    parts = _value_parts(entry, {k: v for k, v in values.items() if k != EXPECTED_COUNT})
+    if values.get("common") is True:
+        parts.append(COMMON_EXPENSE)
+    if isinstance(values.get(EXPECTED_COUNT), int):
+        parts.append(f"{values[EXPECTED_COUNT]:,}건")
+    return " · ".join(parts) or None
+
+
+# 지출 조건 삭제(delete_expenses_by_condition)의 지울 건수 칸·공용 지출 글
+EXPECTED_COUNT = "expectedCnt"
+COMMON_EXPENSE = "공용 지출"
+
+
+def _pet_target(entry: "catalog.CatalogEntry") -> bool:
+    # 경로 칸이 petSn 하나뿐인 도구(반려동물 삭제)
+    path = [name for name, param in entry.params.items() if param.loc == "path"]
+    return path == [catalog.PET_SN]
+
+
+def _target_row_text(entry: "catalog.CatalogEntry", row: dict, rows: "catalog.Rows") -> str | None:
     parts: list[str] = []
     indicator = None
     for spec in entry.target_fields:
@@ -3502,10 +3581,12 @@ def _delete_confirmed(cards: Sequence[ActionCard], text: str) -> bool:
 
 
 def _uses_pets(entry: "catalog.CatalogEntry") -> bool:
-    # 반려동물 목록이 필요한 카드 : 카드의 petSn(pet) 또는 배열 줄의 petSn(line_pet)
-    return "pet" in entry.hooks or "line_pet" in entry.hooks
+    # 반려동물 목록이 필요한 카드 : 카드의 petSn(pet·pet_optional) 또는 배열 줄의 petSn(line_pet)
+    return bool({"pet", "line_pet", "pet_optional"} & set(entry.hooks))
 
 
+# 값 목록 칸이 빈 목록일 때 요약 글
+VALUE_LIST_EMPTY = "없음"
 ACTION_FAILED_MESSAGE = "실패 — {label} · 저장하지 못했어요."
 ACTION_CANCELED_MESSAGE = "취소됨 — {label} · 저장하지 않았어요."
 ACTION_FAILED_DELETE_MESSAGE = "실패 — {label} · 삭제하지 못했어요."
@@ -3527,6 +3608,10 @@ def _input_text(
     clock: bool = True,
     count: str | None = None,
 ) -> str:
+    if catalog.is_value_list(param):
+        # 값 목록(사전 알림 시점) : 값 이름을 ", "로, 빈 목록은 "없음"
+        items = value if isinstance(value, list) else []
+        return ", ".join(str(item) for item in items) or VALUE_LIST_EMPTY
     if param.type == catalog.ARRAY:
         # 배열 : 1줄이면 값(번호·uuid·petSn·참거짓 칸 빼고)을 " / "로 펼치고,
         # 2줄 이상이거나 줄 수 말(count)이 있으면 줄 수만

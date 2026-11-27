@@ -72,6 +72,9 @@ QUIET = frozenset(
     {
         "DEFAULT_TITLE",
         "DISCLAIMER",
+        # 카드 요약 글 조각(값 목록 빈 칸·지출 조건 삭제의 공용 지출, 2026-11-27)
+        "VALUE_LIST_EMPTY",
+        "COMMON_EXPENSE",
         "READ_PET_LABEL",
         "ROUTE_SHOWN",
         "ROUTE_EMPTY_MESSAGE",

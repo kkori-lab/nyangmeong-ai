@@ -55,7 +55,7 @@ OUT_DIR = ROOT / ".cache/tool_eval"
 SONNET = "claude-sonnet-5-5"
 # 도구 고르기 기준 문항(tool-calling.md 7-1절 4회차 판정) : T01~T44
 CORE = 44
-# 새도구 : 2026-11-27 백엔드 새 도구 41개(T97~T137)
+# 새도구 : 2026-11-27 백엔드 새 도구 41개(T97~T137), ②(T138~T140), ③ #326 10개(T141~T150)
 # --off로 끌 수 있는 지름길(2026-11-27 정규식 지름길 줄이기 ①)
 OFF_NAMES = ("hint", "chain")
 TYPES = ("사용법", "이동", "일정", "케어", "지식", "범위밖", "헷갈림", "수정", "조합", "새도구")
@@ -479,11 +479,11 @@ class _EmptyReader(FakeEvalReader):
         super().__init__()
         self.empty = empty
 
-    async def read(self, path: str, params: dict) -> object:
+    async def read(self, path: str, params: dict, body: dict | None = None) -> object:
         if any(word in path for word in self.empty):
             self.calls.append((path, params))
             return []
-        return await super().read(path, params)
+        return await super().read(path, params, body)
 
 
 @dataclass

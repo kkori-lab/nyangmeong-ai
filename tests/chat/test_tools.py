@@ -202,7 +202,8 @@ def test_매핑표의_화면_번호면_그_행():
 
 
 def test_모르는_도구나_형식이_틀린_인자는_거부():
-    assert tools.parse("delete_pet", {}).args is None
+    # delete_pet은 2026-11-27 실음(새 도구 싣기 ③) : 없는 도구 예는 회원 탈퇴
+    assert tools.parse("delete_member", {}).args is None
     assert tools.parse("navigate", {"screen_num": "가계부"}).args is None
 
 
@@ -419,7 +420,7 @@ def test_decline은_범위_밖과_판단_못_함_문구를_나눈다(client, jav
 
 
 @pytest.mark.parametrize(
-    ("tool", "raw"), [("navigate", {"screen_num": 999}), ("delete_pet", {}), (None, None)]
+    ("tool", "raw"), [("navigate", {"screen_num": 999}), ("delete_member", {}), (None, None)]
 )
 def test_인자_거부나_빈_응답은_판단_못_함(client, java, tool, raw):
     use_agent(client, FakeToolAgent(tool, raw))

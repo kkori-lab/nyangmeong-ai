@@ -1,6 +1,6 @@
 {
-  "version": "084ac2432ba367cfa16ff972c2b457bbf37c6d5f8b2185d578ffd2e36753406d",
-  "structureVersion": "575f6028d4c0fd1233f623c06ac313af2abdf7db94aa70dd13389dc8edc61b32",
+  "version": "fc7d0140f7f7afeff9bd46743cf6ba3b70e014d6dac7acf774d551ff6425f868",
+  "structureVersion": "d1fe62d7b2fb38bfbdedf8d950f6c12799d3be6932dc5faa086f8bc91f54cbad",
   "tools": [
     {
       "name": "accept_caregiver_invitation",
@@ -46,6 +46,34 @@
       "rules": []
     },
     {
+      "name": "check_expense_duplicates",
+      "domain": "expense",
+      "kind": "READ",
+      "call": {"method": "POST", "path": "/api/expenses/duplicate-check"},
+      "params": {
+        "expndYmd": {"in": "body", "type": "date", "required": true},
+        "expndClsfCd": {"in": "body", "type": "code", "group": "MYPG05", "required": true},
+        "dtlMttr": {"in": "body", "type": "string", "maxLength": 1000},
+        "expndPlcusNm": {"in": "body", "type": "string", "maxLength": 80},
+        "recptSn": {"in": "body", "type": "long"},
+        "expndInptMthCd": {"in": "body", "type": "code", "group": "MYPG06", "required": true},
+        "lines": {"in": "body", "type": "array", "required": true, "minItems": 1, "items": {"petSn": {"type": "long"}, "expndAmt": {"type": "long", "required": true, "min": 1, "max": 9999999999999}, "idmptDmndId": {"type": "string", "maxLength": 100, "generated": "uuid"}}}
+      },
+      "rules": []
+    },
+    {
+      "name": "check_receipt_save",
+      "domain": "expense",
+      "kind": "READ",
+      "call": {"method": "POST", "path": "/api/receipts/{recptSn}/save-check"},
+      "params": {
+        "recptSn": {"in": "path", "type": "long", "required": true},
+        "ckupYmd": {"in": "body", "type": "date", "required": true},
+        "pets": {"in": "body", "type": "array", "required": true, "minItems": 1, "items": {"petSn": {"type": "long", "required": true}, "amt": {"type": "long"}, "expenseYn": {"type": "boolean"}}}
+      },
+      "rules": []
+    },
+    {
       "name": "delete_care_item",
       "domain": "health",
       "kind": "CARD",
@@ -53,6 +81,16 @@
       "params": {
         "petSn": {"in": "path", "type": "long", "required": true},
         "careArtclSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "delete_caregiver_invitation",
+      "domain": "pet",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/caregiver-invitations/{jntBrupInvtnSn}"},
+      "params": {
+        "jntBrupInvtnSn": {"in": "path", "type": "long", "required": true}
       },
       "rules": []
     },
@@ -100,6 +138,32 @@
       "rules": []
     },
     {
+      "name": "delete_expenses",
+      "domain": "expense",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/expenses"},
+      "params": {
+        "expndSn": {"in": "query", "type": "array", "required": true, "minItems": 1, "itemType": "long"}
+      },
+      "rules": []
+    },
+    {
+      "name": "delete_expenses_by_condition",
+      "domain": "expense",
+      "kind": "CARD",
+      "call": {"method": "POST", "path": "/api/expenses/bulk-delete"},
+      "params": {
+        "expectedCnt": {"in": "body", "type": "int", "required": true, "min": 1},
+        "startYmd": {"in": "body", "type": "date"},
+        "endYmd": {"in": "body", "type": "date"},
+        "petSn": {"in": "body", "type": "long"},
+        "common": {"in": "body", "type": "boolean"},
+        "expndClsfCd": {"in": "body", "type": "code", "group": "MYPG05"},
+        "excludeExpndSn": {"in": "body", "type": "array", "itemType": "long"}
+      },
+      "rules": []
+    },
+    {
       "name": "delete_observation_cycle",
       "domain": "health",
       "kind": "CARD",
@@ -107,6 +171,16 @@
       "params": {
         "petSn": {"in": "path", "type": "long", "required": true},
         "obsrvCyclSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "delete_pet",
+      "domain": "pet",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/pets/{petSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true}
       },
       "rules": []
     },
@@ -367,7 +441,7 @@
       "params": {
         "petSn": {"in": "path", "type": "long", "required": true},
         "inspNvlSn": {"in": "path", "type": "long", "required": true},
-        "rsltNvl": {"in": "body", "type": "decimal", "precision": 9, "scale": 2},
+        "rsltNvl": {"in": "body", "type": "decimal", "min": 0, "precision": 9, "scale": 2},
         "unitNm": {"in": "body", "type": "string", "maxLength": 20},
         "memoCn": {"in": "body", "type": "string", "maxLength": 200}
       },
@@ -415,6 +489,23 @@
       "params": {
         "profilePhoto": {"in": "body", "type": "file"},
         "profilePhotoReset": {"in": "body", "type": "boolean"}
+      },
+      "rules": []
+    },
+    {
+      "name": "draft_notification_settings",
+      "domain": "notification",
+      "kind": "CARD",
+      "call": {"method": "PUT", "path": "/api/members/me/notification-settings"},
+      "params": {
+        "emlNotiRcptnYn": {"in": "body", "type": "boolean", "required": true},
+        "inappNotiRcptnYn": {"in": "body", "type": "boolean", "required": true},
+        "careSchdlNotiRcptnYn": {"in": "body", "type": "boolean", "required": true},
+        "leadTimes": {"in": "body", "type": "array", "required": true, "itemType": "string", "values": ["TODAY", "D1", "D3", "D7"]},
+        "mtchDlngNotiRcptnYn": {"in": "body", "type": "boolean", "required": true},
+        "cmntNotiRcptnYn": {"in": "body", "type": "boolean", "required": true},
+        "lostExpryNotiRcptnYn": {"in": "body", "type": "boolean", "required": true},
+        "expndLimNotiRcptnYn": {"in": "body", "type": "boolean", "required": true}
       },
       "rules": []
     },
@@ -481,10 +572,10 @@
         "chipNo": {"in": "body", "type": "string", "pattern": "^([0-9]{12}|[0-9]{15})?$"},
         "petGndrCd": {"in": "body", "type": "code", "group": "PETG02", "required": true},
         "nutrYn": {"in": "body", "type": "boolean", "required": true},
-        "petBdwg": {"in": "body", "type": "decimal", "required": true, "positive": true, "precision": 5, "scale": 2},
-        "goalBdwg": {"in": "body", "type": "decimal", "positive": true, "precision": 5, "scale": 2},
-        "minBdwg": {"in": "body", "type": "decimal", "positive": true, "precision": 5, "scale": 2},
-        "maxBdwg": {"in": "body", "type": "decimal", "positive": true, "precision": 5, "scale": 2},
+        "petBdwg": {"in": "body", "type": "decimal", "required": true, "max": 200, "positive": true, "precision": 5, "scale": 2},
+        "goalBdwg": {"in": "body", "type": "decimal", "max": 200, "positive": true, "precision": 5, "scale": 2},
+        "minBdwg": {"in": "body", "type": "decimal", "max": 200, "positive": true, "precision": 5, "scale": 2},
+        "maxBdwg": {"in": "body", "type": "decimal", "max": 200, "positive": true, "precision": 5, "scale": 2},
         "bdwgRngDrctInptYn": {"in": "body", "type": "string", "pattern": "^[YN]$"},
         "colrCd": {"in": "body", "type": "code", "group": "PETG03", "required": true},
         "colrDrctInptNm": {"in": "body", "type": "string", "maxLength": 20},
@@ -514,10 +605,10 @@
         "chipNo": {"in": "body", "type": "string", "pattern": "^([0-9]{12}|[0-9]{15})?$"},
         "petGndrCd": {"in": "body", "type": "code", "group": "PETG02", "minLength": 1},
         "nutrYn": {"in": "body", "type": "boolean"},
-        "petBdwg": {"in": "body", "type": "decimal", "positive": true, "precision": 5, "scale": 2},
-        "goalBdwg": {"in": "body", "type": "decimal", "positive": true, "precision": 5, "scale": 2},
-        "minBdwg": {"in": "body", "type": "decimal", "positive": true, "precision": 5, "scale": 2},
-        "maxBdwg": {"in": "body", "type": "decimal", "positive": true, "precision": 5, "scale": 2},
+        "petBdwg": {"in": "body", "type": "decimal", "max": 200, "positive": true, "precision": 5, "scale": 2},
+        "goalBdwg": {"in": "body", "type": "decimal", "max": 200, "positive": true, "precision": 5, "scale": 2},
+        "minBdwg": {"in": "body", "type": "decimal", "max": 200, "positive": true, "precision": 5, "scale": 2},
+        "maxBdwg": {"in": "body", "type": "decimal", "max": 200, "positive": true, "precision": 5, "scale": 2},
         "bdwgRngDrctInptYn": {"in": "body", "type": "string", "pattern": "^[YN]$"},
         "colrCd": {"in": "body", "type": "code", "group": "PETG03", "minLength": 1},
         "colrDrctInptNm": {"in": "body", "type": "string", "maxLength": 20},
@@ -569,6 +660,24 @@
         "dayMdcnNmtm": {"in": "body", "type": "int", "min": 1, "max": 9999},
         "prscSttsCd": {"in": "body", "type": "code", "group": "HLTG06"},
         "careRfltYn": {"in": "body", "type": "boolean"}
+      },
+      "rules": []
+    },
+    {
+      "name": "draft_receipt_checkup",
+      "domain": "expense",
+      "kind": "CARD",
+      "call": {"method": "POST", "path": "/api/receipts/{recptSn}/checkups"},
+      "params": {
+        "recptSn": {"in": "path", "type": "long", "required": true},
+        "petSn": {"in": "query", "type": "long", "required": true},
+        "idmptDmndId": {"in": "body", "type": "string", "maxLength": 100, "generated": "uuid"},
+        "ckupYmd": {"in": "body", "type": "date", "required": true},
+        "hsptlNm": {"in": "body", "type": "string", "required": true, "maxLength": 80},
+        "ckupTypeCd": {"in": "body", "type": "code", "group": "HLTG01", "required": true},
+        "ckupCn": {"in": "body", "type": "string", "maxLength": 500},
+        "ckupMemoCn": {"in": "body", "type": "string", "maxLength": 200},
+        "schdlSn": {"in": "body", "type": "long"}
       },
       "rules": []
     },
@@ -1264,12 +1373,12 @@
       "params": {
         "plcClsfCd": {"in": "query", "type": "code", "group": "PLCG01", "required": true},
         "keyword": {"in": "query", "type": "string", "maxLength": 100},
-        "swLat": {"in": "query", "type": "decimal"},
-        "swLot": {"in": "query", "type": "decimal"},
-        "neLat": {"in": "query", "type": "decimal"},
-        "neLot": {"in": "query", "type": "decimal"},
-        "cntrLat": {"in": "query", "type": "decimal"},
-        "cntrLot": {"in": "query", "type": "decimal"},
+        "swLat": {"in": "query", "type": "decimal", "min": -90, "max": 90},
+        "swLot": {"in": "query", "type": "decimal", "min": -180, "max": 180},
+        "neLat": {"in": "query", "type": "decimal", "min": -90, "max": 90},
+        "neLot": {"in": "query", "type": "decimal", "min": -180, "max": 180},
+        "cntrLat": {"in": "query", "type": "decimal", "min": -90, "max": 90},
+        "cntrLot": {"in": "query", "type": "decimal", "min": -180, "max": 180},
         "whole": {"in": "query", "type": "boolean"},
         "page": {"in": "query", "type": "int", "min": 1},
         "size": {"in": "query", "type": "int", "min": 1, "max": 50}
@@ -1377,6 +1486,14 @@
       "rules": []
     },
     {
+      "name": "mark_service_tutorial_viewed",
+      "domain": "member",
+      "kind": "CARD",
+      "call": {"method": "PUT", "path": "/api/members/me/tutorial"},
+      "params": {},
+      "rules": []
+    },
+    {
       "name": "reject_caregiver_invitation",
       "domain": "pet",
       "kind": "CARD",
@@ -1393,6 +1510,17 @@
       "call": {"method": "POST", "path": "/api/pets/{petSn}/representative"},
       "params": {
         "petSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "unlink_caregiver",
+      "domain": "pet",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/pets/{petSn}/caregivers/{brupRelSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "brupRelSn": {"in": "path", "type": "long", "required": true}
       },
       "rules": []
     }
