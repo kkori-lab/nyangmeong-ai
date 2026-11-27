@@ -1,10 +1,44 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-004 대화창 · 백엔드 새 AI 도구 싣기 ③ develop #326 도구 10개·값 목록 칸 (SCR-AIM-011·012 공통, 추가 요청) — 끝 (2026-11-27, 검증 통과(1회차)·사람 확인). 백엔드 `@AiTool` 10개를 모두 실음(스냅샷 125개), 값 목록 칸 `values`, POST READ 본문, 알림 설정 지금 값 채우기. 측정 148/150(기존 140문항 138 그대로, 새 10문항 모두 맞음), `tool-catalog.md` 10절 ③
+SCR-AIM-013 대화창 · 사진 턴 닫힌 선택지 열기 (AGENT·사진 안내 LLM 글·가계부 영수증 카드, SCR-AIM-004 공통, 추가 요청) — 구현 중 (승인 2026-11-27 16:35, 시작 2026-11-27 16:27, 고침 16:35 사람 "같이 넣고 가급적 LLM이 앞단에서 판단")
+
+방향: 사진 턴에서 무엇을 할지와 안내 글은 LLM이 정한다. 서버는 막기만 한다(`kind` 허용값·글 길이·실패 때 지금 고정 글로). React 분기는 `kind` 그대로(계약 유지), 화면 글은 `messages`(이미 React가 그대로 그림).
+API 계약 변경(구현 전에 `docs/api/chat.md`·`docs/api/ocr.md`를 먼저 고침, 프론트 합의 전 초안, frontend-dc에 알림, 백엔드 변경 없음): image-intent `kind` `AGENT`·안내 글이 LLM 글로 바뀜, 새 API `POST /ai/conversations/{aiCnvrsRoomSn}/expense-card`
+
+1. 사진 용도 판단에 `AGENT` — `app/chat/schemas.py` `ImageIntentKind.AGENT`, `app/chat/clients.py` `IMAGE_INTENT_SYSTEM`·`ImageIntentOutput`: 글이 캐릭터·영수증·피부·눈 분석 밖의 앱 일(프로필 사진 바꾸기, 관찰 기록 사진 더하기·바꾸기, 그 밖 기록·묻는 말)을 말하면 `AGENT`. 글이 없으면 고르지 않는다. 정규식은 더하지 않는다.
+   완료 조건: 명령: `sh scripts/check.sh` (가짜 판단기 AGENT → 응답 `kind` AGENT, 프롬프트에 AGENT 정의·예)
+2. 사진 안내 글을 LLM이 — 같은 판단 호출의 구조화 출력에 `reply`(한두 문장, 200자) 칸을 더해 사용자 글에 맞춰 쓴다(ASK면 무엇을 할지 묻되 캐릭터·영수증·피부·눈 말고 "다른 일도 글로 말해 달라"를 열어 둠, 캐릭터 사진이 안 맞으면 그 이유, CHARACTER·SKIN·EYE·EXPENSE_RECEIPT는 이어 갈 일). 분석 결과·저장을 약속하지 않고 진단하지 않는다. `MEDICAL_RECEIPT`·`AGENT`·`CHECKUP_PDF`는 글 없음(뒤 API가 씀). 판단 실패·빈 글·길이 초과면 지금 고정 글(`IMAGE_MESSAGES`·`CHARACTER_PHOTO_UNFIT_MESSAGE`)을 쓴다. React의 ASK 칩은 그대로(글만 바뀜).
+   완료 조건: 명령: check.sh (가짜 판단기 `reply`가 저장 AI 메시지가 됨, 빈 글·201자·실패는 고정 글, AGENT·MEDICAL_RECEIPT는 AI 메시지 없음) / 화면: Postman 사람 확인(프로필 사진+글, 관찰 사진+글, 글 없는 반려동물 사진, 영수증+"캐릭터 만들어줘", 풍경 사진)
+3. AGENT 사진 턴 이어 가기 — `service.save_image_turn`: 사용자 `[사진] <글>`만 저장. React는 같은 방에 `/messages`를 `cnvrsCn` 없이(지금 있는 "마지막 사용자 메시지에 답변" 길) 부른다. 답할 메시지가 `[사진]`으로 시작하면 도구 고르기 시스템 블록(`clients.tool_system`)에 "회원이 이 메시지에 사진을 붙임, 사진 내용은 볼 수 없음, 파일 칸 카드를 고르면 붙인 사진이 들어감"을 넣고, 정규식(`rules.*`)에는 표시를 뗀 글을 준다. 예전 턴의 `[사진]`은 해당 없음.
+   완료 조건: 명령: check.sh / 화면: 사진+"프로필 사진 이걸로 바꿔줘" → AGENT → `/messages {}` → `draft_member_profile_update` 카드
+4. 카드에 사진 미리 채우기 계약 — 파일 칸 카드 4개(`draft_member_profile_update` `profilePhoto`, `draft_observation_cycle`·`draft_observation_cycle_update`·`draft_observation_item` `file`). Python은 지금처럼 `missing`에 파일 칸을 두고(글로 묻지 않음·확인 말 판정에서 안 셈), React가 AGENT 턴 카드의 `type: file` 칸에 붙인 사진을 넣는다. `draft_pet_update`는 Java 파일 칸이 없어 반려동물 사진 바꾸기는 안 됨(백엔드 요청 후보로 "다음에 할 것").
+   완료 조건: 화면: 3번 카드 `params`에 `profilePhoto` `type: file`, 확인 말에 `done.execute`
+5. 가계부 영수증 막다른 길 풀기 — `EXPENSE_RECEIPT`면 React가 `POST /ai/receipts`(출처 가계부 `AIMC0027`, 반려동물 생략 가능)를 부르고 새 `POST /ai/conversations/{방}/expense-card`로 결과를 보낸다. Python은 요약 AI 메시지를 저장하고 지출 등록 확인 카드(`draft_expense`, `receipt-card`와 같은 카드 모양)를 준다: `expndYmd` 결제일·`expndPlcusNm` 사용처·`expndClsfCd` 추정 카테고리·금액 = 영수증 금액 − 하단 할인·`dtlMttr` 품목명 ", "·반려동물은 비움(`missing`, 회원이 고름), 입력 방법 코드는 도구 목록·공통코드에서 영수증 값을 확인해 정함(없으면 지금 `fixed`). 인식 실패·오류·취소는 `receipt-result`와 같은 요약만, 도구 없으면 카드 없이 본창 가계부 안내. `app/chat/router.py`·`schemas.py`(`ExpenseCardRequest`·`ExpenseCardResult`)·`service.py`, 문서 `docs/api/chat.md` 행·DTO, `docs/api/ocr.md` 대화창 가계부 출처 줄.
+   완료 조건: 명령: check.sh (인식·실패·오류·취소·도구 없음·남의 방 404) / 화면: Postman `/ai/receipts`(AIMC0027) 응답을 `expense-card`에 보내 카드·저장 글 확인
+6. 도구 설명 — `data/tool_prompts.yaml`: `draft_member_profile_update`·`draft_observation_cycle`·`draft_observation_cycle_update`의 "사진은 다루지 않는다"를 "이번 메시지에 [사진]이 붙었으면 그 사진이 카드에 들어가고, 없으면 회원이 카드에서 올린다"로, 프로필 예 "[사진] 프로필 사진 이걸로 바꿔줘". `draft_pet_update`에 "반려동물 사진은 대화로 못 바꾼다(본창 반려동물 정보)".
+   완료 조건: 명령: check.sh
+7. 측정 — `tests/chat/data/tool_eval.jsonl` T151~T154(사진 표시 글: 프로필 → `draft_member_profile_update`, 관찰 사진 바꾸기·관찰 항목에 사진 기록 → `list_observation_items`, 반려동물 사진 → 카드 없음). `uv run python -m scripts.tool_eval` 기본 2회·`--agent` 2회(실제 호출). 사진 판단은 사진을 저장소에 둘 수 없어 2번 Postman 사람 확인.
+   완료 조건: 새 4문항 맞음, 기존 정답 수(148/150의 기존 문항) 그대로
+8. 문서 — `docs/api/chat.md` image-intent 행·ImageIntentResponse(`kind` AGENT, 안내 글은 LLM 글·실패 때 고정 글), `docs/design/tool-catalog.md`에 사진 턴 이어 가기 한 절.
+
+새 의존성: 없음
+
+### 이어서 할 일 (2026-11-27 17:24)
+- **검증부터.** 사람 요청으로 3회차(추가-1·2 반영 뒤) 검증 에이전트를 도중에 멈췄다. 이어 받으면 `/verify`(또는 `/impl` 3번)로 검증을 먼저 돌리고, 통과하면 README "사람 확인"대로 확인한 뒤 `/end`.
+- 지금 상태: `sh scripts/check.sh` 통과. 1회차 실패(지출 금액 할인 두 번)는 `recptAmt` 그대로 쓰게 고침. 2회차 실패(입력 방법 직접입력·반려동물 칸)는 사람 결정 "추천안대로"로 추가-1(사진 턴 반려동물 미리 채움, 없으면 공용)·추가-2(OCR 코드, 대화로 고쳐도 유지, `catalog.py` 고정 값 유지 한 줄)로 고침.
+- 측정(실제 호출, 2026-11-27): tool_eval 기본 153/154·152/154(새 T151~T154 모두 맞음, 틀린 것은 기존 T96·T135), `--agent` 15/15·14/15·14/15. A08 "체중 기록해 줘"는 HEAD(변경 전)에서도 3/3 틀려 이번 변경 탓 아님. 다만 오전보다 자주 틀려 원인은 따로 볼 만함.
+- 검증 중 만든 데이터: 대화방 1138~1147(지움)·1153~1160, Java 영수증 `recptSn` 621·623(가계부 출처)은 남아 있음.
+
+### 추가 요청
+| 번호 | 바꿀 파일 | 완료 조건 | 요청 |
+| --- | --- | --- | --- |
+| 추가-1 | `app/chat/service.py` `_expense_values`, `docs/api/chat.md` expense-card 행 | 명령: check.sh (보낸 `petSn`이 회원 반려동물이면 카드 줄 `petSn`, 아니면 비움 = 공용) / 화면: `expense-card`에 `petSn`을 주면 `lines[0].petSn` | 요청 2026-11-27 17:21 "추천안대로"(A: 기획의 "반려동물 비움(missing)" 대신 사진 턴에서 고른 아이를 미리 채우고 없으면 공용) |
+| 추가-2 | `app/chat/service.py` `_expense_values`, `app/chat/catalog.py` 카드 합치기(fixed), `tests/chat/test_expense_card.py`, `docs/api/chat.md` | 명령: check.sh (expense-card 카드 `expndInptMthCd`가 코드 목록에서 이름 "OCR"인 코드, 없으면 고정 값. 돌려받은 카드를 대화로 고쳐도 목록 안 코드면 그 값 유지) / 화면: `expense-card` 카드 `input.expndInptMthCd` = OCR 코드 | 요청 2026-11-27 17:21 "추천안대로"(B: 입력 방법을 OCR 코드로, 대화로 고쳐도 유지되게 catalog.py 한 줄 포함) |
 
 ## 다음에 할 것
-- 사진 턴 닫힌 선택지 열기 (backend-94 전달 3번, 2026-11-27, 제안 순서상 루프 개선 ①·②보다 먼저): `/image-intent`가 고정 6종(CHARACTER·MEDICAL_RECEIPT·EXPENSE_RECEIPT·SKIN·EYE·ASK, PDF는 CHECKUP_PDF)만 골라 사진+"프로필 사진 변경"이 캐릭터로 감(frontend-dc 보고와 같은 건). 글이 6종 밖 일을 말하면 새 kind(AGENT/OTHER)로 도구 고르기 에이전트에 넘기고, 붙인 사진을 file 칸 카드(`draft_member_profile_update`·`draft_observation_cycle`·`draft_pet_update`)에 미리 채우는 계약은 frontend-dc와. `draft_member_profile_update` 설명 "사진은 다루지 않는다"도 같이. 원칙 제안 "고르기는 LLM, 서버는 막기만"(안전 규칙은 그대로, 바꿀 때마다 tool_eval 기본·`--agent` 2회 이상). 백엔드 변경 없음
+- 고정 답 글을 LLM 글로 (2026-11-27 사람 "가급적 LLM이 앞단에서 판단, 고정 형식 대답이 이상함", 사진 턴 다음): `/messages`의 고정 글 — 도구 거절 폴백(범위 밖·불분명), 이동 안내 "…로 이동할게요", 이어 가기 없음(`AGENT_STOPPED`) — 을 LLM이 쓰고 실패 때만 고정 글. 등록 초안 카드가 떠 있으면 칸 추출이 먼저라 다른 일로 못 넘어갈 수 있음(`service.py` `turn.draft` → `build_card`): tool_eval 문항으로 재 보고 맞으면 도구 고르기가 먼저 정하게. 확인·취소 말(`action_reply_kind`)·자리 표시 글은 막기라 그대로
+- 반려동물 사진 대화로 바꾸기 (백엔드 요청 후보): `draft_pet_update`에 Java 파일 칸이 없음
 - 에이전트 루프 자율성 개선 2건 (backend-94 전달, 2026-11-27, 사람 결정 "1·2 모두 진행", 새 도구 싣기 ③ 뒤 별도 마일스톤으로 /start): ① READ 실패·인자 거부·실행 안 한 도구도 오류 글(Java 400 `data[].field` 칸 이름 포함)을 tool_result로 돌려주고 루프를 이어 감(지금은 `clients.AnthropicToolAgent.answer`가 ReadMore일 때만 다음 바퀴). TOOL_LIMIT 안에서 세고 같은 도구·같은 인자 실패 반복은 끊음 ② 카드 뒤 pending을 정규식(`rules.agent_pending`) 대신 모델이 정함 — 카드면 pending을 주고 agent-continue에서 할 일이 없으면 글로 끝냄. 프론트(frontend-dc)와 계약 맞추고 `tool_eval --agent` 회귀, 단순 명령 하나의 응답 시간·LLM 호출 수가 늘지 않는지 같이 잼. 카드에서 멈춤·TOOL_LIMIT 8·같은 쓰기 반복 막기는 그대로. 백엔드 변경 없음
 - 새 도구 싣기 ③ 품질 후보 (검증 메모, 2026-11-27): 알림 설정 카드 요약 글이 "알림 설정 변경 — D1"로 바꾼 칸(댓글 끔) 대신 `leadTimes`만 보임(참거짓 칸은 요약에서 빠짐) / "까미 알림 중 댓글 알림 꺼 줘" 1회차는 ROUTE(흔들림)
 - 연결 남음: 새 도구 싣기 ③ 프론트 (LJS 프론트, frontend 세션에 알림): 카드 `params.values`(값 목록 칸)·알림 설정 카드(지금 설정값으로 8칸 채워 옴), `delete_expenses` query 숫자 배열이 Java에 `expndSn=1&expndSn=2` 꼴로 가는지(axios 기본은 `expndSn[]=`), 지출 조건 삭제는 POST지만 삭제 카드(`targetText` 조건 + N건), 반려동물 삭제 `targetText` 이름·종·품종

@@ -987,9 +987,17 @@ def card_input(
         old, fresh = base.get(name) or [], new.get(name) or []
         first = (old[0] if old else {}) | (fresh[0] if fresh else {})
         merged[name] = [first, *old[1:]]
-    merged |= entry.fixed
+    # 고정 값 : 돌려받은 카드 값이 그 칸 코드 목록 안이면 유지(영수증 지출 OCR 입력, 2026-11-27)
+    merged |= {name: _kept_fixed(entry, name, fix, base) for name, fix in entry.fixed.items()}
     given = {roles[name] for name in usable if name in roles}
     return _keep_time(entry, merged, given, new, rows or {}, prior or {})
+
+
+def _kept_fixed(entry: CatalogEntry, name: str, value: object, base: dict) -> object:
+    kept = base.get(name)
+    param = entry.params.get(name)
+    allowed = {code.cd for code in (param.codes or ())} if param is not None else set()
+    return kept if kept is not None and kept in allowed else value
 
 
 def mapped_arrays(entry: CatalogEntry) -> list[str]:

@@ -61,6 +61,9 @@ from app.chat.schemas import (
     ConversationDetail,
     ConversationMessage,
     ConversationSummary,
+    ExpenseCardRequest,
+    ExpenseCardResult,
+    ExpenseNoCardReason,
     ImageIntentJudgement,
     ImageIntentKind,
     ImageIntentResult,
@@ -1568,7 +1571,7 @@ async def prepare_turn(
         raise AppError("INVALID_REQUEST", 400, "답할 메시지가 없습니다.")
     return Turn(
         room_sn,
-        question,
+        _rule_question(question),
         room.messages,
         room.pet_sn,
         draft,
@@ -1577,6 +1580,12 @@ async def prepare_turn(
         getattr(room, "smry_cn", None),
         getattr(room, "smry_end_msg_seq", None),
     )
+
+
+def _rule_question(question: ConversationMessage) -> ConversationMessage:
+    # 사진 턴 표시를 뗀 답할 메시지 : 규칙·카드 판정용. 문맥은 turn.messages(표시 그대로)로 만든다
+    text = question_text(question.cnvrs_cn)
+    return question if text == question.cnvrs_cn else question.model_copy(update={"cnvrs_cn": text})
 
 
 SUMMARY_PREFIX = "이전 대화 요약:\n"
@@ -2267,7 +2276,7 @@ async def continue_turn(
         raise AppError("INVALID_REQUEST", 400, "이어 갈 메시지가 없습니다.")
     return Turn(
         room_sn,
-        question,
+        _rule_question(question),
         room.messages,
         room.pet_sn,
         summary=getattr(room, "smry_cn", None),
@@ -2892,6 +2901,110 @@ async def save_receipt_card(
         saved.append(await repo.add_message(room_sn, ROLE_USER, request.cnvrs_cn))
     saved.append(await repo.add_message(room_sn, ROLE_AI, "\n".join(lines)))
     return ReceiptCardResult(messages=saved, action=card, no_card_reason=reason)
+
+
+# 대화창 가계부 영수증 지출 등록 카드 (SCR-AIM-013, 2026-11-27)
+# image-intent EXPENSE_RECEIPT -> /ai/receipts(가계부 AIMC0027) -> 요약 글 + 지출 등록 확인 카드
+EXPENSE_TOOL = "draft_expense"
+EXPENSE_PREFIX = "가계부 영수증 분석 — "
+EXPENSE_ASK = "가계부에 이렇게 적을까요?"
+EXPENSE_NO_TOOL = "가계부에서 직접 등록할 수 있어요."
+EXPENSE_DETAIL_MAX = 1000
+EXPENSE_PLACE_MAX = 80
+# 입력 방법 칸(MYPG06)과 영수증 인식 코드 이름 (2026-11-27 추가-2)
+EXPENSE_METHOD = "expndInptMthCd"
+EXPENSE_METHOD_OCR = "OCR"
+
+
+def expense_result_message(request: ExpenseCardRequest) -> str:
+    # 영수증 요약 한 줄과 같은 꼴 : 사용처, 결제일, 금액(없는 값은 뺌)
+    if request.result is not ReceiptResult.RECOGNIZED:
+        return EXPENSE_PREFIX + RECEIPT_MESSAGES[request.result]
+    ocr = request.ocr
+    assert ocr is not None
+    parts = []
+    place = ocr.expnd_plcus_nm or ocr.hsptl_nm
+    if place:
+        parts.append(place)
+    if ocr.ckup_ymd:
+        parts.append(f"{ocr.ckup_ymd.month}월 {ocr.ckup_ymd.day}일")
+    if ocr.recpt_amt is not None:
+        parts.append(f"{ocr.recpt_amt:,}원")
+    return EXPENSE_PREFIX + (", ".join(parts) or "결과를 확인해 주세요")
+
+
+def _expense_values(
+    entry: "catalog.CatalogEntry", request: ExpenseCardRequest, pets: Sequence[PetInfo]
+) -> dict:
+    """인식 결과 -> draft_expense 카드 값 (Java 칸 이름). 못 채운 필수 칸은 카드 missing으로"""
+    ocr = request.ocr
+    assert ocr is not None
+    values: dict = {"recptSn": request.recpt_sn}
+    if ocr.ckup_ymd is not None:
+        values["expndYmd"] = ocr.ckup_ymd.isoformat()
+    place = (ocr.expnd_plcus_nm or ocr.hsptl_nm or "").strip()
+    if place and len(place) <= EXPENSE_PLACE_MAX:
+        values["expndPlcusNm"] = place
+    allowed = entry.codes.get("expnd_clsf_cd")
+    if ocr.expnd_clsf_cd and (allowed is None or ocr.expnd_clsf_cd in allowed):
+        values["expndClsfCd"] = ocr.expnd_clsf_cd
+    names = [line.item_nm or "" for section in ocr.sections for line in section.items]
+    names += [drug.mdcn_nm or "" for section in ocr.sections for drug in section.drugs]
+    detail = ", ".join(name.strip() for name in names if name and name.strip())
+    if len(detail) > EXPENSE_DETAIL_MAX:
+        detail = detail[: EXPENSE_DETAIL_MAX - 1] + "…"
+    if detail:
+        values["dtlMttr"] = detail
+    line: dict = {}
+    # recptAmt는 이미 할인 뒤 최종 결제 금액(docs/api/internal.md) : 그대로
+    if ocr.recpt_amt is not None and ocr.recpt_amt >= 1:
+        line["expndAmt"] = ocr.recpt_amt
+    if request.pet_sn is not None and any(p.pet_sn == request.pet_sn for p in pets):
+        line[catalog.PET_SN] = request.pet_sn
+    values["lines"] = [line]
+    values = entry.fixed | values
+    # 입력 방법(추가-2) : 코드 목록에서 이름이 "OCR"인 코드, 없으면 도구의 고정 값 그대로
+    ocr_code = _code_named(entry, EXPENSE_METHOD, EXPENSE_METHOD_OCR)
+    if ocr_code is not None:
+        values[EXPENSE_METHOD] = ocr_code
+    return values
+
+
+def _code_named(entry: "catalog.CatalogEntry", java: str, name: str) -> str | None:
+    param = entry.params.get(java)
+    codes = param.codes if param is not None else None
+    return next((code.cd for code in codes or () if code.nm == name), None)
+
+
+async def save_expense_card(
+    repo: ConversationRepository,
+    contexts: RegisterContextRepository,
+    room_sn: int,
+    request: ExpenseCardRequest,
+) -> ExpenseCardResult:
+    """가계부 영수증 분석 결과 요약 AI 메시지 + 지출 등록 확인 카드(카드는 미저장)
+    - 인식 실패·오류·취소는 요약만, 도구 목록에 없으면 NO_TOOL"""
+    lines = [expense_result_message(request)]
+    card: ActionCard | None = None
+    reason: ExpenseNoCardReason | None = None
+    if request.result is ReceiptResult.RECOGNIZED and request.ocr is not None:
+        entry = tools.card_entry(EXPENSE_TOOL)
+        if entry is None:
+            logger.info("지출 등록 도구 없음: 카드 없이 안내")
+            lines.append(EXPENSE_NO_TOOL)
+            reason = ExpenseNoCardReason.NO_TOOL
+        else:
+            pets = await contexts.get_pets()
+            values = _expense_values(entry, request, pets)
+            card = action_card(entry, values, list(pets), [], None, None)
+            lines.append(EXPENSE_ASK)
+            lines += _missing_lines([card]) or [ACTION_ASK_CONFIRM]
+            logger.info("지출 등록 카드: 빈 칸 %d", len(card.missing))
+    saved: list[ConversationMessage] = []
+    if request.cnvrs_cn is not None:
+        saved.append(await repo.add_message(room_sn, ROLE_USER, request.cnvrs_cn))
+    saved.append(await repo.add_message(room_sn, ROLE_AI, "\n".join(lines)))
+    return ExpenseCardResult(messages=saved, action=card, no_card_reason=reason)
 
 
 def _rejected(entry: "catalog.CatalogEntry", values: dict, card: dict) -> list[str]:
@@ -3825,6 +3938,25 @@ IMAGE_MESSAGES = {
     ImageIntentKind.SKIN: "피부 분석으로 이어 갈게요.",
     ImageIntentKind.EYE: "눈 분석으로 이어 갈게요.",
 }
+# 판단 LLM이 쓴 안내 글 최대 길이 (2026-11-27)
+IMAGE_REPLY_MAX = 200
+
+
+def image_reply(reply: str | None) -> str | None:
+    # 앞뒤 공백을 떼고 1~200자일 때만, 아니면 None(고정 글)
+    text = (reply or "").strip()
+    return text if 0 < len(text) <= IMAGE_REPLY_MAX else None
+
+
+def question_text(text: str) -> str:
+    """정규식 규칙에 줄 글 : 사진 턴 표시 "[사진] "을 뗌 (2026-11-27, AGENT 뒤 /messages)
+    - LLM 문맥에는 표시를 그대로 둔다(사진을 붙였다는 뜻). 표시만 있으면 그대로"""
+    rest = text.removeprefix(IMAGE_MARK)
+    if rest is text or not rest.strip():
+        return text
+    return rest.strip()
+
+
 # 글이 캐릭터를 원하지만 사진에 반려동물 얼굴·몸이 안 보여 ASK일 때 (2026-11-24)
 CHARACTER_PHOTO_UNFIT_MESSAGE = (
     "캐릭터는 반려동물 얼굴이나 몸 전체가 보이는 사진으로 만들 수 있어요. "
@@ -3840,6 +3972,7 @@ async def save_image_turn(
     text: str | None,
     kind: ImageIntentKind,
     character_photo_unfit: bool = False,
+    reply: str | None = None,
 ) -> ImageIntentResult:
     """사진 턴을 대화방에 저장 : 사용자 "[사진] <글>" + 용도별 안내 AI 메시지
     - 방 번호가 없으면 방을 만듦(첫 메시지가 사진 메시지, 글이 없으면 제목 LLM 미호출)"""
@@ -3861,6 +3994,8 @@ async def save_image_turn(
     if kind is ImageIntentKind.ASK and character_photo_unfit:
         guide = CHARACTER_PHOTO_UNFIT_MESSAGE
     if guide is not None:
+        # 안내 글은 판단 LLM 글 (2026-11-27), 빈 글·200자 초과면 고정 글
+        guide = image_reply(reply) or guide
         saved.append(await repo.add_message(room_sn, ROLE_AI, guide))
     return ImageIntentResult(kind=kind, ai_cnvrs_room_sn=room_sn, messages=saved)
 

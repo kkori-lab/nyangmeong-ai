@@ -436,6 +436,22 @@ class ReceiptCardResult(_Camel):
     no_card_reason: ReceiptNoCardReason | None = None
 
 
+class ExpenseCardRequest(ReceiptCardRequest):
+    """대화창 가계부 영수증 분석 뒤 결과 요약 저장 + 지출 등록 확인 카드 (2026-11-27)
+    - React가 /ai/receipts(출처 가계부 AIMC0027) 응답을 그대로 보낸다. 칸은 receipt-card와 같음
+    - pet_sn : 회원 반려동물이면 카드 줄의 petSn, 아니면 비움(공용 지출)"""
+
+
+class ExpenseNoCardReason(StrEnum):
+    NO_TOOL = "NO_TOOL"  # 도구 목록에 draft_expense 없음
+
+
+class ExpenseCardResult(_Camel):
+    messages: list[ConversationMessage]
+    action: ActionCard | None = None
+    no_card_reason: ExpenseNoCardReason | None = None
+
+
 class ImageIntentKind(StrEnum):
     """첨부 사진 용도 (SCR-AIM-013, 메인 검색창 공용)"""
 
@@ -446,14 +462,18 @@ class ImageIntentKind(StrEnum):
     EYE = "EYE"  # 반려동물 눈 문제 사진 -> 안구 질환 분석 (2026-11-24)
     CHECKUP_PDF = "CHECKUP_PDF"  # PDF -> 검사결과지 분석 (판단 LLM 미호출, 2026-11-23)
     ASK = "ASK"  # 모름 -> React가 칩으로 되물음
+    # 글이 위 용도 밖의 앱 일 -> 도구 고르기 에이전트(React가 /messages를 cnvrsCn 없이, 2026-11-27)
+    AGENT = "AGENT"
 
 
 class ImageIntentJudgement(BaseModel):
     """사진 용도 판단 결과 (내부용) : ASK 안내 문구를 이유별로 고르기 위함 (2026-11-24)
-    - character_photo_unfit : 글이 캐릭터를 원하지만 사진에 반려동물 얼굴·몸이 안 보여 ASK"""
+    - character_photo_unfit : 글이 캐릭터를 원하지만 사진에 반려동물 얼굴·몸이 안 보여 ASK
+    - reply : 판단 LLM이 사용자 글에 맞춰 쓴 안내 글(2026-11-27). 없으면 고정 글"""
 
     kind: ImageIntentKind
     character_photo_unfit: bool = False
+    reply: str | None = None
 
 
 class ImageIntentResult(_Camel):
