@@ -273,3 +273,16 @@ def test_agent_limit_태그_턴은_주_집계에_잡혀야_한다():
     week = next(iter(weeks.values()))
     assert week.tags == {turnlog.AGENT_LIMIT: 1}
     assert week.reads_max == 8
+
+
+def test_표시_이름_없는_도구의_step은_영어_이름_대신_정보여야_한다():
+    seen: list = []
+    token = service._STEP_SINK.set(seen.append)
+    try:
+        service._step(SimpleNamespace(name="list_new_thing", label=None), "READ")
+    finally:
+        service._STEP_SINK.reset(token)
+
+    assert [e.model_dump(by_alias=True) for e in seen] == [
+        {"tool": "list_new_thing", "label": "정보", "kind": "READ"}
+    ]

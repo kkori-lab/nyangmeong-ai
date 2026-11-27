@@ -322,7 +322,9 @@ _STEP_SINK: ContextVar[Callable[[StepEvent], None] | None] = ContextVar("step_si
 def _step(entry: "catalog.CatalogEntry", kind: str) -> None:
     sink = _STEP_SINK.get()
     if sink is not None:
-        sink(StepEvent(tool=entry.name, label=entry.label or entry.name, kind=kind))
+        # 표시 이름이 없는 도구 : 영어 도구 이름 대신 "정보"(프론트 "○○ 확인 중이에요…")
+        label = entry.label or "정보"
+        sink(StepEvent(tool=entry.name, label=label, kind=kind))
 
 
 async def create_conversation(
