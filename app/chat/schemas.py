@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -88,6 +88,8 @@ class ActionDraft(_Camel):
     # 2단계 쓰기 : React가 돌려보낸 가장 최근 확인 카드의 도구와 input(Java 칸 이름)
     tool: str = Field(min_length=1, max_length=64)
     values: dict[str, Any] = Field(default_factory=dict, alias="input")
+    # 삭제 카드의 대상 글(ActionCard.targetText 그대로, 2026-11-25)
+    target_text: str | None = Field(default=None, max_length=200)
 
 
 class MessageSendRequest(_Camel):
@@ -185,8 +187,13 @@ class ActionItemParam(_Camel):
     # 배열 칸(type array) : 항목 칸 규칙·최소 항목 수
     items: dict[str, "ActionItemParam"] | None = None
     min_items: int | None = None
+    # 숫자 배열 칸(itemSns·petSns 등, 2026-11-27) : 항목 타입(long). 값은 번호 목록
+    item_type: str | None = None
     # "uuid" : React가 [확인] 때 카드 하나에 한 번 만든다
     generated: str | None = None
+    # 값 목록(Java enum 상수 이름, 선언 순서, 2026-11-27) : string 칸이면 그중 하나,
+    # array(itemType string) 칸이면 그중 여럿
+    values: list[str] | None = None
 
 
 class ActionParam(ActionItemParam):
@@ -238,6 +245,23 @@ class ActionCard(_Camel):
     pet_nm: str | None = None
     # FN-AIM-012-08 : 같은 이름 케어 항목 안내 문구(케어 항목 등록), 없으면 null
     notice: str | None = None
+    # 삭제 카드(call.method DELETE)의 대상 글 : 이 턴 READ 결과 행으로 Python이 만듦 (2026-11-25)
+    # React는 보여 주고 다음 메시지·action-result에 그대로 돌려보낸다. 없으면 null
+    target_text: str | None = None
+
+
+class StepEvent(_Camel):
+    # SSE step 이벤트(에이전트 루프 진행, 저장 안 함). kind : READ(읽기 직전)·CARD(카드 만들 때)
+    tool: str
+    label: str
+    kind: Literal["READ", "CARD"]
+
+
+class AgentPending(_Camel):
+    # done.pending (에이전트 ③, 2026-11-26) : 카드 실행 뒤 agent-continue로 이어 갈 서명 토큰
+    agent_token: str
+    # 이 멈춤의 카드 수
+    cards: int
 
 
 class AnswerDone(_Camel):
@@ -253,6 +277,8 @@ class AnswerDone(_Camel):
     actions: list[ActionCard] | None = None
     # 돌려받은 카드 + 확인 말("등록해 줘") : React가 action의 call을 바로 실행 (2026-11-13)
     execute: bool = False
+    # 에이전트 ③ : 실행 결과를 보고 이어 갈 수 있을 때만(없으면 null, 지금 흐름)
+    pending: AgentPending | None = None
 
 
 class StreamError(_Camel):
@@ -278,11 +304,43 @@ class ActionStatus(StrEnum):
     FAILED = "FAILED"  # Java 실행 실패
 
 
+class ActionFieldError(_Camel):
+    # Java 400 data의 한 줄 {field, message} : Python은 field만 쓴다(message는 Java 문구라 안 보임)
+    field: str = Field(min_length=1, max_length=200)
+    message: str | None = Field(default=None, max_length=1000)
+
+
 class ActionResultRequest(_Camel):
     # 확인 카드 결과 텍스트 요약 저장 : 요약 글은 Python이 도구 표시 이름과 input으로 만듦
     tool: str = Field(min_length=1, max_length=64)
     status: ActionStatus
     values: dict[str, Any] = Field(default_factory=dict, alias="input")
+    # FAILED 때 Java 400 칸 오류(선택, 2026-11-25) : 저장 글에 칸 표시 이름으로 "다시 확인"
+    errors: list[ActionFieldError] = Field(default_factory=list, max_length=50)
+    # 삭제 카드의 대상 글(ActionCard.targetText 그대로, 2026-11-25) : 결과 요약에 씀
+    target_text: str | None = Field(default=None, max_length=200)
+
+
+# agent-continue results 최대 수 : 지금 카드 최대 3장(ACTION_MAX_CARDS), 8장은 프론트 합의 뒤
+AGENT_RESULTS_MAX = 3
+# agentToken 길이 상한 : 서명 토큰 48KB(agentstate.MAX_BYTES)
+AGENT_TOKEN_MAX = 48 * 1024
+
+
+class AgentResult(_Camel):
+    # 이 멈춤의 카드 하나의 실행 결과 (docs/design/agent.md 5절)
+    tool: str = Field(min_length=1, max_length=64)
+    status: ActionStatus
+    # FAILED 때 Java 400 data [{field, message}] (ActionResultRequest errors와 같음)
+    errors: list[ActionFieldError] = Field(default_factory=list, max_length=50)
+    # DONE 때 Java 성공 응답 data(선택) : 새 번호(…Sn 정수 칸)만 이 턴 번호 칸 값으로 씀
+    data: dict[str, Any] | None = None
+
+
+class AgentContinueRequest(_Camel):
+    # POST /ai/conversations/{방}/agent-continue (에이전트 ③, 2026-11-26)
+    agent_token: str = Field(min_length=1, max_length=AGENT_TOKEN_MAX)
+    results: list[AgentResult] = Field(min_length=1, max_length=AGENT_RESULTS_MAX)
 
 
 class ReceiptResult(StrEnum):
@@ -307,6 +365,75 @@ class ReceiptResultRequest(_Camel):
         if value is not None and not value.strip():
             raise ValueError("공백만 입력할 수 없습니다.")
         return value
+
+
+class ReceiptOcrLine(_Camel):
+    # ocr 패키지 ReceiptOcrResponse와 같은 모양(기능 패키지끼리 import하지 않아 따로 둠)
+    item_nm: str | None = None
+    item_amt: int | None = None
+
+
+class ReceiptOcrDrug(_Camel):
+    mdcn_nm: str | None = None
+    mdcn_days: int | None = None
+    mdcn_usage: str | None = None
+    mdcn_amt: int | None = None
+
+
+class ReceiptOcrSection(_Camel):
+    section_nm: str | None = None
+    sbttl_amt: int | None = None
+    dscnt_amt: int | None = None
+    items: list[ReceiptOcrLine] = Field(default_factory=list, max_length=200)
+    drugs: list[ReceiptOcrDrug] = Field(default_factory=list, max_length=100)
+
+
+class ReceiptOcr(_Camel):
+    hsptl_nm: str | None = None
+    expnd_plcus_nm: str | None = None
+    expnd_clsf_cd: str | None = None
+    ckup_ymd: date | None = None
+    recpt_amt: int | None = None
+    btm_dscnt_amt: int | None = None
+    sections: list[ReceiptOcrSection] = Field(default_factory=list, max_length=20)
+
+
+class ReceiptCardRequest(_Camel):
+    """대화창 영수증 분석 뒤 결과 요약 저장 + 영수증 저장 확인 카드 (2026-11-27)
+    - React가 /ai/receipts 응답(recptSn·ocr)을 그대로 보낸다. RECOGNIZED일 때만 쓴다"""
+
+    result: ReceiptResult
+    recpt_sn: int | None = Field(default=None, ge=1)
+    # 업로드 때 정한 반려동물(FN-AIM-013-03) : 구역 없는 영수증의 줄 반려동물
+    pet_sn: int | None = Field(default=None, ge=1)
+    ocr: ReceiptOcr | None = None
+    cnvrs_cn: str | None = Field(default=None, min_length=1, max_length=MAX_MESSAGE_LENGTH)
+
+    @field_validator("cnvrs_cn")
+    @classmethod
+    def _not_blank(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("공백만 입력할 수 없습니다.")
+        return value
+
+    @model_validator(mode="after")
+    def _recognized_needs_result(self) -> "ReceiptCardRequest":
+        if self.result is ReceiptResult.RECOGNIZED and (self.recpt_sn is None or self.ocr is None):
+            raise ValueError("인식 결과에는 recptSn과 ocr이 필요합니다.")
+        return self
+
+
+class ReceiptNoCardReason(StrEnum):
+    # 카드가 없는 이유 : 둘 다 React가 [확인 후 저장](모달)을 보인다
+    NEEDS_FORM = "NEEDS_FORM"  # 줄 배정이 필요함(구역 이름 불일치·반려동물 없음)
+    NO_TOOL = "NO_TOOL"  # 도구 목록에 draft_receipt_save 없음
+
+
+class ReceiptCardResult(_Camel):
+    # 저장한 메시지와 확인 카드(없으면 null). 카드는 done.action과 같은 모양, 저장 안 함
+    messages: list[ConversationMessage]
+    action: ActionCard | None = None
+    no_card_reason: ReceiptNoCardReason | None = None
 
 
 class ImageIntentKind(StrEnum):

@@ -205,7 +205,7 @@ def test_반려동물_목록_실패는_대화창에서_error와_두_줄이어야
     with caplog.at_level("WARNING", logger=SERVICE_LOGGER):
         evs = events(send(client, room, "체중 어때?"))
 
-    assert [name for name, _ in evs] == ["intent", "error"]
+    assert [name for name, _ in evs] == ["intent", "step", "error"]
     assert len(_lines(caplog, "READ 반려동물 목록 실패")) == 1
     assert len(_lines(caplog, "답변 실패: 첫 글자 전 read_pets ")) == 1
 

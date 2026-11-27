@@ -24,6 +24,13 @@ ROUTES_PATH = "/internal/ai/routes"
 REQUESTED_WITH_HEADER = "X-Requested-With"
 
 
+class ConversationContext(ConversationDetail):
+    # 추가 요청(2026-11-24) : 컨텍스트 요약(Java 내부 응답에만). React 응답에는 싣지 않음
+    smry_cn: str | None = None
+    # 요약 경계선 : 이 msgSeq까지 요약에 들어감
+    smry_end_msg_seq: int | None = None
+
+
 class ConversationRepository(Protocol):
     async def create_room(
         self, pet_sn: int | None, title: str, first_cn: str
@@ -31,7 +38,7 @@ class ConversationRepository(Protocol):
 
     async def list_rooms(self, pet_sn: int | None) -> list[ConversationSummary]: ...
 
-    async def get_room(self, room_sn: int) -> ConversationDetail: ...
+    async def get_room(self, room_sn: int) -> ConversationContext: ...
 
     async def delete_room(self, room_sn: int) -> None: ...
 
@@ -41,13 +48,15 @@ class ConversationRepository(Protocol):
         self, room_sn: int, role_cd: str, cn: str, cmptn_yn: bool = True
     ) -> ConversationMessage: ...
 
+    async def save_summary(self, room_sn: int, cn: str, end_msg_seq: int) -> None: ...
+
 
 class JavaConversationRepository:
     # 회원 판정은 Java(브라우저 Cookie). 인증 오류·404는 Java 응답 그대로 전달
     def __init__(self, client: httpx2.AsyncClient, settings: Settings, cookie: str | None) -> None:
         self._client = client
         self._settings = settings
-        # Java RequestedWithFilter가 /internal/**의 POST·DELETE에도 적용
+        # Java RequestedWithFilter가 /internal/**의 POST·PUT·PATCH·DELETE에도 적용
         self._headers = {REQUESTED_WITH_HEADER: REQUESTED_WITH}
         if cookie:
             self._headers["Cookie"] = cookie
@@ -66,9 +75,9 @@ class JavaConversationRepository:
             raise external_error()
         return [_parse(ConversationSummary, item) for item in data]
 
-    async def get_room(self, room_sn: int) -> ConversationDetail:
+    async def get_room(self, room_sn: int) -> ConversationContext:
         data = await self._call("GET", f"{CONVERSATIONS_PATH}/{room_sn}")
-        return _parse(ConversationDetail, data)
+        return _parse(ConversationContext, data)
 
     async def delete_room(self, room_sn: int) -> None:
         await self._call("DELETE", f"{CONVERSATIONS_PATH}/{room_sn}")
@@ -88,6 +97,11 @@ class JavaConversationRepository:
             body["cmptnYn"] = False
         data = await self._call("POST", f"{CONVERSATIONS_PATH}/{room_sn}/messages", json=body)
         return _parse(ConversationMessage, data)
+
+    async def save_summary(self, room_sn: int, cn: str, end_msg_seq: int) -> None:
+        # 추가 요청(2026-11-24) : 방당 1행 덮어쓰기, 경계선이 더 클 때만 바꾸는 것·암호화는 Java
+        body = {"smryCn": cn, "smryEndMsgSeq": end_msg_seq}
+        await self._call("PUT", f"{CONVERSATIONS_PATH}/{room_sn}/summary", json=body)
 
     async def _call(self, method: str, path: str, **kwargs):
         return await call_backend(
@@ -115,8 +129,8 @@ def get_conversation_repository(
 class AiSettings:
     # SYS_STNG_AI_TKN_UPLMT_CNT : 답변 최대 생성 토큰(FN-AIM-002-02)
     max_tokens: int = 4500
-    # SYS_STNG_AI_CNVRS_TURN_CNT : 컨텍스트 턴 수(FN-AIM-011-15)
-    context_turns: int = 6
+    # SYS_STNG_AI_CNVRS_TURN_CNT : 컨텍스트 턴 수(FN-AIM-011-15). 15턴마다 요약 (2026-11-24 결정)
+    context_turns: int = 15
 
 
 def get_ai_settings() -> AiSettings:
@@ -182,7 +196,8 @@ def get_register_context_repository(
 
 class ToolReader(Protocol):
     # 도구 흐름 READ : Java 공개 API GET -> ApiResponse의 data (4xx·5xx는 BackendError·AppError)
-    async def read(self, path: str, params: dict) -> object: ...
+    # body : 저장하지 않는 POST READ(저장 전 중복 확인 등, 2026-11-27)의 JSON 본문. 있으면 POST
+    async def read(self, path: str, params: dict, body: dict | None = None) -> object: ...
 
 
 class JavaToolReader:
@@ -196,7 +211,17 @@ class JavaToolReader:
         if cookie:
             self._headers["Cookie"] = cookie
 
-    async def read(self, path: str, params: dict) -> object:
+    async def read(self, path: str, params: dict, body: dict | None = None) -> object:
+        if body is not None:
+            return await call_backend(
+                self._client,
+                self._settings,
+                "POST",
+                path,
+                params=params,
+                json=body,
+                headers=self._headers,
+            )
         return await call_backend(
             self._client, self._settings, "GET", path, params=params, headers=self._headers
         )
@@ -208,6 +233,40 @@ def get_tool_reader(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> ToolReader:
     return JavaToolReader(client, settings, request.headers.get("cookie"))
+
+
+class ReceiptSaveChecker(Protocol):
+    # 영수증 저장 전 확인(가계부 중복·가까운 예정 일정) : Java 공개 API POST, data 그대로
+    async def check(self, recpt_sn: int, body: dict) -> object: ...
+
+
+RECEIPT_SAVE_CHECK_PATH = "/api/receipts/{recptSn}/save-check"
+
+
+class JavaReceiptSaveChecker:
+    """[영수증 저장 전 확인] 저장은 하지 않는 POST
+    - 회원 판정·소유 검사는 Java : 브라우저 Cookie 전달"""
+
+    def __init__(self, client: httpx2.AsyncClient, settings: Settings, cookie: str | None) -> None:
+        self._client = client
+        self._settings = settings
+        self._headers = {REQUESTED_WITH_HEADER: REQUESTED_WITH}
+        if cookie:
+            self._headers["Cookie"] = cookie
+
+    async def check(self, recpt_sn: int, body: dict) -> object:
+        path = RECEIPT_SAVE_CHECK_PATH.format(recptSn=recpt_sn)
+        return await call_backend(
+            self._client, self._settings, "POST", path, json=body, headers=self._headers
+        )
+
+
+def get_receipt_save_checker(
+    request: Request,
+    client: Annotated[httpx2.AsyncClient, Depends(get_backend_client)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ReceiptSaveChecker:
+    return JavaReceiptSaveChecker(client, settings, request.headers.get("cookie"))
 
 
 class RouteRepository(Protocol):

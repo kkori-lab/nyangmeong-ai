@@ -15,14 +15,61 @@ from tests.chat.fakes import (
     FakeToolCatalogClient,
     fake_catalog_json,
 )
+from tests.chat.new_tools import (
+    NEW_ACTION,
+    NEW_ACTION_WITHOUT_CODES,
+    NEW_READ,
+    NEW_READ_WITHOUT_CODES,
+)
 from tests.chat.test_messages import MessageJava, events, send
 from tests.chat.test_register import CHOCO, Extractor, use_extractor
 from tests.chat.test_tools import room_of, use_agent
 
 BUILTIN = {"navigate", "search_guide", "decline"}
 REGISTER = {"draft_schedule", "draft_care_item"}
+# 수정·삭제 도구 (SCR-AIM-012, 2026-11-25)
+SECOND_UPDATES = {
+    "draft_daily_health_record_update",
+    "draft_checkup_update",
+    "draft_prescription_update",
+    "draft_etc_inspection_update",
+    "draft_inspection_value_update",
+    "draft_observation_cycle_update",
+}
+DELETES = {
+    "delete_schedule",
+    "delete_care_item",
+    "cancel_care_completion",
+    "delete_daily_health_record",
+    "delete_checkup",
+    "delete_prescription",
+    "delete_etc_inspection",
+    "delete_observation_cycle",
+    "delete_repeat_prevention",
+    "delete_expense",
+    "delete_place_bookmark",
+    # 오늘 마지막 완료 되돌리기(2026-11-27 새 도구)
+    "cancel_last_dose",
+    # 2026-11-27 사람 결정 "전부 다 추가"(새 도구 싣기 ③) : 반려동물 삭제·공동양육 해제·
+    # 취소한 초대 삭제·지출 여러 건 삭제도 확인 카드
+    "delete_pet",
+    "unlink_caregiver",
+    "delete_caregiver_invitation",
+    "delete_expenses",
+}
+CAREGIVER_CARDS = {
+    "draft_caregiver_invitation",
+    "cancel_caregiver_invitation",
+    "accept_caregiver_invitation",
+    "reject_caregiver_invitation",
+    # 2026-11-27 새 도구 싣기 ③ : 공동양육 해제·취소한 초대 삭제
+    "unlink_caregiver",
+    "delete_caregiver_invitation",
+}
 # 2단계 쓰기 확인 카드(ACTION)
 ACTION = {
+    # 영수증 저장 카드 (SCR-AIM-013 receipt-card, 2026-11-27)
+    "draft_receipt_save",
     "draft_care_completion",
     "draft_daily_health_record",
     "draft_expense_limit",
@@ -38,9 +85,20 @@ ACTION = {
     "draft_inspection_values",
     # 관찰 항목 등록(SCR-AIM-013 피부·눈 카드, 2026-11-24) : 부위 코드 칸, 스냅샷만이면 안 실림
     "draft_observation_item",
+    # 수정·삭제 도구(SCR-AIM-012, 2026-11-25) : 수정 6개, 삭제 11개
+    *SECOND_UPDATES,
+    *DELETES,
+    *NEW_ACTION,
 }
 # 스냅샷(코드 값 없음)으로도 싣는 ACTION : 코드 칸 없음
-ACTION_WITHOUT_CODES = {"draft_care_completion", "draft_expense_limit"}
+ACTION_WITHOUT_CODES = {
+    "draft_care_completion",
+    "draft_expense_limit",
+    "draft_etc_inspection_update",
+    "draft_inspection_value_update",
+    *DELETES,
+    *NEW_ACTION_WITHOUT_CODES,
+}
 READ = {
     "get_checkup",
     "get_health_indicators",
@@ -84,9 +142,10 @@ READ = {
     "list_place_bookmarks",
     "list_places",
     "list_posts",
+    *NEW_READ,
 }
 # 일부러 싣지 않는 Java 도구(tool_prompts.yaml skip)
-SKIP = {"draft_receipt_save", "list_faqs"}
+SKIP = {"list_faqs"}
 # 스냅샷(코드 값 없음)으로도 싣는 READ : 코드 칸 없음
 READ_WITHOUT_CODES = {
     "get_checkup",
@@ -113,6 +172,7 @@ READ_WITHOUT_CODES = {
     "get_post",
     "list_comments",
     "list_health_tips",
+    *NEW_READ_WITHOUT_CODES,
 }
 
 
@@ -160,20 +220,20 @@ def test_설명의_hook_이름과_역할은_Python에_있어야_한다():
 
 
 def test_navigate만_쓰는_API는_스냅샷에_없어야_한다():
-    # ③ 설계 2-3절 : 반려동물 등록·모든 삭제·회원정보·공동양육·관리자·인증·내부 API
-    navigate_only = (
-        ("POST", "/api/pets"),
-        ("PUT", "/api/members/me"),
-        ("PATCH", "/api/members/me"),
-    )
+    # ③ 설계 2-3절 : 회원정보(PUT)·관리자·인증·내부 API
+    # 삭제는 2026-11-25부터 확인 카드(DELETES)만. 프로필 사진 수정(PATCH /api/members/me,
+    # 휴대전화번호 칸 없음)은 2026-11-27부터 확인 카드. 반려동물 삭제·공동양육 해제·지출 여러 건·
+    # 조건 삭제는 2026-11-27 사람 결정(새 도구 싣기 ③)으로 확인 카드
+    navigate_only = (("PUT", "/api/members/me"),)
     for tool in catalog.read_snapshot().tools:
         call = tool.call
-        assert call.method != "DELETE"
+        assert call.method != "DELETE" or tool.name in DELETES
         assert (call.method, call.path) not in navigate_only
         assert not call.path.startswith(("/api/admin", "/api/auth", "/internal"))
-        # 공동양육자·보낸 초대 목록 읽기는 2-1절 READ 후보, 초대·수락·해제(쓰기)만 navigate
-        assert call.method == "GET" or "caregiver" not in call.path
-        assert "chat-rooms" not in call.path
+        # 공동양육 쓰기는 초대 보내기·취소·수락·거절·해제·삭제 카드만(2026-11-27 사람 결정)
+        assert call.method == "GET" or "caregiver" not in call.path or tool.name in CAREGIVER_CARDS
+        # 채팅은 읽지 않은 수만(2026-11-27)
+        assert "chat-rooms" not in call.path or call.path == "/api/chat-rooms/unread-count"
 
 
 @pytest.mark.parametrize(
@@ -255,6 +315,8 @@ def test_LLM에_보이는_칸은_설명이_있는_칸뿐이어야_한다():
         "ckup_type_cd",
         "hsptl_nm",
         "schdl_nm",
+        # 문장에 쓴 반려동물 이름(2026-11-26 추가-2) : Java 칸이 아니라 서버가 목록과 대조
+        "pet_name",
     }
 
 
@@ -604,3 +666,11 @@ def test_스냅샷에_빠진_일정_도구가_없어야_한다():
 
     assert "list_care_schedules" not in names
     assert "list_care_schedules" not in catalog.tool_prompts()
+
+
+def test_읽기_카드_도구는_모두_한글_표시_이름이_있어야_한다():
+    # step 진행 문구("○○ 확인 중이에요…")·카드 제목에 영어 도구 이름이 나오지 않게
+    entries = build(fake_catalog_json()).entries.values()
+    missing = [e.name for e in entries if e.kind in ("READ", "CARD") and not e.label]
+    assert missing == []
+    assert any(e.kind == "READ" for e in entries)

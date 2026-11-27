@@ -91,11 +91,12 @@ def test_배열과_파일_칸이_있는_도구를_버리지_않고_실어야_한
     assert cycle.call.content_type == "multipart/form-data"
 
 
-def test_영수증_저장은_skip이라_싣지_않지만_설명을_주면_중첩_배열까지_읽어야_한다(caplog):
+def test_영수증_저장은_설명이_있어_싣고_중첩_배열까지_읽어야_한다(caplog):
+    # 2026-11-27 receipt-card : skip을 지우고 설명을 둠(영수증 분석 카드를 고칠 때만)
     with caplog.at_level(logging.INFO, logger="app.chat.catalog"):
         built = build(fake_catalog_json())
-    assert "draft_receipt_save" not in built.entries
-    assert "draft_receipt_save 싣지 않음(" in caplog.text
+    assert "draft_receipt_save" in built.entries
+    assert "draft_receipt_save 싣지 않음" not in caplog.text
     assert "draft_receipt_save 설명 없음" not in caplog.text
 
     entry = receipt_entry()
@@ -109,8 +110,11 @@ def test_배열_항목의_코드_칸에_코드_값이_없으면_싣지_않아야
     prompts = catalog.tool_prompts() | {
         "draft_receipt_save": catalog.ToolPrompt.model_validate(RECEIPT_PROMPT)
     }
+    raw = fake_catalog_json()
+    # 가짜 목록은 영수증 저장의 배열 항목 코드 값을 싣는다(2026-11-27) : 여기선 지운다
+    del tool_of(raw, "draft_receipt_save")["params"]["pets"]["items"]["ckupTypeCd"]["codes"]
     with caplog.at_level(logging.WARNING, logger="app.chat.catalog"):
-        built = build(fake_catalog_json(), prompts)
+        built = build(raw, prompts)
 
     assert "draft_receipt_save" not in built.entries
     assert "코드 값 없음 HLTG01" in caplog.text
@@ -323,7 +327,7 @@ def test_관찰_항목을_읽은_뒤_고른_관찰_기록은_목록의_번호와
     )
     room = room_of(client, java, pet_sn=CHOCO)
 
-    evs = events(send(client, room, "초코 등에 난 혹 오늘 1.2cm야 기록해 줘"))
+    evs = events(send(client, room, "초코 등에 난 혹 오늘 1.2cm야 기록할까?"))
 
     assert agent.results[1].startswith(ACTION_SHOWN.split("{summary}")[0])
     action = evs[-1][1]["action"]
@@ -422,7 +426,7 @@ def test_관찰_기록_결과는_사진_칸_없이도_저장하고_사진_값은
     canceled = action_result(client, room, "draft_observation_cycle", "CANCELED", {})
 
     assert res.status_code == again.status_code == canceled.status_code == 201
-    assert res.json()["data"]["cnvrsCn"] == "✔ 관찰 기록 추가 — 09-29(화) 09:00 · 1.2"
+    assert res.json()["data"]["cnvrsCn"] == "✔ 관찰 기록 추가 — 09-29(화) 09:00 · 1.2cm"
     assert canceled.json()["data"]["cnvrsCn"] == "취소됨 — 관찰 기록 추가 · 저장하지 않았어요."
 
 

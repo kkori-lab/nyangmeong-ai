@@ -140,6 +140,26 @@ def is_small_talk(text: str) -> bool:
     return rest == "" or _SMALL_TALK.fullmatch(rest) is not None
 
 
+# FN-AIM-002-03 (2026-11-25 SJM 피드백) : 도구 없이 바로 쓴 답은 글에 건강 말이 있을 때만 고지
+# ("오늘 날씨 어때?"에 고지 붙음). 키워드 밖 건강 질문은 고지가 빠지므로 넓게 잡는다
+_HEALTH_TOPIC = re.compile(
+    r"건강|아프|아파|아픈|아팠|통증|증상|질병|질환|병원|수의|진료|진단|치료|수술|입원|약|영양제"
+    r"|먹|마셔|마시|사료|간식|음식|식욕|식사|음수|구토|토해|토하|토를|설사"
+    r"|대변|변비|변이|변을|변 |배변|소변|오줌|혈뇨"
+    r"|기침|재채기|콧물|열이|열나|체온|체중|몸무게|살이|살찌|비만|다이어트"
+    r"|접종|백신|예방|구충|사상충|진드기|벼룩|기생충|중성화|임신|출산|발정|생리"
+    r"|피부|털|가려|긁|각질|탈모|비듬|발진|상처|피가|피나|출혈|붓|부어|혹이|종양|암이|암에"
+    r"|눈곱|눈물|충혈|눈이|귀가|귓|냄새|입냄새|이빨|치아|잇몸|치석|양치|발톱|발바닥"
+    r"|절뚝|다리|관절|슬개골|허리|숨|호흡|헐떡|경련|발작|떨림|떨어요|떨고|기운|무기력|컨디션|노령|노견|노묘"
+    r"|중독|독성|위험|알레르기|포도|초콜릿|양파|자일리톨|스트레스|불안|짖|물었|무는|깨물|공격|행동"
+    r"|산책|운동|목욕|미용|검진|검사|수치"
+)
+
+
+def is_health_topic(text: str) -> bool:
+    return _HEALTH_TOPIC.search(text) is not None
+
+
 # 이동 먼저 고른 섞인 메시지(2026-11-17) : 이어 주는 이동 말 뒤에 다른 일이 이어지는지
 _CHAIN_AFTER_MOVE = re.compile(r"(열어서|열고|가서|가고|들어가서|이동해서|이동하고|띄워서)(.*)")
 _CHAIN_REST = re.compile(r"[\w가-힣]")
@@ -462,13 +482,73 @@ _DO = (
     r"(등록|수정|변경|저장|추가|기록|체크|완료|진행|그대로)"
     r"(해|해줘|해주세요|해줄래|해요|하자|해주라|ㄱ)?"
 )
-_CONFIRM = re.compile(rf"^(?:{_YES}(?:{_DO})?|{_DO})$")
+# 삭제 카드의 확인 말 (2026-11-25) : 삭제 카드가 없으면 service.py가 확인 말로 보지 않음
+_DEL = (
+    r"(삭제(해|해줘|해주세요|해줄래|해요|하자|ㄱ)?|지워(줘|주세요|줄래|요)?"
+    r"|없애(줘|주세요|줄래)?)"
+)
+_CONFIRM = re.compile(rf"^(?:{_YES}(?:{_DO}|{_DEL})?|{_DO}|{_DEL})$")
+# 도구별 동사(tool_prompts.yaml verb)의 확인 말 (2026-11-27) : 그 동사의 카드가 있을 때만
+# service.py가 확인 말로 본다("진행"은 _DO에 있음)
+# 해제·변경·삭제 : 새 도구 싣기 ③(공동양육 해제·알림 설정·지출 조건 삭제, 2026-11-27)
+CARD_VERBS = ("지정", "구매", "수락", "거절", "종료", "저장", "해제", "변경", "삭제")
+_CARD_VERB_SAID = re.compile(
+    rf"^{_YES}?(?P<verb>{'|'.join(CARD_VERBS)})(해|해줘|해주세요|해줄래|해요|하자|해주라|ㄱ)?$"
+)
+_DELETE_WORD = re.compile(r"삭제|지워|지우|없애")
+_PROCEED_WORD = re.compile(r"진행")
 _NO = r"(아니|아니요|아뇨|아니야)"
 _STOP = (
     r"(취소|취소해|취소해줘|취소해주세요|됐어|됐어요|그만|그만해"
-    r"|하지마|하지마요|안할래|등록하지마|저장하지마|등록안해|안해)"
+    r"|하지마|하지마요|안할래|등록하지마|저장하지마|등록안해|안해|삭제하지마|지우지마|삭제안해)"
 )
 _CANCEL = re.compile(rf"^(?:{_NO}{_STOP}?|{_STOP})$")
+
+
+def _compact_reply(text: str) -> str:
+    return re.sub(r"[\s.!~?ㅎㅋ^]+", "", text)
+
+
+# 동사형 명령 (2026-11-26 팀 합의) : 첫 턴에 확인 말 없이 바로 실행. 문장 끝이 쓰기 명령형
+# 하다형 동사 + 해 줘 등, 어형 동사(바꿔·지워 …)는 꼬리 없이도, 끝이 맨 "기록"이어도 명령
+# 도구별 동사(지정·수락·거절·종료, 2026-11-27)도 명령형이면 바로 실행
+_RUN_HA = r"(등록|수정|변경|저장|추가|기록|체크|완료|삭제|구매|지정|수락|거절|종료)"
+_RUN_EO = r"(바꿔|바꾸어|고쳐|넣어|적어|남겨|지워|없애|올려|잡아)"
+_RUN_ASK = r"(해줄래|해줄래요|해주실래요|줄래|줄래요|주실래요)"
+_RUN_HA_TAIL = rf"(해줘|해줘요|해주세요|해주라|해둬|해놔|해|해요|하자|ㄱ|{_RUN_ASK})"
+_RUN_EO_TAIL = rf"(줘|줘요|주세요|주라|둬|놔|요|{_RUN_ASK})?"
+# 아이템 구매 "사 줘"(2026-11-27 사람 결정 : 구매도 명령형이면 바로 실행)
+# "사"만은 "감사"에 걸려 꼬리 필수
+_RUN_BUY = rf"사(줘|줘요|주세요|주라|{_RUN_ASK})"
+_RUN_NOW = re.compile(rf"(?:{_RUN_HA}{_RUN_HA_TAIL}|{_RUN_EO}{_RUN_EO_TAIL}|{_RUN_BUY}|기록)$")
+_RUN_ASKING = re.compile(rf"{_RUN_ASK}$")
+
+
+def commands_now(text: str) -> bool:
+    """쓰기 명령형 문장("…기록해 줘"·"…지워 줘"·"…4kg 기록") : 빈 칸이 없으면 첫 턴에 바로 실행
+    - 물음표로 끝나면 "해 줄래?"처럼 부탁꼴만 명령, "등록해?"는 물음
+    - 동사 없는 말("코코 체중 4kg")·물음꼴("등록할까?")은 거짓"""
+    compact = _compact_reply(text)
+    if not _RUN_NOW.search(compact):
+        return False
+    asking = text.rstrip().endswith("?")
+    return not asking or bool(_RUN_ASKING.search(compact))
+
+
+def says_delete(text: str) -> bool:
+    """삭제 동사(삭제·지워·없애)가 든 말 : 삭제 카드는 이 말이어야 실행 (2026-11-25)"""
+    return bool(_DELETE_WORD.search(_compact_reply(text)))
+
+
+def says_proceed(text: str) -> bool:
+    """'진행' 말 : 등록·삭제가 섞인 카드의 확인 말"""
+    return bool(_PROCEED_WORD.search(_compact_reply(text)))
+
+
+def says_card_verb(text: str) -> str | None:
+    """도구별 동사 확인 말("수락해 줘"·"응 구매해")이면 그 동사, 아니면 None"""
+    match = _CARD_VERB_SAID.match(_compact_reply(text))
+    return match.group("verb") if match else None
 
 
 def action_reply_kind(text: str) -> str | None:
@@ -708,6 +788,132 @@ READ_TRUNCATED = "\n(결과가 길어 앞부분만 보냄)"
 READ_FAILED = "기록을 불러오지 못함. 앱의 해당 화면에서 확인하라고 안내한다."
 # 결과를 받은 뒤 읽기 도구가 아닌 도구를 고름 : 실행하지 않고 받은 결과로 답하게
 READ_NOT_RUN = "이 도구는 실행하지 않음. 앞서 받은 결과만으로 답한다."
+# 첫 응답에 읽기 도구와 같이 고른 카드·이동 (2026-11-26 동시 도구) : 결과를 본 뒤 다시 고르게
+READ_LATER = "이 도구는 아직 실행하지 않음. 읽은 결과를 본 뒤 필요하면 다시 고른다."
+# 한 턴 도구 상한에 걸림 : 더 부르지 않고 지금까지 받은 결과로 답하게 (에이전트 루프)
+TOOL_LIMIT_REACHED = (
+    "이 턴에는 도구를 더 부를 수 없어 실행하지 않음. 지금까지 받은 결과만으로 답하고, "
+    "못 확인한 것은 앱 화면에서 보라고 안내한다."
+)
+
+
+# 에이전트 ③ (docs/design/agent.md 2·5·6절, 2026-11-26)
+# 카드 뒤 할 일이 남은 문장 : 쓰기 동사 뒤 이어 주는 말 + 다른 일(읽기·비교·다른 쓰기)
+_AGENT_MORE = re.compile(
+    r"(하고|한\s*뒤|한\s*다음|하고\s*나서|그리고|고\s*나서|만들고|넣고|바꾸고|고치고|지우고|잡고)"
+    r".*(알려|확인|비교|보여|봐|어때|어떤지|얼마|늘었|줄었|넣어|추가|등록|기록|만들어|바꿔|수정)"
+)
+# 쓰기 동사 : 원래 문장에 쓰기가 몇 개 있는지(말하지 않은 쓰기 막기)
+_WRITE_VERB = re.compile(
+    r"기록|등록|추가|넣|만들|수정|바꾸|바꿔|변경|고쳐|삭제|지워|지우|체크|저장|잡아|잡고"
+)
+
+
+def agent_more(text: str) -> bool:
+    """카드를 실행한 뒤 LLM이 할 일이 남았을 수 있는 문장인지 : 참일 때만 done.pending
+    - "체중 4.2kg 기록하고 지난주보다 늘었는지 알려 줘"·"검진기록 만들고 수치도 넣어 줘" : 참
+    - "산책 30분 기록해 줘" 같은 단순 명령 하나 : 거짓(지금 흐름과 같음)"""
+    return _AGENT_MORE.search(text) is not None
+
+
+# 쓰기 뒤 묻는 말 : 카드를 실행한 뒤 읽기·답이 남음 (에이전트 ④)
+_AGENT_ASK = re.compile(
+    r"(하고|한\s*뒤|한\s*다음|하고\s*나서|그리고|고\s*나서|만들고|넣고|바꾸고|고치고|지우고|잡고)"
+    r".*(알려|확인|비교|보여|봐|어때|어떤지|얼마|늘었|줄었)"
+)
+
+
+def agent_pending(text: str, executed: int) -> bool:
+    """done.pending을 줄 문장인지 (에이전트 ④, 2026-11-26)
+    - executed : 이 턴에서 실행이 끝났거나 이번에 실행할 카드 수
+    - 쓰기 뒤 묻는 말이 있거나(읽기·답이 남음) 문장의 쓰기 동사가 executed보다 많을 때만 참
+    - "체중 기록하고 산책도 기록해 줘"를 카드 두 장으로 실행하면 거짓(남은 일 없음)"""
+    if not agent_more(text):
+        return False
+    return _AGENT_ASK.search(text) is not None or write_count(text) > executed
+
+
+# 쓰기 동사 + 이어 주는 말("기록하고"·"만들고") : 카드 뒤 다른 일이 이어지는 명령
+_AGENT_COMMAND = re.compile(
+    r"(기록하|등록하|추가하|수정하|변경하|삭제하|체크하|저장하|만들|넣|바꾸|고치|지우|잡)고"
+)
+
+
+def agent_command(text: str) -> bool:
+    """에이전트 이어 가기용 명령 : "체중 4.2kg 기록하고 늘었는지 알려 줘"처럼 쓰기 동사 뒤 다른 일
+    - 문장 끝이 읽기 말("알려 줘")이라 commands_now는 거짓이지만 앞 쓰기는 명령이다
+    - 물음표로 끝나면 부탁꼴만(commands_now와 같음). 이어 가기 키가 있을 때만 쓴다"""
+    compact = _compact_reply(text)
+    if not _AGENT_COMMAND.search(compact) or not agent_more(text):
+        return False
+    asking = text.rstrip().endswith("?")
+    return not asking or bool(_RUN_ASKING.search(compact))
+
+
+def write_count(text: str) -> int:
+    """문장 속 쓰기 동사 수 : 이어 가기에서 이미 실행한 카드 수보다 많을 때만 새 카드를 바로 실행"""
+    return len(_WRITE_VERB.findall(text))
+
+
+# 이어 가기 LLM에 주는 진행 기록 : 원래 질문 뒤에 붙임(회원이 새로 한 말이 아님)
+AGENT_NOTES_HEAD = (
+    "[이 턴 진행 기록 — 서버가 붙인 것, 회원이 새로 한 말이 아님]\n"
+    "위 질문을 처리하던 중 확인 카드를 실행했고 결과는 아래와 같다."
+)
+AGENT_NOTES_TAIL = (
+    "질문에서 남은 일이 있으면 이어서 도구를 부르고, 다 했으면 결과를 바탕으로 짧게 답한다. "
+    "'실행 완료'인 일은 이미 저장된 것이다. 다시 하지 않고, "
+    "저장 전이라거나 확인 말을 해 달라고 하지 않는다. "
+    "'취소'·'다시 하지 않음'이라고 적힌 일도 다시 하지 않는다. "
+    "번호 칸(…_sn)은 진행 기록과 읽기 결과에 나온 번호만 쓴다."
+)
+AGENT_READ_NOTE = "읽기 {tool} 결과:\n{result}"
+# 실행 전에 읽은 결과 : 실행한 기록이 빠져 있으므로 답에 쓰려면 같은 읽기 도구를 다시 부르게
+AGENT_STALE_READ_NOTE = (
+    "읽기 {tool} 결과(쓰기 실행 전이라 방금 실행한 기록은 빠져 있음. "
+    "답에 쓰려면 이 읽기 도구를 다시 부른다):"
+)
+AGENT_DONE_NOTE = "- 실행 완료: {label} ({tool}) 입력 {input}"
+AGENT_DONE_DATA = " · 저장 결과 {data}"
+AGENT_FIX_NOTE = (
+    "- 실행 실패: {label} ({tool}) 입력 {input}. 다시 확인할 칸: {names}. "
+    "이 칸만 고친 같은 도구를 한 번 부른다."
+)
+AGENT_FAILED_NOTE = "- 실행 실패: {label} ({tool}). 다시 하지 않음."
+AGENT_CANCELED_NOTE = "- 회원이 취소: {label} ({tool}). 다시 하지 않음."
+# 바로 실행하고 결과를 받아 이어 가는 카드(done.pending)의 tool_result : 남은 일은 지금 답하지 않음
+AGENT_RUN_SHOWN = (
+    "확인 카드를 만듦. 카드 내용: {summary}. 회원이 바로 하라고 했으므로 이 턴에 실행된다. "
+    "질문의 남은 일(조회·비교 등)은 실행 결과를 받은 뒤 이어서 하므로 지금 답하지 않는다. "
+    "확인을 묻지 말고 카드 내용을 짧게 보여 준 뒤 '등록하고 이어서 알려 드릴게요.'로 끝낸다. "
+    "카드에서 확인하라거나 확인 말을 해 달라고 하지 않는다."
+)
+# 같은 쓰기 반복 막기 (6절 7번) : 이미 실행한 카드와 같은 도구·같은 값
+AGENT_ALREADY_DONE = (
+    "이 일은 이 턴에서 이미 실행했으므로 카드를 다시 만들지 않음. "
+    "다시 저장하지 말고 지금까지의 결과로 답한다."
+)
+# 이어 갈 일이 없음(취소만·고칠 수 없는 실패만) : LLM 없이 저장하는 짧은 글
+AGENT_STOPPED = "남은 일은 이어서 하지 않았어요."
+
+# 2026-11-27 frontend-dc ② : 바로 실행된 턴의 답에 확인 말 안내("'등록해 줘'라고 말해")가 남음
+_ASKS_CONFIRM = re.compile(r"'(등록|수정|삭제|진행|지정|구매|수락|거절|종료|저장)해\s*줘'\s*라고")
+
+
+def asks_confirm(text: str) -> bool:
+    """답 글이 확인 말을 해 달라고 안내하는지 : 바로 실행(execute)된 턴이면 어긋난 안내"""
+    return _ASKS_CONFIRM.search(text) is not None
+
+
+# 2026-11-27 frontend-dc ③ : 이력에 같은 결과 글(✔)이 있는 쓰기는 바로 실행하지 않고 확인 카드로
+WRITE_REPEAT_NOTICE = (
+    "방금 같은 기록을 저장했어요. 한 번 더 저장하려면 '등록해 줘'라고 말해 주세요."
+)
+# READ 뒤 카드 길 : LLM에 주는 tool_result(ACTION_SHOWN 뒤에 붙임)
+WRITE_REPEAT_SHOWN = (
+    "이 대화에서 방금 같은 내용을 저장했으므로 바로 실행하지 않음. "
+    "같은 기록을 이미 저장했다고 먼저 알린다."
+)
 
 
 _DATE_HEAD = re.compile(r"\d{4}-\d{2}-\d{2}(?![\d])")
@@ -725,19 +931,68 @@ def _with_weekday(text: str) -> str:
     return f"{match.group()} ({WEEKDAYS[day.weekday()]}){text[match.end() :]}"
 
 
-def _drop_free_text(value: object) -> object:
-    # 내용(…Cn) 칸 : 메모·자유 입력 글이라 외부 AI API로 보내지 않음
+def _with_weekdays(value: object) -> object:
+    # 날짜에 요일을 붙임. 내용(…Cn) 칸(알레르기·메모 등)도 그대로 넘김(2026-11-25 결정)
     if isinstance(value, dict):
-        return {k: _drop_free_text(v) for k, v in value.items() if not k.endswith("Cn")}
+        return {k: _with_weekdays(v) for k, v in value.items()}
     if isinstance(value, list):
-        return [_drop_free_text(item) for item in value]
+        return [_with_weekdays(item) for item in value]
     if isinstance(value, str):
         return _with_weekday(value)
     return value
 
 
 def read_result_text(data: object, max_chars: int = READ_RESULT_MAX_CHARS) -> str:
-    text = json.dumps(_drop_free_text(data), ensure_ascii=False, default=str)
+    text = json.dumps(_with_weekdays(data), ensure_ascii=False, default=str)
     if len(text) <= max_chars:
         return text
     return text[:max_chars] + READ_TRUNCATED
+
+
+# 반려동물 수정 카드의 목록 칸(알레르기·질환·특징) 합치기 (2026-11-25)
+# Java PATCH는 칸 전체를 바꾸므로, 말한 항목을 지금 값에 더하거나 빼서 카드에 싣는다
+LIST_ADD = "add"
+LIST_REMOVE = "remove"
+LIST_REPLACE = "replace"
+_LIST_REMOVE_WORDS = re.compile(r"빼|삭제|지워|지우|제거|없애|없어졌|나았")
+_LIST_ADD_WORDS = re.compile(r"추가|넣어|넣고|더해|생겼|도\s*있")
+_LIST_REPLACE_WORDS = re.compile(r"바꿔|바꾸|변경|고쳐|수정|만\s*(남|있)")
+
+
+def list_edit_mode(text: str) -> str:
+    """빼는 말 > 더하는 말 > 바꾸는 말. 아무것도 없으면 더하기(지금 값을 잃지 않음)"""
+    if _LIST_REMOVE_WORDS.search(text):
+        return LIST_REMOVE
+    if _LIST_ADD_WORDS.search(text):
+        return LIST_ADD
+    if _LIST_REPLACE_WORDS.search(text):
+        return LIST_REPLACE
+    return LIST_ADD
+
+
+def _list_items(value: object) -> list[str]:
+    if not isinstance(value, str):
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _list_key(item: str) -> str:
+    return re.sub(r"\s+", "", item)
+
+
+def merge_list(current: object, said: object, mode: str) -> str:
+    """쉼표 목록 합치기 : 같은 항목은 띄어쓰기만 달라도 하나로. 다 빼면 빈 글(Java가 비움)"""
+    new = _list_items(said)
+    if mode == LIST_REPLACE:
+        return ",".join(new)
+    old = _list_items(current)
+    if mode == LIST_REMOVE:
+        gone = {_list_key(item) for item in new}
+        return ",".join(item for item in old if _list_key(item) not in gone)
+    keys = {_list_key(item) for item in old}
+    added = []
+    for item in new:
+        if _list_key(item) not in keys:
+            keys.add(_list_key(item))
+            added.append(item)
+    return ",".join(old + added)

@@ -1,7 +1,8 @@
+import asyncio
 import base64
 import logging
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import date
 from functools import lru_cache
@@ -14,7 +15,7 @@ from anthropic.types import Message
 from fastapi import Depends
 from pydantic import BaseModel, ValidationError
 
-from app.chat import rules, tools
+from app.chat import rules, tools, turnlog
 from app.chat.schemas import ImageIntentJudgement, ImageIntentKind
 from app.core.config import Settings, get_settings
 from app.core.llm import get_anthropic_client
@@ -161,6 +162,70 @@ def get_title_generator(
     return AnthropicTitleGenerator(get_anthropic_client(settings), settings.llm_model, usage)
 
 
+# 추가 요청(2026-11-24) : 컨텍스트 요약 상한
+SUMMARY_MAX_LENGTH = 2000
+SUMMARY_MAX_TOKENS = 4096
+CONVERSATION_SUMMARY_SYSTEM = (
+    "반려동물 케어 앱의 AI 대화창 대화를 다음 대화에서 이어 쓸 요약으로 줄인다. "
+    "이전 요약이 있으면 그 내용을 잃지 말고 새 대화와 합친다. "
+    "반려동물 이름, 회원이 알려 준 사실(증상·체중·식사·일정 등), 회원의 요청과 그 결과를 남긴다. "
+    "각 사실 앞에 그 말이 나온 날짜(예: 11월 3일)를 붙인다. "
+    "끝난 등록·수정·취소는 결과만 한 줄로 쓰고, 확인을 기다리는 카드나 초안의 칸 값은 쓰지 않는다. "
+    "대화에 없는 내용을 덧붙이지 않는다. "
+    "한국어 짧은 문장 목록으로 2,000자를 넘지 않게, 요약만 쓴다."
+)
+
+
+class ConversationSummarizer(Protocol):
+    # 실패·거절이면 빈 문자열 : 요약 저장 안 함
+    async def summarize(self, previous: str | None, transcript: str) -> str: ...
+
+
+class AnthropicConversationSummarizer:
+    # 클라이언트는 요약할 때 만듦 : 키 없는 환경에서 메시지 전송 의존성이 502로 막히지 않게
+    def __init__(self, settings: Settings, usage: UsageReporter = NO_USAGE):
+        self.settings = settings
+        self.usage = usage
+
+    async def summarize(self, previous: str | None, transcript: str) -> str:
+        client = get_anthropic_client(self.settings)
+        started = time.monotonic()
+        content = f"이전 요약:\n{previous or '없음'}\n\n새 대화:\n{transcript}"
+        try:
+            response = await client.messages.create(
+                model=self.settings.llm_model,
+                max_tokens=SUMMARY_MAX_TOKENS,
+                system=CONVERSATION_SUMMARY_SYSTEM,
+                messages=[{"role": "user", "content": content}],
+                output_config={"effort": LLM_EFFORT},
+            )
+        except anthropic.APIError as error:
+            self.usage.record(errored(ExternalApi.CHAT, started, error))
+            _log_failure("대화 요약", started, _failure_reason(error))
+            return ""
+        if response.stop_reason == "refusal":
+            self.usage.record(failed(ExternalApi.CHAT, started, "refusal", response.usage))
+            _log_failure("대화 요약", started, "refusal")
+            return ""
+        self.usage.record(succeeded(ExternalApi.CHAT, started, response.usage))
+        text = next((block.text for block in response.content if block.type == "text"), "")
+        summary = text.strip()[:SUMMARY_MAX_LENGTH]
+        logger.info(
+            "LLM 대화 요약: 입력 %d자 → %d자 (%.0fms)",
+            len(content),
+            len(summary),
+            (time.monotonic() - started) * 1000,
+        )
+        return summary
+
+
+def get_conversation_summarizer(
+    settings: Annotated[Settings, Depends(get_settings)],
+    usage: Annotated[UsageReporter, Depends(get_usage_reporter)] = NO_USAGE,
+) -> ConversationSummarizer:
+    return AnthropicConversationSummarizer(settings, usage)
+
+
 class ClassifyError(Exception):
     """도구 고르기 LLM 장애(API 오류·시간 초과). reason은 로그용 실패 종류(원문 없음)"""
 
@@ -245,6 +310,18 @@ class ToolDecision:
     call: tools.ToolCall | None = None
     text: AsyncIterator[str] | None = None
     content: tuple[dict, ...] = ()
+    # 프로그래밍식 도구 호출 : content 앞의 코드 실행 왕복(assistant·user 턴)과 그 컨테이너
+    history: tuple[dict, ...] = ()
+    container: str | None = None
+    # 한 응답의 direct 도구 전부(첫 번째가 call, 2026-11-26 동시 도구). 비면 (call,)
+    calls: tuple[tools.ToolCall, ...] = ()
+    # call 말고 실행한 도구의 결과(tool_use id, 결과 글) : answer가 tool_result로 같이 보냄
+    results: tuple[tuple[str, str], ...] = ()
+
+    def all_calls(self) -> tuple[tools.ToolCall, ...]:
+        if self.calls:
+            return self.calls
+        return (self.call,) if self.call is not None else ()
 
 
 class ReadMore(str):
@@ -253,19 +330,33 @@ class ReadMore(str):
 
 # 결과 답변 중 LLM이 고른 도구 실행 : 결과 글, 실행하지 않은 도구면 None
 FollowRead = Callable[[tools.ToolCall], Awaitable[str | None]]
-# 한 턴 READ 최대 횟수(첫 고르기 포함) : 첫 글자 제한 10초가 고르기·Java·라운드마다 LLM을 덮음
-READ_LIMIT = 3
-# 결과 답변에서 도구를 고르는 최대 횟수 : 두 번째부터는 follow가 ReadMore를 줄 때만
-# READ_LIMIT번 읽은 뒤에도 쓰기 카드를 한 번 고를 수 있게 READ_LIMIT과 같음
-FOLLOW_ROUNDS = READ_LIMIT
+# 한 턴 도구 호출 상한(첫 고르기·한 응답 여럿·결과 뒤 도구 합쳐) : 맴도는 루프 끊기
+# 단계당 약 2초라 8번이면 15~20초, 평가·turnlog agent_limit을 보고 조정
+TOOL_LIMIT = 8
+# 결과 답변에서 도구를 고르는 최대 바퀴 : 두 번째부터는 follow가 ReadMore를 줄 때만
+# 바퀴마다 도구 한 번 이상이라 보통 TOOL_LIMIT이 먼저 막음
+FOLLOW_ROUNDS = TOOL_LIMIT
+# 프로그래밍식 도구 호출 시험 (2026-11-26) : 코드 실행 안 읽기 도구 호출 상한(한 턴)
+# TOOL_LIMIT과 따로 셈. 넘는 호출은 서버가 오류 글로 답함
+PTC_CALL_LIMIT = 20
+# 코드 실행 왕복 상한(한 턴) : 상한 넘는 호출도 오류 글로 왕복하므로 끝없는 반복 막기
+PTC_ROUNDS = PTC_CALL_LIMIT + 2
+# 코드 안 도구 실행 : 결과 글(코드에 그대로 돌려줌)
+CodeRun = Callable[[tools.ToolCall], Awaitable[str]]
 
 
 class ToolAgent(Protocol):
     # docs/design/tool-calling.md 4절 : 분류·목차 선택·등록 칸 추출을 도구 고르기 한 번으로
     # decide 장애면 ClassifyError, 글 스트림 장애면 AnswerError
-    # answer의 follow : 있으면 결과를 본 LLM이 도구를 더 고름(한 턴 READ 최대 READ_LIMIT번)
+    # answer의 follow : 있으면 결과를 본 LLM이 도구를 더 고름(한 턴 도구 최대 TOOL_LIMIT번)
+    # code : 프로그래밍식 도구 호출을 켠 에이전트(ptc)에만 넘김. 코드 안 읽기 도구 실행
     async def decide(
-        self, messages: list[dict], max_tokens: int, today: date, hint: rules.RouteRow | None = None
+        self,
+        messages: list[dict],
+        max_tokens: int,
+        today: date,
+        hint: rules.RouteRow | None = None,
+        code: CodeRun | None = None,
     ) -> ToolDecision: ...
 
     def answer(
@@ -276,19 +367,51 @@ class ToolAgent(Protocol):
         max_tokens: int,
         today: date,
         follow: FollowRead | None = None,
+        code: CodeRun | None = None,
     ) -> AsyncIterator[str]: ...
+
+    # 에이전트 ③ 이어 가기(agent-continue) : 원래 질문에 이 턴 진행 기록(notes)을 붙여 다시 고르기
+    async def resume(
+        self, messages: list[dict], notes: str, max_tokens: int, today: date
+    ) -> ToolDecision: ...
+
+
+def with_notes(messages: list[dict], notes: str) -> list[dict]:
+    """이어 가기 메시지 : 마지막 사용자 메시지(원래 질문) 뒤에 진행 기록을 붙인 복사본
+    Messages API는 user·assistant가 번갈아야 해 새 user 턴 대신 같은 턴에 덧붙임"""
+    if not messages or messages[-1].get("role") != "user":
+        return [*messages, {"role": "user", "content": notes}]
+    last = messages[-1]
+    content = last["content"]
+    if isinstance(content, str):
+        joined: str | list = f"{content}\n\n{notes}"
+    else:
+        joined = [*content, {"type": "text", "text": notes}]
+    return [*messages[:-1], {**last, "content": joined}]
 
 
 # 확인 카드는 채팅 확인 말로 실행 (2026-11-13) : 버튼을 누르라고 안내하지 않게 (2026-11-20)
+# 2026-11-26 추가-2 : "✔ 관찰 항목 등록 — …" 뒤 "등록 됐어?"에 "아직 등록되지 않았다"고 답함
+ACTION_RESULT_RULE = (
+    "- '✔'로 시작하는 결과 글은 저장(등록·수정·삭제)이 끝난 것이고, "
+    "'취소됨 —'·'실패 —'로 시작하는 결과 글은 저장되지 않은 것이다. "
+    "저장됐는지 물으면 가장 최근 결과 글대로 답하고, 끝난 카드에 확인 말을 다시 하라고 하지 않는다."
+)
 CHAT_CONFIRM_RULE = (
     "- 확인 카드는 버튼이 아니라 대화로 확인한다. 카드를 묻거나 저장 방법을 물으면 "
-    "'등록해 줘'(수정 카드는 '수정해 줘', 섞이면 '진행해 줘')라고 말해 달라고 안내하고, "
-    "버튼을 누르라고 하지 않는다."
+    "'등록해 줘'(수정 카드는 '수정해 줘', 삭제 카드는 '삭제해 줘', 섞이면 '진행해 줘')라고 "
+    "말해 달라고 안내하고, "
+    "버튼을 누르라고 하지 않는다. "
+    # 2026-11-27 frontend-dc ② : 바로 실행된 카드에 "카드에서 확인하신 뒤 '등록해 줘'라고…"
+    "도구 결과에 '이 턴에 실행된다'고 적힌 카드는 확인 말을 안내하지 않는다."
 )
 TOOL_RULES = (
     "도구\n"
-    "- 회원의 말에 맞는 도구가 있으면 그 도구 하나만 부른다. "
+    "- 회원의 말에 맞는 도구가 있으면 그 도구를 부른다. "
     "도구를 부를 때는 앞에 글을 쓰지 않는다.\n"
+    # 한 응답 도구 여럿 (2026-11-26) : 읽기 도구는 동시에 실행. T96 : 이력의 답 없는 질문은 빼고
+    "- 한 메시지에 서로 다른 기록을 함께 물으면 읽기 도구를 한 번에 여럿 부를 수 있다. "
+    "지금 질문에 필요한 도구만 부르고, 이력의 앞 질문은 다시 조회하지 않는다.\n"
     "- 서비스 범위 안의 반려동물 건강·생활 정보 질문은 도구 없이 바로 답한다.\n"
     "- 두 도구가 다 맞아 보이면 도구 없이 무엇을 원하는지 짧게 되묻는다.\n"
     "- 도구 인자는 회원이 말한 것만 채우고 모르는 칸은 비운다.\n"
@@ -304,7 +427,7 @@ TOOL_RULES = (
     "- search_guide 결과를 받은 뒤 더 부를 도구가 없으면 받은 안내로 바로 답한다. "
     "함께 물은 기록은 다시 물어 달라고 한 문장 덧붙인다.\n"
     # 한 메시지 여러 명령 ② (2026-11-19) : 쓰기 도구는 하나씩, 카드 결과 뒤 남은 쓰기 도구
-    "- 한 메시지에 쓰기 요청(기록·등록·수정)이 여럿이면 앞의 것 하나를 부르고, "
+    "- 한 메시지에 쓰기 요청(기록·등록·수정·삭제)이 여럿이면 앞의 것 하나를 부르고, "
     "확인 카드 결과를 받은 뒤 남은 쓰기 요청의 도구를 부른다. 남은 것이 없으면 글을 쓰지 않는다.\n"
     "- 기록을 읽어 답한 뒤 회원이 다른 반려동물 이름만 말해도 같은 읽기 도구를 다시 부른다.\n"
     "- 읽기 결과의 '조회한 반려동물'을 답에 밝히고, "
@@ -321,25 +444,40 @@ TOOL_RULES = (
     "글로 되묻지 않고 쓰기 도구를 부른다. 반려동물은 서버가 정하고, 못 정하면 서버가 카드에서 "
     "고르게 한다. 이전 AI 메시지의 '…가 둘이에요' 같은 되물음을 따라 쓰지 않는다.\n"
     # 2026-11-20 검증 관찰 : 앞서 띄운 확인 카드를 "실제 카드는 뜨지 않았어요"라고 부정
-    "- 이전 AI 메시지 중 '이렇게 할까요?'로 시작하는 글과 '등록할게요·수정할게요·진행할게요'·"
+    "- 이전 AI 메시지 중 '이렇게 할까요?'로 시작하는 글과 "
+    "'등록할게요·수정할게요·삭제할게요·진행할게요'·"
     "'✔ …' 결과 글은 서버가 실제로 띄운 확인 카드와 그 결과다. "
     "카드가 없었다거나 그 안내가 잘못이었다고 말하지 않는다.\n"
     # 2026-11-20 검증 관찰 : 카드를 묻는 말에 "[확인]을 눌러 주세요"라고 함(채팅 확인과 어긋남)
+    f"{ACTION_RESULT_RULE}\n"
     f"{CHAT_CONFIRM_RULE}\n"
 )
 
 
-def tool_system() -> str:
-    return _tool_system(rules.routing_table())
+# 프로그래밍식 도구 호출 시험 (2026-11-26) : 켰을 때만 TOOL_RULES 뒤에 붙임
+PTC_RULES = (
+    "- 기록을 여러 번 읽어 합치거나 비교·계산해야 하면(목록 뒤 상세 여러 건, 두 기록 함께, "
+    "기간 비교, 여러 반려동물의 값 모으기) code_execution 안에서 읽기 도구를 불러 "
+    "답에 필요한 값만 print한다. 읽기 도구는 결과 글(str)을 돌려준다: 반려동물마다 "
+    "'조회한 반려동물: 이름' 줄과 JSON 한 덩어리이고 덩어리 사이는 빈 줄이다. "
+    "불러오지 못하면 JSON이 아닌 안내 글이다.\n"
+    "- 쓰기(기록·등록·수정·삭제)·navigate·search_guide·decline 도구는 코드에서 부르지 않고 "
+    "코드 밖에서 부른다.\n"
+)
 
 
-@lru_cache(maxsize=2)
-def _tool_system(table: tuple[rules.RouteRow, ...]) -> str:
+def tool_system(ptc: bool = False) -> str:
+    return _tool_system(rules.routing_table(), ptc)
+
+
+@lru_cache(maxsize=4)
+def _tool_system(table: tuple[rules.RouteRow, ...], ptc: bool = False) -> str:
     # 매핑표가 같으면 같은 글 : 도구 정의와 함께 캐시(tools → system 순서로 캐시 앞부분)
     scope = SERVICE_SCOPE
     guide_rules = GUIDE_RULES.removesuffix("\n\n안내서\n")
+    rules_text = TOOL_RULES + (PTC_RULES if ptc else "")
     return (
-        f"{ANSWER_SYSTEM.replace(PRIVATE_DATA_RULE, TOOL_DATA_RULE)}\n\n{scope}\n{TOOL_RULES}\n"
+        f"{ANSWER_SYSTEM.replace(PRIVATE_DATA_RULE, TOOL_DATA_RULE)}\n\n{scope}\n{rules_text}\n"
         f"search_guide 결과로 받은 안내서로 답할 때\n{guide_rules}\n\n"
         f"화면 목록(번호. 화면명: 키워드)\n{tools.screen_list()}\n\n"
         f"안내서 목차(번호 화면명 · 할 일)\n{_guide_toc()}"
@@ -360,10 +498,12 @@ def _tool_hint(hint: rules.RouteRow | None) -> str:
     )
 
 
-def tool_system_blocks(today: date, hint: rules.RouteRow | None = None) -> list[dict]:
+def tool_system_blocks(
+    today: date, hint: rules.RouteRow | None = None, ptc: bool = False
+) -> list[dict]:
     # 오늘 날짜·키워드 힌트는 요청마다 달라 캐시 뒤 블록
     blocks: list[dict] = [
-        {"type": "text", "text": tool_system(), "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": tool_system(ptc), "cache_control": {"type": "ephemeral"}},
         {"type": "text", "text": f"오늘: {today.isoformat()} ({rules.WEEKDAYS[today.weekday()]})"},
     ]
     note = _tool_hint(hint)
@@ -376,10 +516,45 @@ def tool_system_blocks(today: date, hint: rules.RouteRow | None = None) -> list[
     return blocks
 
 
-# 도구는 한 번에 하나 : 답 없는 질문이 이력에 둘이면 tool_use를 여럿 냄(2026-11-06 방 143 재현)
-# none에는 붙일 수 없음(400 Extra inputs)
-TOOL_CHOICE_AUTO = {"type": "auto", "disable_parallel_tool_use": True}
+# 한 응답에 도구 여럿(2026-11-26 팀 합의, disable_parallel_tool_use 뺌) : READ는 동시에 실행
+# 답 없는 질문이 이력에 둘일 때 여럿 내던 문제(2026-11-06 방 143)는 TOOL_RULES "지금 질문만"으로
+TOOL_CHOICE_AUTO = {"type": "auto"}
 TOOL_CHOICE_NONE = {"type": "none"}
+# 프로그래밍식 도구 호출(LLM_PTC) : 이제 같은 값(disable_parallel_tool_use와 같이 못 쓰던 것)
+TOOL_CHOICE_PTC = TOOL_CHOICE_AUTO
+
+
+def _is_code_call(block: object) -> bool:
+    # 코드 실행이 부른 도구 : caller.type이 code_execution_…(direct가 아님)
+    if getattr(block, "type", None) != "tool_use":
+        return False
+    caller = getattr(block, "caller", None)
+    return caller is not None and getattr(caller, "type", "direct") != "direct"
+
+
+def _code_calls(final: Message) -> list:
+    return [block for block in final.content if _is_code_call(block)]
+
+
+def _direct_uses(final: Message) -> list:
+    return [b for b in final.content if b.type == "tool_use" and not _is_code_call(b)]
+
+
+def _parsed(uses: list) -> tuple[tools.ToolCall, ...]:
+    return tuple(
+        tools.parse(use.name, use.input if isinstance(use.input, dict) else {}, use.id)
+        for use in uses
+    )
+
+
+def _code_pending(final: Message) -> bool:
+    # 코드 결과를 기다리거나(코드 안 도구 호출) 서버가 턴을 멈춤(pause_turn)
+    return final.stop_reason == "pause_turn" or bool(_code_calls(final))
+
+
+def _container_id(final: Message, previous: str | None) -> str | None:
+    container = getattr(final, "container", None)
+    return getattr(container, "id", None) or previous
 
 
 def _stream_failure(error: Exception) -> str:
@@ -391,7 +566,8 @@ def _stream_failure(error: Exception) -> str:
 class AnthropicToolAgent:
     """[도구 고르기 LLM]
     - 스트리밍 한 번 : 첫 블록이 글이면 그대로 답변, 도구면 끝까지 받아 인자 검증
-    - on_usage : 평가 스크립트의 토큰 집계용(앱은 없음)"""
+    - on_usage : 평가 스크립트의 토큰 집계용(앱은 없음)
+    - ptc : 프로그래밍식 도구 호출 시험(tools.PTC_CODE·PTC_BOTH), None이면 지금 방식"""
 
     def __init__(
         self,
@@ -399,21 +575,39 @@ class AnthropicToolAgent:
         model: str,
         on_usage: Callable[[str, object], None] | None = None,
         usage: UsageReporter = NO_USAGE,
+        ptc: str | None = None,
     ):
         self.client = client
         self.model = model
         self.on_usage = on_usage
         self.usage = usage
+        self.ptc = ptc
 
-    def _request(self, messages: list[dict], max_tokens: int, system: list[dict]) -> dict:
-        return {
+    def _request(
+        self,
+        messages: list[dict],
+        max_tokens: int,
+        system: list[dict],
+        container: str | None = None,
+    ) -> dict:
+        request = {
             "model": self.model,
             "max_tokens": max_tokens,
             "system": system,
-            "tools": list(tools.tool_definitions()),
+            "tools": list(tools.tool_definitions(self.ptc)),
             "messages": messages,
             "output_config": {"effort": LLM_EFFORT},
         }
+        if container:
+            # 코드 결과를 기다리는 중이면 필수(없으면 400), 아니어도 같은 컨테이너를 이어 씀
+            request["container"] = container
+        return request
+
+    def _system(self, today: date, hint: rules.RouteRow | None = None) -> list[dict]:
+        return tool_system_blocks(today, hint, ptc=self.ptc is not None)
+
+    def _auto(self) -> dict:
+        return TOOL_CHOICE_AUTO
 
     async def _events(self, request: dict) -> AsyncIterator[object]:
         # 원시 이벤트 뒤에 마지막으로 완성 메시지 : 글 스트림이 같은 호출을 이어 읽게
@@ -422,44 +616,161 @@ class AnthropicToolAgent:
                 yield event
             yield await stream.get_final_message()
 
+    async def _continue(self, current: list[dict], final: Message, code: CodeRun) -> list[dict]:
+        # 코드 안 도구를 모두 실행해 tool_result만 담은 user 턴으로(글 블록 넣으면 400)
+        content = [block.model_dump(exclude_none=True) for block in final.content]
+        turns = [*current, {"role": "assistant", "content": content}]
+        calls = _code_calls(final)
+        if not calls:
+            # pause_turn : assistant 턴 그대로 다시 보내면 서버가 이어 감
+            return turns
+        parsed = [
+            tools.parse(b.name, b.input if isinstance(b.input, dict) else {}, b.id) for b in calls
+        ]
+        results = await asyncio.gather(*(code(call) for call in parsed))
+        logger.info("코드 안 도구 %d개: %s", len(parsed), ",".join(c.name for c in parsed))
+        return [
+            *turns,
+            {
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": block.id, "content": result}
+                    for block, result in zip(calls, results, strict=True)
+                ],
+            },
+        ]
+
     async def decide(
-        self, messages: list[dict], max_tokens: int, today: date, hint: rules.RouteRow | None = None
+        self,
+        messages: list[dict],
+        max_tokens: int,
+        today: date,
+        hint: rules.RouteRow | None = None,
+        code: CodeRun | None = None,
     ) -> ToolDecision:
-        started = time.monotonic()
-        request = self._request(messages, max_tokens, tool_system_blocks(today, hint))
-        request["tool_choice"] = TOOL_CHOICE_AUTO
-        events = self._events(request)
-        final = None
-        try:
-            async for event in events:
-                if isinstance(event, Message):
-                    final = event
-                elif event.type == "content_block_start" and event.content_block.type == "text":
-                    return ToolDecision(text=self._texts(events, started, "도구 답변"))
-        except (anthropic.APIError, httpx2.HTTPError) as error:
-            self.usage.record(errored(ExternalApi.CHAT, started, error))
-            reason = _stream_failure(error)
-            _log_failure("도구 고르기", started, reason)
-            await events.aclose()
-            raise ClassifyError(reason) from None
-        if final is None or final.stop_reason == "refusal":
-            reason = (final.stop_reason if final else None) or "no_output"
-            self._record_failure(final, started, reason)
-            _log_failure("도구 고르기", started, reason)
-            return ToolDecision()
-        self._log(final, "도구 고르기", started)
-        use = next((block for block in final.content if block.type == "tool_use"), None)
-        if use is None:
-            return ToolDecision()
-        call = tools.parse(use.name, use.input if isinstance(use.input, dict) else {}, use.id)
-        content = tuple(block.model_dump(exclude_none=True) for block in final.content)
-        logger.info("LLM 도구: %s 인자 %s", call.name, "통과" if call.args else "거부")
-        return ToolDecision(call=call, content=content)
+        current = messages
+        container: str | None = None
+        for _ in range(PTC_ROUNDS if code is not None else 1):
+            started = time.monotonic()
+            request = self._request(current, max_tokens, self._system(today, hint), container)
+            request["tool_choice"] = self._auto()
+            events = self._events(request)
+            final = None
+            try:
+                async for event in events:
+                    if isinstance(event, Message):
+                        final = event
+                    elif event.type == "content_block_start" and event.content_block.type == "text":
+                        more = self._more(current, container, code, max_tokens, today)
+                        return ToolDecision(text=self._texts(events, started, "도구 답변", more))
+            except (anthropic.APIError, httpx2.HTTPError) as error:
+                self.usage.record(errored(ExternalApi.CHAT, started, error))
+                reason = _stream_failure(error)
+                _log_failure("도구 고르기", started, reason)
+                await events.aclose()
+                raise ClassifyError(reason) from None
+            if final is None or final.stop_reason == "refusal":
+                reason = (final.stop_reason if final else None) or "no_output"
+                self._record_failure(final, started, reason)
+                _log_failure("도구 고르기", started, reason)
+                return ToolDecision()
+            self._log(final, "도구 고르기", started)
+            container = _container_id(final, container)
+            if code is not None and _code_pending(final):
+                current = await self._continue(current, final, code)
+                continue
+            calls = _parsed(_direct_uses(final))
+            if not calls:
+                return ToolDecision()
+            content = tuple(block.model_dump(exclude_none=True) for block in final.content)
+            for call in calls:
+                logger.info("LLM 도구: %s 인자 %s", call.name, "통과" if call.args else "거부")
+            return ToolDecision(
+                call=calls[0],
+                content=content,
+                history=tuple(current[len(messages) :]),
+                container=container,
+                calls=calls,
+            )
+        logger.warning("코드 실행 왕복 상한(%d): 도구 고르기 끝", PTC_ROUNDS)
+        turnlog.tag(turnlog.CODE_ROUNDS)
+        return ToolDecision()
+
+    def _more(
+        self,
+        current: list[dict],
+        container: str | None,
+        code: CodeRun | None,
+        max_tokens: int,
+        today: date,
+        rounds: int = PTC_ROUNDS,
+    ) -> "Callable[[Message], AsyncIterator[str]] | None":
+        # 글 뒤 코드 실행 : 글은 이미 흘렸으므로 코드 결과를 돌려주고 이어지는 글을 더 흘림
+        if code is None or rounds <= 0:
+            return None
+
+        def resume(final: Message) -> AsyncIterator[str]:
+            return self._code_text(current, final, container, code, max_tokens, today, rounds)
+
+        return resume
+
+    async def _code_text(
+        self,
+        current: list[dict],
+        final: Message,
+        container: str | None,
+        code: CodeRun,
+        max_tokens: int,
+        today: date,
+        rounds: int,
+    ) -> AsyncIterator[str]:
+        for left in range(rounds - 1, -1, -1):
+            current = await self._continue(current, final, code)
+            container = _container_id(final, container)
+            started = time.monotonic()
+            request = self._request(current, max_tokens, self._system(today), container)
+            request["tool_choice"] = self._auto()
+            events = self._events(request)
+            next_final = None
+            try:
+                async for event in events:
+                    if isinstance(event, Message):
+                        next_final = event
+                    elif event.type == "content_block_start" and event.content_block.type == "text":
+                        more = self._more(current, container, code, max_tokens, today, left)
+                        async for text in self._texts(events, started, "코드 뒤 답변", more):
+                            yield text
+                        return
+            except (anthropic.APIError, httpx2.HTTPError) as error:
+                self.usage.record(errored(ExternalApi.CHAT, started, error))
+                reason = _stream_failure(error)
+                _log_failure("코드 뒤 답변", started, reason)
+                raise AnswerError(reason) from None
+            finally:
+                await events.aclose()
+            if next_final is None or next_final.stop_reason == "refusal":
+                reason = (next_final.stop_reason if next_final else None) or "no_output"
+                self._record_failure(next_final, started, reason)
+                _log_failure("코드 뒤 답변", started, reason)
+                raise AnswerError(reason)
+            self._log(next_final, "코드 뒤 답변", started)
+            if not _code_pending(next_final):
+                # 글 뒤 코드 다음에 고른 direct 도구 : 글 답변 중이라 쓰지 않음
+                logger.warning("LLM 코드 뒤 답변: 글 없이 끝남")
+                return
+            final = next_final
+        logger.warning("코드 실행 왕복 상한(%d): 코드 뒤 답변 끝", PTC_ROUNDS)
+        turnlog.tag(turnlog.CODE_ROUNDS)
 
     async def _texts(
-        self, events: AsyncIterator[object], started: float, task: str
+        self,
+        events: AsyncIterator[object],
+        started: float,
+        task: str,
+        more: "Callable[[Message], AsyncIterator[str]] | None" = None,
     ) -> AsyncIterator[str]:
         length = 0
+        pending: Message | None = None
         try:
             async for event in events:
                 if isinstance(event, Message):
@@ -467,7 +778,12 @@ class AnthropicToolAgent:
                         self._record_failure(event, started, "refusal")
                         _log_failure(task, started, "refusal")
                         raise AnswerError("refusal")
-                    if any(block.type == "tool_use" for block in event.content):
+                    if more is not None and _code_pending(event):
+                        # 글 뒤 코드 실행(프로그래밍식 도구 호출) : 이어서 결과를 돌려줌
+                        turnlog.tag(turnlog.TEXT_THEN_CODE)
+                        logger.info("LLM %s: 글 뒤 코드 실행 이어 감", task)
+                        pending = event
+                    elif any(block.type == "tool_use" for block in event.content):
                         # 글 뒤 도구 : 1단계는 글만 사용, 평가에서 건수 확인
                         logger.warning("LLM %s: 글 뒤 도구 호출 무시", task)
                     self._log(event, task, started, length)
@@ -481,6 +797,9 @@ class AnthropicToolAgent:
             raise AnswerError(reason) from None
         finally:
             await events.aclose()
+        if pending is not None and more is not None:
+            async for text in more(pending):
+                yield text
 
     async def answer(
         self,
@@ -490,21 +809,32 @@ class AnthropicToolAgent:
         max_tokens: int,
         today: date,
         follow: FollowRead | None = None,
+        code: CodeRun | None = None,
     ) -> AsyncIterator[str]:
         # 서버 도구 결과를 돌려준 뒤 같은 대화로 답변
         # follow 있음 : 첫 블록이 글이면 그대로, 도구면 실행 후 도구 없이(LLM 3번).
         # follow가 ReadMore를 주면 FOLLOW_ROUNDS까지 도구를 더 고를 수 있음(LLM 최대 2 + 라운드 수)
-        current = with_result(messages, decision.content, decision.call, result)
+        # code 있음 : 코드 실행 왕복은 라운드에 세지 않음(호출 수는 code가 PTC_CALL_LIMIT로 셈)
+        container = decision.container
+        current = with_result(
+            [*messages, *decision.history],
+            decision.content,
+            decision.call,
+            result,
+            dict(decision.results),
+        )
         if follow is None:
-            request = self._request(current, max_tokens, tool_system_blocks(today))
+            request = self._request(current, max_tokens, self._system(today), container)
             request["tool_choice"] = TOOL_CHOICE_NONE
             events = self._events(request)
             async for text in self._texts(events, time.monotonic(), "도구 결과 답변"):
                 yield text
             return
-        for round_no in range(1, FOLLOW_ROUNDS + 1):
-            request = self._request(current, max_tokens, tool_system_blocks(today))
-            request["tool_choice"] = TOOL_CHOICE_AUTO
+        round_no = 0
+        code_rounds = 0
+        while round_no < FOLLOW_ROUNDS:
+            request = self._request(current, max_tokens, self._system(today), container)
+            request["tool_choice"] = self._auto()
             started = time.monotonic()
             events = self._events(request)
             final = None
@@ -513,7 +843,8 @@ class AnthropicToolAgent:
                     if isinstance(event, Message):
                         final = event
                     elif event.type == "content_block_start" and event.content_block.type == "text":
-                        async for text in self._texts(events, started, "도구 결과 답변"):
+                        more = self._more(current, container, code, max_tokens, today)
+                        async for text in self._texts(events, started, "도구 결과 답변", more):
                             yield text
                         return
             except (anthropic.APIError, httpx2.HTTPError) as error:
@@ -529,26 +860,47 @@ class AnthropicToolAgent:
                 _log_failure("도구 결과 답변", started, reason)
                 raise AnswerError(reason)
             self._log(final, "도구 결과 답변", started)
-            use = next((block for block in final.content if block.type == "tool_use"), None)
-            if use is None:
+            container = _container_id(final, container)
+            if code is not None and _code_pending(final):
+                code_rounds += 1
+                if code_rounds > PTC_ROUNDS:
+                    logger.warning("코드 실행 왕복 상한(%d): 도구 결과 답변", PTC_ROUNDS)
+                    turnlog.tag(turnlog.CODE_ROUNDS)
+                    raise AnswerError("code_rounds")
+                current = await self._continue(current, final, code)
+                continue
+            round_no += 1
+            calls = _parsed(_direct_uses(final))
+            if not calls:
                 _log_failure("도구 결과 답변", started, "no_output")
                 raise AnswerError("no_output")
-            call = tools.parse(use.name, use.input if isinstance(use.input, dict) else {}, use.id)
-            logger.info(
-                "LLM 결과 뒤 도구(%d): %s 인자 %s",
-                round_no,
-                call.name,
-                "통과" if call.args else "거부",
-            )
-            second = await follow(call)
+            for call in calls:
+                logger.info(
+                    "LLM 결과 뒤 도구(%d): %s 인자 %s",
+                    round_no,
+                    call.name,
+                    "통과" if call.args else "거부",
+                )
+            outs = await follow_all(follow, calls)
             content = tuple(block.model_dump(exclude_none=True) for block in final.content)
-            current = with_result(current, content, call, second or rules.READ_NOT_RUN)
-            if not isinstance(second, ReadMore):
+            pairs = zip(calls, outs, strict=True)
+            results = {call.use_id: out or rules.READ_NOT_RUN for call, out in pairs}
+            current = with_result(current, content, calls[0], results[calls[0].use_id], results)
+            if not all(isinstance(out, ReadMore) for out in outs):
                 break
-        request = self._request(current, max_tokens, tool_system_blocks(today))
+        else:
+            logger.info("결과 뒤 도구 바퀴 상한(%d): 지금까지 결과로 답", FOLLOW_ROUNDS)
+            turnlog.tag(turnlog.AGENT_LIMIT)
+        request = self._request(current, max_tokens, self._system(today), container)
         request["tool_choice"] = TOOL_CHOICE_NONE
         async for text in self._texts(self._events(request), time.monotonic(), "도구 결과 답변"):
             yield text
+
+    async def resume(
+        self, messages: list[dict], notes: str, max_tokens: int, today: date
+    ) -> ToolDecision:
+        # 이어 가기 첫 고르기 : 원래 질문 + 진행 기록으로 decide와 같은 고르기(도구 목록 그대로)
+        return await self.decide(with_notes(messages, notes), max_tokens, today)
 
     def _record_failure(self, final: Message | None, started: float, reason: str) -> None:
         usage = final.usage if final is not None else None
@@ -572,24 +924,51 @@ class AnthropicToolAgent:
         )
 
 
+def _is_direct_block(block: dict) -> bool:
+    caller = block.get("caller") or {}
+    return block.get("type") == "tool_use" and caller.get("type", "direct") == "direct"
+
+
+async def follow_all(follow: FollowRead, calls: Sequence[tools.ToolCall]) -> list[str | None]:
+    """한 응답의 도구 여럿 실행 (2026-11-26) : 읽기 도구는 동시에, 나머지(카드·이동)는 차례로
+    결과는 calls 순서. 카드 1장·READ 횟수 규칙은 follow가 그대로 지킴"""
+    outs: dict[int, str | None] = {}
+    reads = [no for no, call in enumerate(calls) if tools.read_entry(call.name) is not None]
+    if len(reads) > 1:
+        logger.info("한 응답 읽기 도구 %d개 동시 실행", len(reads))
+    done = await asyncio.gather(*(follow(calls[no]) for no in reads))
+    outs.update(zip(reads, done, strict=True))
+    for no, call in enumerate(calls):
+        if no not in outs:
+            outs[no] = await follow(call)
+    return [outs[no] for no in range(len(calls))]
+
+
 def with_result(
-    messages: list[dict], content: tuple[dict, ...], call: tools.ToolCall | None, result: str
+    messages: list[dict],
+    content: tuple[dict, ...],
+    call: tools.ToolCall | None,
+    result: str,
+    results: dict[str, str] | None = None,
 ) -> list[dict]:
     # tool_use마다 tool_result 필수(없으면 Anthropic 400) : 실행한 도구만 결과, 나머지는 실행 안 함
+    # results : call 말고 결과가 있는 도구(tool_use id -> 결과 글, 한 응답 도구 여럿)
+    # 코드 실행이 부른 tool_use는 그 왕복에서 이미 결과를 줬으므로 direct만
     use_id = call.use_id if call is not None else ""
-    ids = [block["id"] for block in content if block.get("type") == "tool_use"] or [use_id]
-    results = [
+    given = {**(results or {}), use_id: result}
+    ids = [block["id"] for block in content if _is_direct_block(block)] or [use_id]
+    results_ = [
         {
             "type": "tool_result",
             "tool_use_id": block_id,
-            "content": result if block_id == use_id else rules.READ_NOT_RUN,
+            "content": given.get(block_id, rules.READ_NOT_RUN),
         }
         for block_id in ids
     ]
     return [
         *messages,
         {"role": "assistant", "content": list(content)},
-        {"role": "user", "content": results},
+        {"role": "user", "content": results_},
     ]
 
 
@@ -598,7 +977,11 @@ def get_tool_agent(
     usage: Annotated[UsageReporter, Depends(get_usage_reporter)] = NO_USAGE,
 ) -> ToolAgent:
     # 2026-11-09 결정 : 대화창 판정은 항상 도구 흐름(끄는 설정 없음)
-    return AnthropicToolAgent(get_anthropic_client(settings), settings.llm_model, usage=usage)
+    # 프로그래밍식 도구 호출 시험(2026-11-26) : LLM_PTC를 켜면 읽기 도구를 코드에서만
+    ptc = tools.PTC_CODE if settings.llm_ptc else None
+    return AnthropicToolAgent(
+        get_anthropic_client(settings), settings.llm_model, usage=usage, ptc=ptc
+    )
 
 
 class RegisterExtractor(Protocol):

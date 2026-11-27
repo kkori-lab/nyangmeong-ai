@@ -1,7 +1,232 @@
 {
-  "version": "78946e7523f4d41762ac57a3c65d07ae9fea85be79822bff924f325c76ee9444",
-  "structureVersion": "0dbc59b3c5f4a0d565ef6c017590b0861c63ab546a26d26808a9bff3a5f705ca",
+  "version": "fc7d0140f7f7afeff9bd46743cf6ba3b70e014d6dac7acf774d551ff6425f868",
+  "structureVersion": "d1fe62d7b2fb38bfbdedf8d950f6c12799d3be6932dc5faa086f8bc91f54cbad",
   "tools": [
+    {
+      "name": "accept_caregiver_invitation",
+      "domain": "pet",
+      "kind": "CARD",
+      "call": {"method": "POST", "path": "/api/caregiver-invitations/{jntBrupInvtnSn}/accept"},
+      "params": {
+        "jntBrupInvtnSn": {"in": "path", "type": "long", "required": true},
+        "petSns": {"in": "body", "type": "array", "required": true, "minItems": 1, "itemType": "long"}
+      },
+      "rules": []
+    },
+    {
+      "name": "cancel_care_completion",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/pets/{petSn}/care-completions/{careCmptnHstrySn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "careCmptnHstrySn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "cancel_caregiver_invitation",
+      "domain": "pet",
+      "kind": "CARD",
+      "call": {"method": "POST", "path": "/api/caregiver-invitations/{jntBrupInvtnSn}/cancel"},
+      "params": {
+        "jntBrupInvtnSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "cancel_last_dose",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/pets/{petSn}/care-items/{careArtclSn}/today-completion/last"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "careArtclSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "check_expense_duplicates",
+      "domain": "expense",
+      "kind": "READ",
+      "call": {"method": "POST", "path": "/api/expenses/duplicate-check"},
+      "params": {
+        "expndYmd": {"in": "body", "type": "date", "required": true},
+        "expndClsfCd": {"in": "body", "type": "code", "group": "MYPG05", "required": true},
+        "dtlMttr": {"in": "body", "type": "string", "maxLength": 1000},
+        "expndPlcusNm": {"in": "body", "type": "string", "maxLength": 80},
+        "recptSn": {"in": "body", "type": "long"},
+        "expndInptMthCd": {"in": "body", "type": "code", "group": "MYPG06", "required": true},
+        "lines": {"in": "body", "type": "array", "required": true, "minItems": 1, "items": {"petSn": {"type": "long"}, "expndAmt": {"type": "long", "required": true, "min": 1, "max": 9999999999999}, "idmptDmndId": {"type": "string", "maxLength": 100, "generated": "uuid"}}}
+      },
+      "rules": []
+    },
+    {
+      "name": "check_receipt_save",
+      "domain": "expense",
+      "kind": "READ",
+      "call": {"method": "POST", "path": "/api/receipts/{recptSn}/save-check"},
+      "params": {
+        "recptSn": {"in": "path", "type": "long", "required": true},
+        "ckupYmd": {"in": "body", "type": "date", "required": true},
+        "pets": {"in": "body", "type": "array", "required": true, "minItems": 1, "items": {"petSn": {"type": "long", "required": true}, "amt": {"type": "long"}, "expenseYn": {"type": "boolean"}}}
+      },
+      "rules": []
+    },
+    {
+      "name": "delete_care_item",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/pets/{petSn}/care-items/{careArtclSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "careArtclSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "delete_caregiver_invitation",
+      "domain": "pet",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/caregiver-invitations/{jntBrupInvtnSn}"},
+      "params": {
+        "jntBrupInvtnSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "delete_checkup",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/pets/{petSn}/checkups/{ckupRcdSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "ckupRcdSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "delete_daily_health_record",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/pets/{petSn}/daily-health-records/{dailyHlthRcdSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "dailyHlthRcdSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "delete_etc_inspection",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/pets/{petSn}/etc-inspections/{etcInspSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "etcInspSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "delete_expense",
+      "domain": "expense",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/expenses/{expndSn}"},
+      "params": {
+        "expndSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "delete_expenses",
+      "domain": "expense",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/expenses"},
+      "params": {
+        "expndSn": {"in": "query", "type": "array", "required": true, "minItems": 1, "itemType": "long"}
+      },
+      "rules": []
+    },
+    {
+      "name": "delete_expenses_by_condition",
+      "domain": "expense",
+      "kind": "CARD",
+      "call": {"method": "POST", "path": "/api/expenses/bulk-delete"},
+      "params": {
+        "expectedCnt": {"in": "body", "type": "int", "required": true, "min": 1},
+        "startYmd": {"in": "body", "type": "date"},
+        "endYmd": {"in": "body", "type": "date"},
+        "petSn": {"in": "body", "type": "long"},
+        "common": {"in": "body", "type": "boolean"},
+        "expndClsfCd": {"in": "body", "type": "code", "group": "MYPG05"},
+        "excludeExpndSn": {"in": "body", "type": "array", "itemType": "long"}
+      },
+      "rules": []
+    },
+    {
+      "name": "delete_observation_cycle",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/pets/{petSn}/observation-cycles/{obsrvCyclSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "obsrvCyclSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "delete_pet",
+      "domain": "pet",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/pets/{petSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "delete_place_bookmark",
+      "domain": "place",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/place-bookmarks/{plcBkmkSn}"},
+      "params": {
+        "plcBkmkSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "delete_prescription",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/pets/{petSn}/prescriptions/{prscSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "prscSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "delete_repeat_prevention",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/pets/{petSn}/repeat-preventions/{reptPrvntMngSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "reptPrvntMngSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "delete_schedule",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/pets/{petSn}/care-schedules/{schdlSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "schdlSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
     {
       "name": "draft_care_completion",
       "domain": "health",
@@ -51,6 +276,48 @@
       ]
     },
     {
+      "name": "draft_caregiver_invitation",
+      "domain": "pet",
+      "kind": "CARD",
+      "call": {"method": "POST", "path": "/api/caregiver-invitations"},
+      "params": {
+        "invtnTrgtEml": {"in": "body", "type": "string", "required": true, "maxLength": 254},
+        "petSns": {"in": "body", "type": "array", "required": true, "minItems": 1, "itemType": "long"}
+      },
+      "rules": []
+    },
+    {
+      "name": "draft_checkup",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "POST", "path": "/api/pets/{petSn}/checkups"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "ckupYmd": {"in": "body", "type": "date", "required": true},
+        "hsptlNm": {"in": "body", "type": "string", "required": true, "maxLength": 80},
+        "ckupTypeCd": {"in": "body", "type": "code", "group": "HLTG01", "required": true},
+        "ckupCn": {"in": "body", "type": "string", "maxLength": 500},
+        "ckupMemoCn": {"in": "body", "type": "string", "maxLength": 200},
+        "schdlSn": {"in": "body", "type": "long"}
+      },
+      "rules": []
+    },
+    {
+      "name": "draft_checkup_update",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "PATCH", "path": "/api/pets/{petSn}/checkups/{ckupRcdSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "ckupRcdSn": {"in": "path", "type": "long", "required": true},
+        "hsptlNm": {"in": "body", "type": "string", "maxLength": 80},
+        "ckupTypeCd": {"in": "body", "type": "code", "group": "HLTG01"},
+        "ckupCn": {"in": "body", "type": "string", "maxLength": 500},
+        "ckupMemoCn": {"in": "body", "type": "string", "maxLength": 200}
+      },
+      "rules": []
+    },
+    {
       "name": "draft_daily_health_record",
       "domain": "health",
       "kind": "CARD",
@@ -69,6 +336,59 @@
         {"requiredIf": {"field": "rcdNvl", "when": "dailyRcdIdctCd", "equals": "HLTC0016"}},
         {"requiredIf": {"field": "rcdNvl", "when": "dailyRcdIdctCd", "equals": "HLTC0018"}}
       ]
+    },
+    {
+      "name": "draft_daily_health_record_update",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "PATCH", "path": "/api/pets/{petSn}/daily-health-records/{dailyHlthRcdSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "dailyHlthRcdSn": {"in": "path", "type": "long", "required": true},
+        "rcdDt": {"in": "body", "type": "datetime"},
+        "rcdNvl": {"in": "body", "type": "decimal", "precision": 7, "scale": 2},
+        "crsdSttsCd": {"in": "body", "type": "code", "group": "HLTG10", "maxLength": 8}
+      },
+      "rules": []
+    },
+    {
+      "name": "draft_equipped_items",
+      "domain": "pet",
+      "kind": "CARD",
+      "call": {"method": "PUT", "path": "/api/pixel-characters/{pixelCharSn}/equipped-items"},
+      "params": {
+        "pixelCharSn": {"in": "path", "type": "long", "required": true},
+        "hldItemSns": {"in": "body", "type": "array", "required": true, "itemType": "long"}
+      },
+      "rules": []
+    },
+    {
+      "name": "draft_etc_inspection",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "POST", "path": "/api/pets/{petSn}/etc-inspections"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "ckupRcdSn": {"in": "body", "type": "long", "required": true},
+        "inspNm": {"in": "body", "type": "string", "required": true, "maxLength": 100},
+        "inspRsltCn": {"in": "body", "type": "string", "required": true, "maxLength": 500},
+        "memoCn": {"in": "body", "type": "string", "maxLength": 200}
+      },
+      "rules": []
+    },
+    {
+      "name": "draft_etc_inspection_update",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "PATCH", "path": "/api/pets/{petSn}/etc-inspections/{etcInspSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "etcInspSn": {"in": "path", "type": "long", "required": true},
+        "inspNm": {"in": "body", "type": "string", "maxLength": 100},
+        "inspRsltCn": {"in": "body", "type": "string", "maxLength": 500},
+        "memoCn": {"in": "body", "type": "string", "maxLength": 200}
+      },
+      "rules": []
     },
     {
       "name": "draft_expense",
@@ -114,6 +434,20 @@
       "rules": []
     },
     {
+      "name": "draft_inspection_value_update",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "PATCH", "path": "/api/pets/{petSn}/inspection-values/{inspNvlSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "inspNvlSn": {"in": "path", "type": "long", "required": true},
+        "rsltNvl": {"in": "body", "type": "decimal", "min": 0, "precision": 9, "scale": 2},
+        "unitNm": {"in": "body", "type": "string", "maxLength": 20},
+        "memoCn": {"in": "body", "type": "string", "maxLength": 200}
+      },
+      "rules": []
+    },
+    {
       "name": "draft_inspection_values",
       "domain": "health",
       "kind": "CARD",
@@ -122,6 +456,56 @@
         "petSn": {"in": "path", "type": "long", "required": true},
         "ckupRcdSn": {"in": "body", "type": "long", "required": true},
         "values": {"in": "body", "type": "array", "required": true, "minItems": 1, "items": {"inspArtclCd": {"type": "code", "group": "HLTG12", "maxLength": 8}, "inspArtclDrctInptNm": {"type": "string", "maxLength": 40}, "rsltNvl": {"type": "decimal", "required": true, "min": 0, "precision": 9, "scale": 2}, "unitNm": {"type": "string", "required": true, "maxLength": 20}, "refLlmtNvl": {"type": "decimal", "min": 0, "precision": 9, "scale": 2}, "refUplmtNvl": {"type": "decimal", "min": 0, "precision": 9, "scale": 2}, "memoCn": {"type": "string", "maxLength": 200}}}
+      },
+      "rules": []
+    },
+    {
+      "name": "draft_item_purchase",
+      "domain": "pet",
+      "kind": "CARD",
+      "call": {"method": "POST", "path": "/api/pixel-characters/{pixelCharSn}/held-items"},
+      "params": {
+        "pixelCharSn": {"in": "path", "type": "long", "required": true},
+        "idmptDmndId": {"in": "body", "type": "string", "maxLength": 100, "generated": "uuid"},
+        "itemSns": {"in": "body", "type": "array", "required": true, "minItems": 1, "itemType": "long"}
+      },
+      "rules": []
+    },
+    {
+      "name": "draft_member_nickname_update",
+      "domain": "member",
+      "kind": "CARD",
+      "call": {"method": "PATCH", "path": "/api/members/me/nickname"},
+      "params": {
+        "mbrNcnm": {"in": "body", "type": "string", "required": true, "maxLength": 10, "pattern": "^[가-힣A-Za-z0-9]*$"}
+      },
+      "rules": []
+    },
+    {
+      "name": "draft_member_profile_update",
+      "domain": "member",
+      "kind": "CARD",
+      "call": {"method": "PATCH", "path": "/api/members/me", "contentType": "multipart/form-data"},
+      "params": {
+        "profilePhoto": {"in": "body", "type": "file"},
+        "profilePhotoReset": {"in": "body", "type": "boolean"}
+      },
+      "rules": []
+    },
+    {
+      "name": "draft_notification_settings",
+      "domain": "notification",
+      "kind": "CARD",
+      "call": {"method": "PUT", "path": "/api/members/me/notification-settings"},
+      "params": {
+        "emlNotiRcptnYn": {"in": "body", "type": "boolean", "required": true},
+        "inappNotiRcptnYn": {"in": "body", "type": "boolean", "required": true},
+        "careSchdlNotiRcptnYn": {"in": "body", "type": "boolean", "required": true},
+        "leadTimes": {"in": "body", "type": "array", "required": true, "itemType": "string", "values": ["TODAY", "D1", "D3", "D7"]},
+        "mtchDlngNotiRcptnYn": {"in": "body", "type": "boolean", "required": true},
+        "cmntNotiRcptnYn": {"in": "body", "type": "boolean", "required": true},
+        "lostExpryNotiRcptnYn": {"in": "body", "type": "boolean", "required": true},
+        "expndLimNotiRcptnYn": {"in": "body", "type": "boolean", "required": true}
       },
       "rules": []
     },
@@ -135,6 +519,22 @@
         "obsrvArtclSn": {"in": "body", "type": "long", "required": true},
         "file": {"in": "body", "type": "file", "required": true},
         "obsrvDt": {"in": "body", "type": "datetime", "required": true},
+        "obsrvSz": {"in": "body", "type": "decimal", "precision": 7, "scale": 2},
+        "obsrvChgCd": {"in": "body", "type": "code", "group": "HLTG17", "maxLength": 8},
+        "memoCn": {"in": "body", "type": "string", "maxLength": 200}
+      },
+      "rules": []
+    },
+    {
+      "name": "draft_observation_cycle_update",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "PATCH", "path": "/api/pets/{petSn}/observation-cycles/{obsrvCyclSn}", "contentType": "multipart/form-data"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "obsrvCyclSn": {"in": "path", "type": "long", "required": true},
+        "file": {"in": "body", "type": "file"},
+        "obsrvDt": {"in": "body", "type": "datetime"},
         "obsrvSz": {"in": "body", "type": "decimal", "precision": 7, "scale": 2},
         "obsrvChgCd": {"in": "body", "type": "code", "group": "HLTG17", "maxLength": 8},
         "memoCn": {"in": "body", "type": "string", "maxLength": 200}
@@ -159,6 +559,38 @@
       "rules": []
     },
     {
+      "name": "draft_pet",
+      "domain": "pet",
+      "kind": "CARD",
+      "call": {"method": "POST", "path": "/api/pets"},
+      "params": {
+        "petNm": {"in": "body", "type": "string", "required": true, "maxLength": 20},
+        "petSeCd": {"in": "body", "type": "code", "group": "PETG01", "required": true},
+        "vrtySn": {"in": "body", "type": "long"},
+        "vrtyDrctInptNm": {"in": "body", "type": "string", "maxLength": 40},
+        "petBrdt": {"in": "body", "type": "date", "required": true},
+        "chipNo": {"in": "body", "type": "string", "pattern": "^([0-9]{12}|[0-9]{15})?$"},
+        "petGndrCd": {"in": "body", "type": "code", "group": "PETG02", "required": true},
+        "nutrYn": {"in": "body", "type": "boolean", "required": true},
+        "petBdwg": {"in": "body", "type": "decimal", "required": true, "max": 200, "positive": true, "precision": 5, "scale": 2},
+        "goalBdwg": {"in": "body", "type": "decimal", "max": 200, "positive": true, "precision": 5, "scale": 2},
+        "minBdwg": {"in": "body", "type": "decimal", "max": 200, "positive": true, "precision": 5, "scale": 2},
+        "maxBdwg": {"in": "body", "type": "decimal", "max": 200, "positive": true, "precision": 5, "scale": 2},
+        "bdwgRngDrctInptYn": {"in": "body", "type": "string", "pattern": "^[YN]$"},
+        "colrCd": {"in": "body", "type": "code", "group": "PETG03", "required": true},
+        "colrDrctInptNm": {"in": "body", "type": "string", "maxLength": 20},
+        "chrcCn": {"in": "body", "type": "string", "maxLength": 1000},
+        "algyCn": {"in": "body", "type": "string", "maxLength": 1000},
+        "dssCn": {"in": "body", "type": "string", "maxLength": 1000}
+      },
+      "rules": [
+        {"requiredIf": {"field": "colrDrctInptNm", "when": "colrCd", "equals": "PETC0017"}},
+        {"requiredIf": {"field": "minBdwg", "when": "bdwgRngDrctInptYn", "equals": "Y"}},
+        {"requiredIf": {"field": "maxBdwg", "when": "bdwgRngDrctInptYn", "equals": "Y"}},
+        {"oneOf": ["vrtySn", "vrtyDrctInptNm"]}
+      ]
+    },
+    {
       "name": "draft_pet_update",
       "domain": "pet",
       "kind": "CARD",
@@ -173,10 +605,10 @@
         "chipNo": {"in": "body", "type": "string", "pattern": "^([0-9]{12}|[0-9]{15})?$"},
         "petGndrCd": {"in": "body", "type": "code", "group": "PETG02", "minLength": 1},
         "nutrYn": {"in": "body", "type": "boolean"},
-        "petBdwg": {"in": "body", "type": "decimal", "positive": true, "precision": 5, "scale": 2},
-        "goalBdwg": {"in": "body", "type": "decimal", "positive": true, "precision": 5, "scale": 2},
-        "minBdwg": {"in": "body", "type": "decimal", "positive": true, "precision": 5, "scale": 2},
-        "maxBdwg": {"in": "body", "type": "decimal", "positive": true, "precision": 5, "scale": 2},
+        "petBdwg": {"in": "body", "type": "decimal", "max": 200, "positive": true, "precision": 5, "scale": 2},
+        "goalBdwg": {"in": "body", "type": "decimal", "max": 200, "positive": true, "precision": 5, "scale": 2},
+        "minBdwg": {"in": "body", "type": "decimal", "max": 200, "positive": true, "precision": 5, "scale": 2},
+        "maxBdwg": {"in": "body", "type": "decimal", "max": 200, "positive": true, "precision": 5, "scale": 2},
         "bdwgRngDrctInptYn": {"in": "body", "type": "string", "pattern": "^[YN]$"},
         "colrCd": {"in": "body", "type": "code", "group": "PETG03", "minLength": 1},
         "colrDrctInptNm": {"in": "body", "type": "string", "maxLength": 20},
@@ -184,6 +616,68 @@
         "algyCn": {"in": "body", "type": "string", "maxLength": 1000},
         "dssCn": {"in": "body", "type": "string", "maxLength": 1000},
         "goalBdwgReset": {"in": "body", "type": "boolean"}
+      },
+      "rules": []
+    },
+    {
+      "name": "draft_place_bookmark",
+      "domain": "place",
+      "kind": "CARD",
+      "call": {"method": "POST", "path": "/api/place-bookmarks"},
+      "params": {
+        "plcSn": {"in": "body", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "draft_prescription",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "POST", "path": "/api/pets/{petSn}/prescriptions"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "ckupRcdSn": {"in": "body", "type": "long", "required": true},
+        "mdcnNm": {"in": "body", "type": "string", "required": true, "maxLength": 40},
+        "mdcnBgngYmd": {"in": "body", "type": "date", "required": true},
+        "mdcnEndYmd": {"in": "body", "type": "date", "required": true},
+        "dayMdcnNmtm": {"in": "body", "type": "int", "required": true, "min": 1, "max": 9999},
+        "prscSttsCd": {"in": "body", "type": "code", "group": "HLTG06", "required": true},
+        "careRfltYn": {"in": "body", "type": "boolean"}
+      },
+      "rules": []
+    },
+    {
+      "name": "draft_prescription_update",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "PATCH", "path": "/api/pets/{petSn}/prescriptions/{prscSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "prscSn": {"in": "path", "type": "long", "required": true},
+        "mdcnNm": {"in": "body", "type": "string", "maxLength": 40},
+        "mdcnBgngYmd": {"in": "body", "type": "date"},
+        "mdcnEndYmd": {"in": "body", "type": "date"},
+        "dayMdcnNmtm": {"in": "body", "type": "int", "min": 1, "max": 9999},
+        "prscSttsCd": {"in": "body", "type": "code", "group": "HLTG06"},
+        "careRfltYn": {"in": "body", "type": "boolean"}
+      },
+      "rules": []
+    },
+    {
+      "name": "draft_receipt_checkup",
+      "domain": "expense",
+      "kind": "CARD",
+      "call": {"method": "POST", "path": "/api/receipts/{recptSn}/checkups"},
+      "params": {
+        "recptSn": {"in": "path", "type": "long", "required": true},
+        "petSn": {"in": "query", "type": "long", "required": true},
+        "idmptDmndId": {"in": "body", "type": "string", "maxLength": 100, "generated": "uuid"},
+        "ckupYmd": {"in": "body", "type": "date", "required": true},
+        "hsptlNm": {"in": "body", "type": "string", "required": true, "maxLength": 80},
+        "ckupTypeCd": {"in": "body", "type": "code", "group": "HLTG01", "required": true},
+        "ckupCn": {"in": "body", "type": "string", "maxLength": 500},
+        "ckupMemoCn": {"in": "body", "type": "string", "maxLength": 200},
+        "schdlSn": {"in": "body", "type": "long"}
       },
       "rules": []
     },
@@ -201,6 +695,23 @@
         "pets": {"in": "body", "type": "array", "required": true, "minItems": 1, "items": {"petSn": {"type": "long", "required": true}, "ckupTypeCd": {"type": "code", "group": "HLTG01", "required": true, "pattern": "HLTC000[1-5]"}, "ckupCn": {"type": "string", "maxLength": 500}, "ckupMemoCn": {"type": "string", "maxLength": 200}, "amt": {"type": "long"}, "expenseYn": {"type": "boolean"}, "schdlSn": {"type": "long"}, "drugs": {"type": "array", "items": {"mdcnNm": {"type": "string", "required": true, "maxLength": 40}, "mdcnBgngYmd": {"type": "date", "required": true}, "mdcnEndYmd": {"type": "date", "required": true}, "dayMdcnNmtm": {"type": "int", "required": true, "positive": true}, "prscSttsCd": {"type": "code", "group": "HLTG06", "required": true, "pattern": "HLTC001[01]"}}}}}
       },
       "rules": []
+    },
+    {
+      "name": "draft_repeat_prevention",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "POST", "path": "/api/pets/{petSn}/repeat-preventions"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "ckupRcdSn": {"in": "body", "type": "long", "required": true},
+        "reptPrvntArtclCd": {"in": "body", "type": "code", "group": "HLTG07", "required": true},
+        "reptCycleCd": {"in": "body", "type": "code", "group": "HLTG15", "required": true},
+        "cycleDrctInptDayCnt": {"in": "body", "type": "int", "min": 1, "max": 365},
+        "bgngYmd": {"in": "body", "type": "date", "required": true}
+      },
+      "rules": [
+        {"requiredIf": {"field": "cycleDrctInptDayCnt", "when": "reptCycleCd", "equals": "HLTC0042"}}
+      ]
     },
     {
       "name": "draft_schedule",
@@ -247,6 +758,65 @@
       "rules": []
     },
     {
+      "name": "end_observation_item",
+      "domain": "health",
+      "kind": "CARD",
+      "call": {"method": "POST", "path": "/api/pets/{petSn}/observation-items/{obsrvArtclSn}/end"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "obsrvArtclSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "get_care_match",
+      "domain": "community",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/care-matches/{petPrtcMtchSn}"},
+      "params": {
+        "petPrtcMtchSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "get_care_mission_progress",
+      "domain": "health",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/pets/{petSn}/care-items/mission-progress"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "get_care_recruitment",
+      "domain": "community",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/care-recruitments/{petPrtcRcrtSn}"},
+      "params": {
+        "petPrtcRcrtSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "get_caregiver_invitation",
+      "domain": "pet",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/caregiver-invitations/{jntBrupInvtnSn}"},
+      "params": {
+        "jntBrupInvtnSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "get_chat_unread_count",
+      "domain": "community",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/chat-rooms/unread-count"},
+      "params": {},
+      "rules": []
+    },
+    {
       "name": "get_checkup",
       "domain": "health",
       "kind": "READ",
@@ -282,6 +852,14 @@
       "rules": []
     },
     {
+      "name": "get_health_dashboard_widgets",
+      "domain": "health",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/members/me/dashboard-widgets"},
+      "params": {},
+      "rules": []
+    },
+    {
       "name": "get_health_indicators",
       "domain": "health",
       "kind": "READ",
@@ -292,6 +870,62 @@
       "rules": []
     },
     {
+      "name": "get_inquiry",
+      "domain": "support",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/inquiries/{otoInqrySn}"},
+      "params": {
+        "otoInqrySn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "get_lost_report",
+      "domain": "community",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/lost-reports/{lostTpofSn}"},
+      "params": {
+        "lostTpofSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "get_minimum_wage",
+      "domain": "community",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/care-recruitments/minimum-wage"},
+      "params": {},
+      "rules": []
+    },
+    {
+      "name": "get_news",
+      "domain": "community",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/news/{newsSn}"},
+      "params": {
+        "newsSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "get_notice",
+      "domain": "support",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/notices/{ntcMttrSn}"},
+      "params": {
+        "ntcMttrSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "get_notification_settings",
+      "domain": "notification",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/members/me/notification-settings"},
+      "params": {},
+      "rules": []
+    },
+    {
       "name": "get_pet",
       "domain": "pet",
       "kind": "READ",
@@ -299,6 +933,14 @@
       "params": {
         "petSn": {"in": "path", "type": "long", "required": true}
       },
+      "rules": []
+    },
+    {
+      "name": "get_pet_limit",
+      "domain": "pet",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/pets/limit"},
+      "params": {},
       "rules": []
     },
     {
@@ -345,6 +987,52 @@
       "params": {
         "recptSn": {"in": "path", "type": "long", "required": true},
         "petSn": {"in": "query", "type": "long"}
+      },
+      "rules": []
+    },
+    {
+      "name": "get_service_tutorial",
+      "domain": "member",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/members/me/tutorial"},
+      "params": {},
+      "rules": []
+    },
+    {
+      "name": "get_terms",
+      "domain": "member",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/terms/{trmsSn}"},
+      "params": {
+        "trmsSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "get_today_story",
+      "domain": "community",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/community-ai-commentaries"},
+      "params": {
+        "cmtryCrtrYmd": {"in": "query", "type": "date"}
+      },
+      "rules": []
+    },
+    {
+      "name": "get_unread_notification_count",
+      "domain": "notification",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/notifications/unread-count"},
+      "params": {},
+      "rules": []
+    },
+    {
+      "name": "list_breeds",
+      "domain": "pet",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/breeds"},
+      "params": {
+        "petSeCd": {"in": "query", "type": "code", "group": "PETG01", "required": true}
       },
       "rules": []
     },
@@ -397,6 +1085,20 @@
       "call": {"method": "GET", "path": "/api/pets/{petSn}/caregivers"},
       "params": {
         "petSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "list_checkup_attachments",
+      "domain": "health",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/pets/{petSn}/checkup-attachments"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "ckupRcdSn": {"in": "query", "type": "long"},
+        "atchTypeCd": {"in": "query", "type": "code", "group": "HLTG20"},
+        "page": {"in": "query", "type": "int", "min": 1},
+        "size": {"in": "query", "type": "int", "min": 1, "max": 50}
       },
       "rules": []
     },
@@ -514,6 +1216,18 @@
       "rules": []
     },
     {
+      "name": "list_inquiries",
+      "domain": "support",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/inquiries"},
+      "params": {
+        "inqryPrcsSttsCd": {"in": "query", "type": "code", "group": "CSCG03"},
+        "page": {"in": "query", "type": "int", "min": 1},
+        "size": {"in": "query", "type": "int", "min": 1, "max": 50}
+      },
+      "rules": []
+    },
+    {
       "name": "list_inspection_values",
       "domain": "health",
       "kind": "READ",
@@ -543,6 +1257,14 @@
       "rules": []
     },
     {
+      "name": "list_main_shortcuts",
+      "domain": "pet",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/pets/main-shortcuts"},
+      "params": {},
+      "rules": []
+    },
+    {
       "name": "list_my_care_schedules",
       "domain": "health",
       "kind": "READ",
@@ -565,6 +1287,30 @@
       "params": {
         "newsClsfCd": {"in": "query", "type": "code", "group": "CMUG06"},
         "keyword": {"in": "query", "type": "string"},
+        "page": {"in": "query", "type": "int", "min": 1},
+        "size": {"in": "query", "type": "int", "min": 1, "max": 50}
+      },
+      "rules": []
+    },
+    {
+      "name": "list_notices",
+      "domain": "support",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/notices"},
+      "params": {
+        "keyword": {"in": "query", "type": "string"},
+        "latestYn": {"in": "query", "type": "boolean"},
+        "page": {"in": "query", "type": "int", "min": 1},
+        "size": {"in": "query", "type": "int", "min": 1, "max": 50}
+      },
+      "rules": []
+    },
+    {
+      "name": "list_notifications",
+      "domain": "notification",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/notifications"},
+      "params": {
         "page": {"in": "query", "type": "int", "min": 1},
         "size": {"in": "query", "type": "int", "min": 1, "max": 50}
       },
@@ -627,16 +1373,24 @@
       "params": {
         "plcClsfCd": {"in": "query", "type": "code", "group": "PLCG01", "required": true},
         "keyword": {"in": "query", "type": "string", "maxLength": 100},
-        "swLat": {"in": "query", "type": "decimal"},
-        "swLot": {"in": "query", "type": "decimal"},
-        "neLat": {"in": "query", "type": "decimal"},
-        "neLot": {"in": "query", "type": "decimal"},
-        "cntrLat": {"in": "query", "type": "decimal"},
-        "cntrLot": {"in": "query", "type": "decimal"},
+        "swLat": {"in": "query", "type": "decimal", "min": -90, "max": 90},
+        "swLot": {"in": "query", "type": "decimal", "min": -180, "max": 180},
+        "neLat": {"in": "query", "type": "decimal", "min": -90, "max": 90},
+        "neLot": {"in": "query", "type": "decimal", "min": -180, "max": 180},
+        "cntrLat": {"in": "query", "type": "decimal", "min": -90, "max": 90},
+        "cntrLot": {"in": "query", "type": "decimal", "min": -180, "max": 180},
         "whole": {"in": "query", "type": "boolean"},
         "page": {"in": "query", "type": "int", "min": 1},
         "size": {"in": "query", "type": "int", "min": 1, "max": 50}
       },
+      "rules": []
+    },
+    {
+      "name": "list_point_ledger_months",
+      "domain": "pet",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/point-ledgers/months"},
+      "params": {},
       "rules": []
     },
     {
@@ -702,6 +1456,71 @@
       "params": {
         "pixelCharSn": {"in": "path", "type": "long", "required": true},
         "itemRegnCd": {"in": "query", "type": "code", "group": "MYPG01"}
+      },
+      "rules": []
+    },
+    {
+      "name": "list_terms",
+      "domain": "member",
+      "kind": "READ",
+      "call": {"method": "GET", "path": "/api/terms"},
+      "params": {},
+      "rules": []
+    },
+    {
+      "name": "mark_all_notifications_read",
+      "domain": "notification",
+      "kind": "CARD",
+      "call": {"method": "POST", "path": "/api/notifications/read-all"},
+      "params": {},
+      "rules": []
+    },
+    {
+      "name": "mark_notification_read",
+      "domain": "notification",
+      "kind": "CARD",
+      "call": {"method": "POST", "path": "/api/notifications/{inappNotiSn}/read"},
+      "params": {
+        "inappNotiSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "mark_service_tutorial_viewed",
+      "domain": "member",
+      "kind": "CARD",
+      "call": {"method": "PUT", "path": "/api/members/me/tutorial"},
+      "params": {},
+      "rules": []
+    },
+    {
+      "name": "reject_caregiver_invitation",
+      "domain": "pet",
+      "kind": "CARD",
+      "call": {"method": "POST", "path": "/api/caregiver-invitations/{jntBrupInvtnSn}/reject"},
+      "params": {
+        "jntBrupInvtnSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "set_representative_pet",
+      "domain": "pet",
+      "kind": "CARD",
+      "call": {"method": "POST", "path": "/api/pets/{petSn}/representative"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true}
+      },
+      "rules": []
+    },
+    {
+      "name": "unlink_caregiver",
+      "domain": "pet",
+      "kind": "CARD",
+      "call": {"method": "DELETE", "path": "/api/pets/{petSn}/caregivers/{brupRelSn}"},
+      "params": {
+        "petSn": {"in": "path", "type": "long", "required": true},
+        "brupRelSn": {"in": "path", "type": "long", "required": true}
       },
       "rules": []
     }

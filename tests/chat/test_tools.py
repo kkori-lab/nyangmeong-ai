@@ -23,6 +23,7 @@ from app.core.config import Settings
 from app.core.response import AppError
 from tests.chat.conftest import as_member
 from tests.chat.fakes import FakeToolAgent
+from tests.chat.new_tools import NEW_ACTION, NEW_READ
 from tests.chat.test_llm_clients import MODEL, FakeAnthropic, server_error, sse
 from tests.chat.test_messages import MessageJava, deltas, events, names, send
 from tests.chat.test_register import CHOCO, TODAY, Extractor, use_extractor
@@ -59,69 +60,99 @@ def room_of(client, java, pet_sn: int | None = None) -> int:
 
 def test_도구는_builtin_등록_READ이고_설명과_인자_스키마를_모델에서_뽑는다():
     defs = {d["name"]: d for d in tools.tool_definitions()}
-    assert set(defs) == {
-        "navigate",
-        "search_guide",
-        "draft_schedule",
-        "draft_care_item",
-        "decline",
-    } | {
-        "get_health_indicators",
-        "list_care_completions",
-        "list_care_items",
-        "list_my_care_schedules",
-        "list_checkups",
-        "list_daily_health_records",
-        "list_inspection_values",
-        "list_observation_items",
-        "list_prescriptions",
-        "list_repeat_preventions",
-        "get_checkup",
-        "list_etc_inspections",
-        "list_observation_cycles",
-        "get_expense_statistics",
-        "get_expense_total",
-        "get_receipt",
-        "list_expense_months",
-        "list_expense_pets",
-        "list_expenses",
-    } | {
-        # 반려동물·캐릭터·커뮤니티·플레이스 READ(2026-11-11)
-        "get_pet",
-        "get_pixel_character",
-        "get_points",
-        "list_caregivers",
-        "list_daily_missions",
-        "list_pets",
-        "list_pixel_characters",
-        "list_point_ledgers",
-        "list_sent_caregiver_invitations",
-        "list_shop_items",
-        "get_popular_photo",
-        "get_post",
-        "list_care_recruitments",
-        "list_comments",
-        "list_health_tips",
-        "list_lost_reports",
-        "list_news",
-        "list_place_bookmarks",
-        "list_places",
-        "list_posts",
-    } | {
-        "draft_care_completion",
-        "draft_daily_health_record",
-        "draft_expense_limit",
-        "draft_schedule_update",
-        "draft_care_item_update",
-        "draft_expense_update",
-        "draft_pet_update",
-        "draft_expense",
-        "draft_observation_cycle",
-        # 검사 수치 저장(SCR-AIM-013 대화창 PDF, 2026-11-23)
-        "draft_inspection_values",
-        # 관찰 항목 등록(SCR-AIM-013 피부·눈 분석 카드, 2026-11-24)
-        "draft_observation_item",
-    }
+    assert (
+        set(defs)
+        == {
+            "navigate",
+            "search_guide",
+            "draft_schedule",
+            "draft_care_item",
+            "decline",
+            # 영수증 저장 카드 (SCR-AIM-013 receipt-card, 2026-11-27)
+            "draft_receipt_save",
+        }
+        | {
+            "get_health_indicators",
+            "list_care_completions",
+            "list_care_items",
+            "list_my_care_schedules",
+            "list_checkups",
+            "list_daily_health_records",
+            "list_inspection_values",
+            "list_observation_items",
+            "list_prescriptions",
+            "list_repeat_preventions",
+            "get_checkup",
+            "list_etc_inspections",
+            "list_observation_cycles",
+            "get_expense_statistics",
+            "get_expense_total",
+            "get_receipt",
+            "list_expense_months",
+            "list_expense_pets",
+            "list_expenses",
+        }
+        | {
+            # 반려동물·캐릭터·커뮤니티·플레이스 READ(2026-11-11)
+            "get_pet",
+            "get_pixel_character",
+            "get_points",
+            "list_caregivers",
+            "list_daily_missions",
+            "list_pets",
+            "list_pixel_characters",
+            "list_point_ledgers",
+            "list_sent_caregiver_invitations",
+            "list_shop_items",
+            "get_popular_photo",
+            "get_post",
+            "list_care_recruitments",
+            "list_comments",
+            "list_health_tips",
+            "list_lost_reports",
+            "list_news",
+            "list_place_bookmarks",
+            "list_places",
+            "list_posts",
+        }
+        | {
+            "draft_care_completion",
+            "draft_daily_health_record",
+            "draft_expense_limit",
+            "draft_schedule_update",
+            "draft_care_item_update",
+            "draft_expense_update",
+            "draft_pet_update",
+            "draft_expense",
+            "draft_observation_cycle",
+            # 검사 수치 저장(SCR-AIM-013 대화창 PDF, 2026-11-23)
+            "draft_inspection_values",
+            # 관찰 항목 등록(SCR-AIM-013 피부·눈 분석 카드, 2026-11-24)
+            "draft_observation_item",
+        }
+        | {
+            # 수정·삭제 도구(SCR-AIM-012, 2026-11-25)
+            "draft_daily_health_record_update",
+            "draft_checkup_update",
+            "draft_prescription_update",
+            "draft_etc_inspection_update",
+            "draft_inspection_value_update",
+            "draft_observation_cycle_update",
+            "delete_schedule",
+            "delete_care_item",
+            "cancel_care_completion",
+            "delete_daily_health_record",
+            "delete_checkup",
+            "delete_prescription",
+            "delete_etc_inspection",
+            "delete_observation_cycle",
+            "delete_repeat_prevention",
+            "delete_expense",
+            "delete_place_bookmark",
+        }
+        | NEW_READ
+        | NEW_ACTION
+    )
     for d in defs.values():
         assert "쓸 때:" in d["description"] and "말하는 법:" in d["description"]
         assert d["input_schema"]["type"] == "object"
@@ -171,7 +202,8 @@ def test_매핑표의_화면_번호면_그_행():
 
 
 def test_모르는_도구나_형식이_틀린_인자는_거부():
-    assert tools.parse("delete_pet", {}).args is None
+    # delete_pet은 2026-11-27 실음(새 도구 싣기 ③) : 없는 도구 예는 회원 탈퇴
+    assert tools.parse("delete_member", {}).args is None
     assert tools.parse("navigate", {"screen_num": "가계부"}).args is None
 
 
@@ -388,7 +420,7 @@ def test_decline은_범위_밖과_판단_못_함_문구를_나눈다(client, jav
 
 
 @pytest.mark.parametrize(
-    ("tool", "raw"), [("navigate", {"screen_num": 999}), ("delete_pet", {}), (None, None)]
+    ("tool", "raw"), [("navigate", {"screen_num": 999}), ("delete_member", {}), (None, None)]
 )
 def test_인자_거부나_빈_응답은_판단_못_함(client, java, tool, raw):
     use_agent(client, FakeToolAgent(tool, raw))
@@ -503,7 +535,7 @@ def test_도구_요청은_도구_정의와_캐시한_system과_오늘_날짜를_
 
     body = fake.requests[0]
     assert [t["name"] for t in body["tools"]] == [d["name"] for d in tools.tool_definitions()]
-    assert body["tool_choice"] == {"type": "auto", "disable_parallel_tool_use": True}
+    assert body["tool_choice"] == {"type": "auto"}  # 2026-11-26 한 응답 도구 여럿
     assert body["system"][0]["cache_control"] == {"type": "ephemeral"}
     assert body["system"][1]["text"] == "오늘: 2026-09-29 (화)"
     assert body["messages"] == CONTEXT
@@ -585,3 +617,25 @@ def test_도구_system에는_채팅_확인_규칙이_들어가고_확인_버튼_
     assert clients.CHAT_CONFIRM_RULE in system
     assert "'수정해 줘'" in clients.CHAT_CONFIRM_RULE
     assert "[확인]을 누르" not in system
+
+
+# 2026-11-26 추가-2 : 실행 결과 글(✔) 뒤 "등록 됐어?"에 아직 안 됐다고 답하지 않게
+def test_도구_system에는_결과_글이_저장_완료인지_알려_주는_규칙이_들어간다():
+    system = tool_system()
+    assert clients.ACTION_RESULT_RULE in system
+    assert "'✔'로 시작하는 결과 글은 저장" in clients.ACTION_RESULT_RULE
+    assert "'취소됨 —'·'실패 —'" in clients.ACTION_RESULT_RULE
+
+
+# 사람 확인 피드백 2차 (2026-11-25) : 대표 용어·뜻 없는 글자가 섞인 포인트
+def test_반려동물_캐릭터_도구_설명에는_대표_반려동물_용어_규칙이_들어간다():
+    defs = {d["name"]: d["description"] for d in tools.tool_definitions()}
+    for name in ("list_pets", "get_pet", "list_pixel_characters", "list_shop_items"):
+        assert "'대표 캐릭터'라고 하지 않는다" in defs[name], name
+    assert "[픽셀 캐릭터 관리] 화면에서 바꾼다" in defs["list_pets"]
+
+
+def test_포인트_한_마디와_뜻_없는_글자_예시가_도구_설명에_있다():
+    defs = {d["name"]: d["description"] for d in tools.tool_definitions()}
+    assert '"ㄹㄹ 포인트"' in defs["get_points"]
+    assert '"ㄹㄹ 포인트"는 get_points' in defs["decline"]

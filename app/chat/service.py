@@ -1,21 +1,26 @@
 import asyncio
 import io
+import json
 import logging
 import re
 import time
 from collections.abc import AsyncIterator, Callable, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel
 from pydantic.alias_generators import to_camel
 
-from app.chat import catalog, rules, tools
+from app.chat import agentstate, catalog, rules, tools, turnlog
 from app.chat.clients import (
-    READ_LIMIT,
+    PTC_CALL_LIMIT,
+    TOOL_LIMIT,
     AnswerError,
     ClassifyError,
+    ConversationSummarizer,
     ImageIntentError,
     ImageIntentJudge,
     ReadMore,
@@ -23,12 +28,14 @@ from app.chat.clients import (
     TitleGenerator,
     ToolAgent,
     ToolDecision,
+    with_notes,
     with_result,
 )
 from app.chat.repository import (
     AiSettings,
     ConversationRepository,
     PetInfo,
+    ReceiptSaveChecker,
     RegisterContextRepository,
     RouteRepository,
     ToolReader,
@@ -40,6 +47,9 @@ from app.chat.schemas import (
     ActionDraft,
     ActionResultRequest,
     ActionStatus,
+    AgentContinueRequest,
+    AgentPending,
+    AgentResult,
     AnswerDone,
     CardType,
     CheckupCardRequest,
@@ -61,12 +71,18 @@ from app.chat.schemas import (
     LesionKind,
     LesionResult,
     PetChoice,
+    ReceiptCardRequest,
+    ReceiptCardResult,
+    ReceiptNoCardReason,
+    ReceiptOcr,
+    ReceiptOcrDrug,
     ReceiptResult,
     ReceiptResultRequest,
     RegisterCard,
     RegisterDraft,
     RegisterResult,
     RegisterResultRequest,
+    StepEvent,
     StreamError,
 )
 from app.core.backend import BackendError, external_error, failure_reason
@@ -133,11 +149,28 @@ ANSWER_ERROR_MESSAGE = "일시적으로 답변할 수 없어요"
 # READ 도구 : 반려동물을 못 정하면 Java 미호출, 고정 문구로 되물음 (2026-11-06 LJS 결정)
 READ_PET_ASK = "어느 아이의 기록을 볼까요? {names} 중에서 이름을 넣어 다시 물어봐 주세요."
 READ_NO_PET = "등록된 반려동물이 없어요. 반려동물을 먼저 등록해 주세요."
+# 문장에 쓴 이름이 반려동물 목록에 없음 (2026-11-26 추가-2) : 카드·READ 없이 안내
+PET_UNKNOWN = "'{names}'라는 아이는 등록돼 있지 않아요. {pets} 중에서 이름을 넣어 다시 말해 주세요."
+# 여럿 중 일부만 없음(READ) : 있는 아이는 읽고, 없는 아이는 LLM이 답에서 알림
+READ_PET_UNKNOWN_NOTE = (
+    "'{names}'라는 아이는 등록돼 있지 않음(이 아이 기록은 없음). 답에서 그렇게 알린다."
+)
+# 결과 뒤 고른 쓰기 도구의 이름이 목록에 없음 : 카드를 만들지 않고 LLM이 안내
+CARD_PET_UNKNOWN_NOTE = (
+    "'{names}'라는 아이는 등록돼 있지 않아 카드를 만들지 않음. "
+    "등록된 아이({pets}) 중에서 이름을 넣어 다시 말해 달라고 한다."
+)
 # READ 도구 : 한 번에 읽는 반려동물 상한과 Java 동시 호출 수 (2026-11-09 LJS 결정)
 READ_MAX_PETS = 10
 READ_CONCURRENCY = 4
 # READ 결과 글의 마리별 머리줄 : LLM이 "선택된 반려동물 기준" 같은 말을 지어내지 않게
 READ_PET_LABEL = "조회한 반려동물: {name}"
+# 프로그래밍식 도구 호출 시험 (2026-11-26) : 코드에 돌려주는 tool_result 글(회원에게 안 보임)
+# allowed_callers는 보안 경계가 아니라 서버가 막음(문서). 읽기 도구만 코드에서
+CODE_NOT_READ = (
+    "이 도구는 코드에서 부를 수 없음. 읽기 도구만 코드에서 부르고 나머지는 코드 밖에서 부른다."
+)
+CODE_LIMIT = "코드 안 도구 호출 상한({limit}번)을 넘어 실행하지 않음. 받은 결과로 답한다."
 # READ 결과를 본 LLM이 쓰기 도구를 고른 경우의 tool_result : 카드는 done.action으로
 # 결과 뒤 navigate의 결과 글 : 화면은 옮기지 않고 답 아래 바로가기 버튼(done.shortcut)
 ROUTE_SHOWN = (
@@ -150,6 +183,12 @@ ACTION_SHOWN = (
     "확인 카드를 만듦(아직 저장 안 됨). 카드 내용: {summary}. "
     "회원이 대화로 '등록해 줘'라고 말해야 저장된다. 카드 내용을 그대로 보여 주고, "
     "맞으면 '등록해 줘'라고 말해 달라고 한두 문장으로 안내한다."
+)
+# 동사형 명령(2026-11-26) : READ 뒤 카드도 빈 칸이 없으면 확인 말 없이 이 턴에 실행 지시
+ACTION_RUN_SHOWN = (
+    "확인 카드를 만듦. 카드 내용: {summary}. 회원이 바로 하라고 했으므로 이 턴에 실행된다. "
+    "확인을 묻지 말고 카드 내용을 짧게 보여 준 뒤 '등록할게요.'로 끝낸다. "
+    "카드에서 확인하라거나 확인 말을 해 달라고 하지 않는다."
 )
 # 확인 카드를 모달 대신 채팅으로 확인 (2026-11-13) : 카드 턴의 저장 글과 다음 턴의 확인·취소
 ACTION_ASK_TEMPLATE = "이렇게 할까요?\n{summary}"
@@ -165,12 +204,33 @@ ACTION_ASK_MISSING_UNNAMED_NO = "{no}번 카드에 빈 칸이 있어요. 말로 
 PET_LABEL = "반려동물"
 ACTION_ASK_CONFIRM = "맞으면 '등록해 줘'라고 말해 주세요. 바꿀 내용은 말로 알려 주시면 고칠게요."
 ACTION_EXECUTE_MESSAGE = "등록할게요."
+# 사진(file) 칸만 빈 카드의 확인 말 (2026-11-24 LJS 결정) : 버튼을 말하지 않고 사진은 카드에서
+# lesion-card(React가 분석한 사진을 붙임)와 대화로 만든 관찰 카드(회원이 올림)에 같이 맞는 글
+ACTION_EXECUTE_PHOTO_MESSAGE = "사진과 함께 등록할게요."
+# 카드 턴 : 사진 칸이 빈 카드의 안내 줄(카드 여럿이면 번호)
+ACTION_ASK_PHOTO = "사진은 카드에서 올려 주세요."
+ACTION_ASK_PHOTO_NO = "{no}번 사진은 카드에서 올려 주세요."
+# 카드 턴 : 회원이 말한 수가 Java 소수 자리보다 길어 반올림했을 때 (2026-11-25 SJM 피드백)
+ACTION_ROUNDED = "소수 {place} 자리까지라 {value}로 적을게요."
+DECIMAL_PLACES = {1: "첫째", 2: "둘째", 3: "셋째"}
+# 카드 요약의 수치 단위 : 같은 카드의 코드 칸 이름으로(코드 값은 쓰지 않음)
+# tool_prompts.yaml 답변 단위와 같음
+VALUE_UNITS = {"체중": "kg", "식사량": "g", "음수량": "ml", "산책": "분"}
+# 실행 실패(Java 400 칸 오류) : Java 칸 이름·Java 문구 대신 칸 표시 이름으로 (2026-11-25)
+ACTION_FAILED_FIX = "{names} 다시 확인해 주세요."
+ACTION_FAILED_FIX_UNNAMED = "입력값을 다시 확인해 주세요."
 ACTION_DROP_MESSAGE = "등록하지 않았어요."
-# 한 메시지 여러 명령 ② (2026-11-19) : 한 메시지 확인 카드 최대 수(READ 상한과 같음)
+# 한 메시지 여러 명령 ② (2026-11-19) : 한 메시지 확인 카드 최대 수(에이전트 ③에서 프론트 합의 뒤 8)
 ACTION_MAX_CARDS = 3
+# 에이전트 ③ turnlog 태그 : 이미 실행한 쓰기를 다시 고름, done.pending을 줌
+AGENT_REPEAT = "agent_repeat"
+AGENT_PENDING = "agent_pending"
+# 2026-11-27 frontend-dc ②③ turnlog 태그 : 바로 실행된 턴 답에 확인 말 안내, 이력의 같은 쓰기 반복
+RUN_CONFIRM_TEXT = "run_confirm_text"
+WRITE_REPEAT = "write_repeat"
 # 쓰기 카드 뒤 이어 주는 말이 있을 때 남은 쓰기 도구를 이어 고르는 tool_result
 ACTION_CHAINED = (
-    "확인 카드를 만듦(아직 저장 안 됨). 이 메시지에 다른 쓰기 요청(기록·등록·수정)이 남았으면 "
+    "확인 카드를 만듦(아직 저장 안 됨). 이 메시지에 다른 쓰기 요청(기록·등록·수정·삭제)이 남았으면 "
     "그 쓰기 도구를 부르고, 남은 것이 없으면 아무 글도 쓰지 않고 끝낸다."
 )
 # 카드가 둘 이상일 때 : 번호 붙은 요약 줄, 빈 칸은 카드 번호로
@@ -199,19 +259,75 @@ READ_EMPTY_MESSAGE = "요청을 처리하지 못했어요. 이름이나 날짜�
 ACTION_VERB_ADD = "등록"
 ACTION_VERB_UPDATE = "수정"
 ACTION_VERB_MIXED = "진행"
+# 삭제 도구 (2026-11-25 LJS 결정, 삭제도 확인 카드로) : 카드가 모두 DELETE면 "삭제"
+ACTION_VERB_DELETE = "삭제"
+DELETE = "DELETE"
+# 삭제 카드는 고칠 칸이 없어 확인 말 안내만
+ACTION_ASK_DELETE = "맞으면 '삭제해 줘'라고 말해 주세요."
+# 삭제 카드에 "응"·"네"만 : 실행하지 않고 다시 안내 (삭제 동사가 든 말만 실행)
+ACTION_DELETE_CONFIRM = "지우려면 '삭제해 줘'라고 말해 주세요."
+ACTION_DELETE_TARGET_MISSING = (
+    "지울 대상을 이 턴 읽기 결과에서 찾지 못해 카드를 띄우지 않음. "
+    "어떤 것을 지울지 이름이나 날짜를 넣어 다시 말해 달라고 한두 문장으로 안내한다."
+)
+DELETE_TARGET_MISSING_MESSAGE = (
+    "지울 {target}을 찾지 못했어요. 이름이나 날짜를 넣어 다시 말해 주세요."
+)
+# 도구별 동사 (2026-11-27) : tool_prompts.yaml verb(지정·구매·수락·거절·종료·진행), 없으면 메서드로
+# 위 문구의 "등록"을 그 동사로 바꾼다. 번호를 못 정했을 때 글도 그 동사로("진행"이면 동사 없이)
+VERB_TARGET_MISSING_MESSAGE = "{verb}할 {target}을 찾지 못했어요. 이름을 넣어 다시 말해 주세요."
+PROCEED_TARGET_MISSING_MESSAGE = "{target}을 찾지 못했어요. 이름을 넣어 다시 말해 주세요."
+ACTION_VERB_TARGET_MISSING = (
+    "{verb}할 대상을 이 턴 읽기 결과에서 찾지 못해 카드를 띄우지 않음. "
+    "어떤 것을 {verb}할지 이름을 넣어 다시 말해 달라고 한두 문장으로 안내한다."
+)
+
+
+def _method_verb(method: str) -> str:
+    upper = method.upper()
+    if upper == "PATCH":
+        return ACTION_VERB_UPDATE
+    if upper == DELETE:
+        return ACTION_VERB_DELETE
+    return ACTION_VERB_ADD
 
 
 def action_verb(methods: Sequence[str]) -> str:
-    """카드 call.method 목록 -> 확인 문구 동사(등록·수정·진행)"""
-    kinds = {method.upper() == "PATCH" for method in methods}
-    if kinds == {True}:
-        return ACTION_VERB_UPDATE
+    """카드 call.method 목록 -> 확인 문구 동사(등록·수정·삭제·진행)"""
+    return _joined_verb([_method_verb(method) for method in methods])
+
+
+def entry_verb(entry: "catalog.CatalogEntry") -> str:
+    """도구 하나의 확인 문구 동사 : tool_prompts.yaml verb, 없으면 HTTP 메서드로"""
+    return entry.verb or _method_verb(entry.call.method)
+
+
+def _card_verb(card: ActionCard) -> str:
+    entry = tools.card_entry(card.tool)
+    if entry is not None and entry.verb:
+        return entry.verb
+    return _method_verb(card.call.method)
+
+
+def _joined_verb(verbs: Sequence[str]) -> str:
+    # 카드 여럿의 동사가 다르면 "진행"
+    kinds = set(verbs)
+    if len(kinds) == 1:
+        return next(iter(kinds))
     return ACTION_VERB_MIXED if len(kinds) > 1 else ACTION_VERB_ADD
+
+
+def is_delete(card: "ActionCard | catalog.CatalogEntry") -> bool:
+    # DELETE이거나 동사가 "삭제"인 카드(지출 조건 삭제는 POST, 2026-11-27)
+    if card.call.method.upper() == DELETE:
+        return True
+    entry = card if isinstance(card, catalog.CatalogEntry) else tools.card_entry(card.tool)
+    return entry is not None and entry.verb == ACTION_VERB_DELETE
 
 
 def _worded(message: str, cards: Sequence[ActionCard]) -> str:
     # 등록 기준 문구를 카드 종류의 동사로
-    verb = action_verb([card.call.method for card in cards])
+    verb = _joined_verb([_card_verb(card) for card in cards])
     return message.replace(ACTION_VERB_ADD, verb)
 
 
@@ -221,6 +337,12 @@ async def _fixed(text: str) -> AsyncIterator[str]:
 
 def _target_missing(entry: "catalog.CatalogEntry") -> str:
     target = entry.target or entry.label or "대상"
+    if is_delete(entry):
+        return DELETE_TARGET_MISSING_MESSAGE.format(target=target)
+    if entry.verb == ACTION_VERB_MIXED:
+        return PROCEED_TARGET_MISSING_MESSAGE.format(target=target)
+    if entry.verb:
+        return VERB_TARGET_MISSING_MESSAGE.format(verb=entry.verb, target=target)
     if entry.call.method == "PATCH":
         return TARGET_MISSING_MESSAGE.format(target=target)
     return ADD_TARGET_MISSING_MESSAGE.format(target=target)
@@ -228,11 +350,26 @@ def _target_missing(entry: "catalog.CatalogEntry") -> str:
 
 def _target_missing_note(entry: "catalog.CatalogEntry") -> str:
     # 읽기 결과를 본 LLM에 주는 tool_result 글
+    if is_delete(entry):
+        return ACTION_DELETE_TARGET_MISSING
+    if entry.verb and entry.verb != ACTION_VERB_MIXED:
+        return ACTION_VERB_TARGET_MISSING.format(verb=entry.verb)
     return ACTION_TARGET_MISSING if entry.call.method == "PATCH" else ACTION_ADD_TARGET_MISSING
 
 
 # SSE 이벤트 하나 : (이름, 내용)
 Event = tuple[str, BaseModel | dict]
+# 에이전트 루프 step 이벤트를 받는 곳 : 답변 스트림을 읽는 _search_answer가 정함
+# 도구 고르기 중 코드 안 READ(프로그래밍식 도구 호출 시험)는 이 값이 없어 안 보냄
+_STEP_SINK: ContextVar[Callable[[StepEvent], None] | None] = ContextVar("step_sink", default=None)
+
+
+def _step(entry: "catalog.CatalogEntry", kind: str) -> None:
+    sink = _STEP_SINK.get()
+    if sink is not None:
+        # 표시 이름이 없는 도구 : 영어 도구 이름 대신 "정보"(프론트 "○○ 확인 중이에요…")
+        label = entry.label or "정보"
+        sink(StepEvent(tool=entry.name, label=label, kind=kind))
 
 
 async def create_conversation(
@@ -258,7 +395,10 @@ async def list_conversations(
 
 async def get_conversation(repo: ConversationRepository, room_sn: int) -> ConversationDetail:
     # FN-AIM-011-10 : 남의 방은 Java가 없는 방과 같은 404 응답
-    return await repo.get_room(room_sn)
+    # 요약 칸(내부용)은 React 응답에서 뺌 (2026-11-24)
+    room = await repo.get_room(room_sn)
+    inner = room.model_dump(exclude={"smry_cn", "smry_end_msg_seq"})
+    return ConversationDetail.model_validate(inner)
 
 
 async def delete_conversation(repo: ConversationRepository, room_sn: int) -> None:
@@ -297,6 +437,8 @@ class Judged:
     # ACTION 고치기 : 돌려받은 같은 도구 카드가 여럿(반려동물별로 나눈 카드)일 때
     # 그 카드마다 (목록 번호, 검증한 input, 비운 칸). 어느 카드를 고칠지는 _action_reply가 정함
     per_prior: tuple[tuple[int, dict, tuple[str, ...]], ...] = ()
+    # ACTION : 도구 인자 pet_name(문장에 쓴 반려동물 이름, 추가-2). 목록에 없으면 안내 글로
+    pet_names: tuple[str, ...] = ()
 
 
 def _guide_shortcut(chunk_id: str) -> Intent | None:
@@ -317,24 +459,34 @@ async def judge_tools(
     prior: ActionDraft | None = None,
     now: datetime | None = None,
     priors: Sequence[ActionDraft] = (),
+    carry: "AgentCarry | None" = None,
 ) -> Judged:
     """도구 흐름 판정(docs/design/tool-calling.md 4절)
-    - priors : 돌려받은 확인 카드 목록(여러 명령 ②). 있으면 prior 대신 같은 도구 카드를 바탕으로"""
+    - priors : 돌려받은 확인 카드 목록(여러 명령 ②). 있으면 prior 대신 같은 도구 카드를 바탕으로
+    - carry : 에이전트 이어 가기(agent-continue). 원래 질문 + 진행 기록으로 다시 고름"""
     if rules.is_placeholder(text):
         # 추가 요청(2026-11-09) : LLM은 자리 표시 글에 글로 되물어 decline을 안 고름(실측)
         return Judged(Intent(kind=IntentKind.FALLBACK))
     row = None
     # FN-AIM-004-13 : 등록 요청은 라우팅 키워드보다 먼저, 칸은 도구 인자로
-    if not rules.is_register_request(text):
+    if carry is None and not rules.is_register_request(text):
         # 추가 요청(2026-11-06) : 키워드에 걸린 문장은 질문꼴이 아니어도 힌트와 함께 도구 고르기
         # FN-AIM-002-10 : 도구 고르기 장애·시간 초과면 그 행으로 이동(LLM 장애와 무관)
         row = rules.match_route(text)
+    # 프로그래밍식 도구 호출 시험 : 코드 안 READ와 그 뒤 READ 답변이 같은 반려동물·번호 칸을 씀
+    follow = _ptc_follow(agent, text, read)
     try:
         async with asyncio.timeout(first_token_sec):
-            decision = await agent.decide(context, max_tokens, today, hint=row)
+            if carry is not None:
+                decision = await agent.resume(context, carry.notes, max_tokens, today)
+            else:
+                decision = await agent.decide(
+                    context, max_tokens, today, hint=row, **_code_kw(agent, follow)
+                )
     except (ClassifyError, TimeoutError) as error:
         if isinstance(error, TimeoutError):
             # LLM 오류(ClassifyError)는 클라이언트가 로그, 시간 초과는 취소라 여기서 한 줄
+            turnlog.tag(turnlog.TIMEOUT)
             logger.warning(
                 "도구 고르기 시간 초과(%g초): %s",
                 first_token_sec,
@@ -343,10 +495,16 @@ async def judge_tools(
         if row is not None:
             return Judged(row.to_intent())
         raise ClassifyError("tool_decide") from None
+    if carry is not None:
+        # 이어 간 고르기 뒤 답변·이어 고르기도 같은 메시지(원래 질문 + 진행 기록)로
+        context = with_notes(context, carry.notes)
+    if decision.call is not None:
+        turnlog.picked(decision.call.name)
     judged = _tool_judged(
-        text, context, agent, decision, max_tokens, today, read, prior, now, priors
+        text, context, agent, decision, max_tokens, today, read, prior, now, priors, follow
     )
-    if judged.intent.kind is IntentKind.ACTION and rules.chains_more(text):
+    several = len(decision.all_calls()) > 1
+    if judged.intent.kind is IntentKind.ACTION and (several or rules.chains_more(text)):
         judged = await _chain_cards(
             text, context, agent, decision, judged, max_tokens, today, first_token_sec, now, priors
         )
@@ -366,42 +524,88 @@ async def _chain_cards(
     priors: Sequence[ActionDraft],
 ) -> Judged:
     # 한 메시지 여러 명령 ② : 쓰기 카드 결과를 돌려주고 남은 쓰기 도구를 이어 고름(최대 3장)
+    # 한 응답에 쓰기 도구 여럿(2026-11-26 동시 도구)이면 그 응답에서 먼저 모음
     # 같은 도구·쓰기 아닌 도구·글·장애면 거기서 멈추고 모은 카드만
     # 이어 고르기 전체가 첫 글자 제한 안
     picked = [judged.tool]
+    # 고른 카드 (도구, input) : 같은 도구를 값만 달리 다시 고를 때 비교 (에이전트 ④)
+    chosen: list[dict] = [{"tool": judged.tool, "input": judged.action or {}}]
+    names = list(judged.pet_names)
     more: list[tuple[str, dict, tuple[str, ...]]] = []
     messages = context
     current = decision
+    calls = list(decision.all_calls()[1:])
+    used = [decision.call.use_id] if decision.call is not None else []
     try:
         async with asyncio.timeout(first_token_sec):
             while len(picked) < ACTION_MAX_CARDS:
-                messages = with_result(messages, current.content, current.call, ACTION_CHAINED)
+                stop = False
+                for call in calls:
+                    if len(picked) >= ACTION_MAX_CARDS:
+                        break
+                    turnlog.picked(call.name)
+                    nxt = _chained_card(text, call, picked, chosen, today, now, priors)
+                    if nxt is None:
+                        stop = True
+                        break
+                    picked.append(call.name)
+                    chosen.append({"tool": call.name, "input": nxt.action or {}})
+                    names.extend(nxt.pet_names)
+                    used.append(call.use_id)
+                    more.append((call.name, nxt.action or {}, nxt.rejected))
+                if stop or len(picked) >= ACTION_MAX_CARDS or not rules.chains_more(text):
+                    break
+                messages = with_result(
+                    [*messages, *current.history],
+                    current.content,
+                    current.call,
+                    ACTION_CHAINED,
+                    dict.fromkeys(used, ACTION_CHAINED),
+                )
                 current = await agent.decide(messages, max_tokens, today)
-                call = current.call
-                if call is None:
+                calls = list(current.all_calls())
+                used = []
+                if not calls:
                     if current.text is not None:
                         await _drop_text(current.text)
                     break
-                if call.args is None or tools.card_entry(call.name) is None:
-                    logger.info("이어 고른 도구 쓰기 아님: %s", call.name)
-                    break
-                if call.name in picked:
-                    logger.info("같은 쓰기 도구 두 번 버림: %s", call.name)
-                    break
-                card = tools.card_entry(call.name)
-                nxt = _card_judged(text, call, card, today, None, now, priors)
-                if nxt.intent.kind is not IntentKind.ACTION:
-                    logger.info("이어 고른 쓰기 도구 대상 번호 없음: %s", call.name)
-                    break
-                picked.append(call.name)
-                more.append((call.name, nxt.action or {}, nxt.rejected))
     except (ClassifyError, TimeoutError) as error:
         logger.warning(
             "쓰기 이어 고르기 실패(%s): 카드 %d장으로", type(error).__name__, len(picked)
         )
     if more:
         logger.info("한 메시지 쓰기 카드 %d장: %s", len(picked), ", ".join(picked))
-    return replace(judged, more=tuple(more))
+    return replace(judged, more=tuple(more), pet_names=tuple(dict.fromkeys(names)))
+
+
+def _chained_card(
+    text: str,
+    call: tools.ToolCall,
+    picked: list[str],
+    chosen: Sequence[dict],
+    today: date,
+    now: datetime | None,
+    priors: Sequence[ActionDraft],
+) -> "Judged | None":
+    # 이어 고른(또는 같은 응답의) 쓰기 도구 -> 카드 판정
+    # 쓰기 아님·대상 번호 없음이면 None
+    # 같은 도구는 새 명령(돌려받은 카드 없음)이고 쓰기 동사 수가 남았고 값이 다를 때만 (에이전트 ④)
+    card = tools.card_entry(call.name)
+    if call.args is None or card is None:
+        logger.info("이어 고른 도구 쓰기 아님: %s", call.name)
+        return None
+    again = call.name in picked
+    if again and (priors or len(picked) >= rules.write_count(text)):
+        logger.info("같은 쓰기 도구 두 번 버림: %s", call.name)
+        return None
+    nxt = _card_judged(text, call, card, today, None, now, priors)
+    if nxt.intent.kind is not IntentKind.ACTION:
+        logger.info("이어 고른 쓰기 도구 대상 번호 없음: %s", call.name)
+        return None
+    if again and _repeats(chosen, call.name, nxt.action or {}):
+        logger.info("같은 쓰기 도구 같은 값 버림: %s", call.name)
+        return None
+    return nxt
 
 
 async def _drop_text(stream: AsyncIterator[str]) -> None:
@@ -415,6 +619,20 @@ async def _drop_text(stream: AsyncIterator[str]) -> None:
         aclose = getattr(stream, "aclose", None)
         if aclose is not None:
             await aclose()
+
+
+async def _unknown_pet_judged(
+    judged: Judged, text: str, contexts: RegisterContextRepository
+) -> Judged:
+    # 쓰기 카드의 pet_name이 목록에 없음(추가-2) : 카드 없이 안내 글(SEARCH), 고지 없음
+    pets = await contexts.get_pets()
+    unknown = unknown_pets(judged.pet_names, pets, text)
+    if not unknown:
+        return judged
+    logger.info("쓰기 카드 반려동물 이름 목록에 없음: %d개", len(unknown))
+    turnlog.tag(PET_UNKNOWN_TAG)
+    message = pet_unknown_text(PET_UNKNOWN, unknown, pets=_pet_names(pets)) if pets else READ_NO_PET
+    return Judged(Intent(kind=IntentKind.SEARCH), stream=_fixed(message), notice=False)
 
 
 def _prior_for(
@@ -438,21 +656,29 @@ def _tool_judged(
     prior: ActionDraft | None = None,
     now: datetime | None = None,
     priors: Sequence[ActionDraft] = (),
+    follow: "_Follow | None" = None,
 ) -> Judged:
     # 도구 -> intent 값 (설계 6절). CARD 도구는 ACTION(등록 카드 2개도 ④부터)
+    # follow : 프로그래밍식 도구 호출을 켰을 때 도구 고르기 중 코드 안 READ를 실행한 것
     call = decision.call
     if call is None:
         if decision.text is not None:
-            # FN-AIM-002-03 : 인사·잡담에 대한 바로 답은 고지 없음(추가 요청 2026-11-09)
-            notice = not rules.is_small_talk(text)
+            # FN-AIM-002-03 : 인사·잡담에 대한 바로 답은 고지 없음(추가 요청 2026-11-09),
+            # 건강 말이 없는 바로 답("오늘 날씨 어때?")도 고지 없음(2026-11-25)
+            # 코드 안에서 고지 READ가 성공했으면 고지
+            talk = rules.is_small_talk(text)
+            notice = not talk and rules.is_health_topic(text)
+            if follow is not None and follow.notice_reads:
+                notice = True
             # FN-AIM-002-04 : 질문 글이 룰 키워드에 걸리면 그 행을 바로가기로, 인사·잡담 제외
-            shortcut = _keyword_shortcut(text) if notice else None
+            shortcut = _keyword_shortcut(text) if not talk else None
             return Judged(
                 Intent(kind=IntentKind.SEARCH), shortcut, stream=decision.text, notice=notice
             )
         return Judged(Intent(kind=IntentKind.FALLBACK))
     if call.args is None:
         logger.info("도구 인자 거부: %s", call.name)
+        turnlog.tag(turnlog.BAD_ARGS)
         return Judged(Intent(kind=IntentKind.FALLBACK))
     if call.name == tools.NAVIGATE:
         row = tools.route_row(call)
@@ -463,16 +689,28 @@ def _tool_judged(
         return Judged(Intent(kind=IntentKind.FALLBACK), out_of_scope=not call.args.unclear)
     card = tools.card_entry(call.name)
     if card is not None:
-        return _card_judged(text, call, card, today, prior, now, priors)
+        trace = read.trace if read is not None else None
+        seen = trace.seen0 if trace is not None else None
+        judged = _card_judged(text, call, card, today, prior, now, priors, seen)
+        if trace is not None and judged.action and _already_done(trace, call.name, judged.action):
+            # 같은 쓰기 반복 막기(이어 가기) : 카드 없이 "이미 실행함"을 LLM에 돌려주고 글로 답
+            logger.info("이미 실행한 쓰기 다시 고름: %s", call.name)
+            turnlog.tag(AGENT_REPEAT)
+            stream = agent.answer(context, decision, rules.AGENT_ALREADY_DONE, max_tokens, today)
+            return Judged(Intent(kind=IntentKind.SEARCH), stream=stream, notice=False)
+        return judged
     entry = tools.read_entry(call.name)
     if entry is not None:
         if read is None:
             logger.info("READ 도구 실행 불가: %s", call.name)
+            turnlog.tag(turnlog.READ_UNAVAILABLE)
             return Judged(Intent(kind=IntentKind.FALLBACK))
         # Java 호출은 답변 스트림 안 : 첫 글자 제한이 Java 호출까지 덮음
         cards: list[ActionCard] = []
         notice_reads: set[str] = set()
         shortcuts: list[Intent] = []
+        if follow is not None:
+            cards, notice_reads, shortcuts = follow.cards, follow.notice_reads, follow.shortcuts
         stream = _read_answer(
             text,
             context,
@@ -485,6 +723,7 @@ def _tool_judged(
             cards,
             notice_reads,
             shortcuts,
+            follow,
         )
         return Judged(
             Intent(kind=IntentKind.SEARCH),
@@ -513,7 +752,9 @@ def _tool_judged(
     notice_reads: set[str] = set()
     shortcuts: list[Intent] = []
     follow = _Follow(text, read, cards, notice_reads, shortcuts)
-    stream = agent.answer(context, decision, guide, max_tokens, today, follow)
+    stream = agent.answer(
+        context, decision, guide, max_tokens, today, follow, **_code_kw(agent, follow)
+    )
     return Judged(
         Intent(kind=IntentKind.SEARCH),
         shortcut,
@@ -533,8 +774,10 @@ def _card_judged(
     prior: ActionDraft | None,
     now: datetime | None,
     priors: Sequence[ActionDraft] = (),
+    seen: dict[str, set[int]] | None = None,
 ) -> Judged:
     # 쓰기 도구 -> ACTION. 돌려받은 카드와 같은 도구면 그 input을 바탕으로 이 메시지 칸을 덮어씀
+    # seen : 이어 가기에서 앞 단계 READ·실행 결과 번호(번호 칸은 이 값만), 없으면 번호 칸 비움
     match = _prior_for(call.name, prior, priors)
     base = match.values if match is not None else None
     args = call.args.model_dump(exclude_none=True) if call.args is not None else {}
@@ -543,7 +786,7 @@ def _card_judged(
         args = catalog.fill_now(card, args, now)
     # LLM이 비운 날짜 : 문장의 날짜 말, 없으면 새 등록 기록 도구만 오늘 (2026-11-23)
     args = catalog.fill_date(card, args, rules.said_dates(text, today), today)
-    values, rejected = _card_values(text, card, args, base, today, now)
+    values, rejected = _card_values(text, card, args, base, today, now, seen)
     if catalog.missing_target_ids(card, values):
         # 경로·본문 필수 번호 칸은 카드에서 고를 수 없음 : 안내 글(SEARCH), 고지 없음
         logger.info("쓰기 도구 대상 번호 없음: %s", call.name)
@@ -562,6 +805,7 @@ def _card_judged(
         action=values,
         rejected=rejected,
         per_prior=per_prior,
+        pet_names=tuple(catalog.said_pet_names(args)),
     )
 
 
@@ -572,13 +816,14 @@ def _card_values(
     base: dict | None,
     today: date,
     now: datetime | None,
+    seen: dict[str, set[int]] | None = None,
 ) -> tuple[dict, tuple[str, ...]]:
     # 도구 인자 -> 검증한 카드 input과 비운 칸. base는 돌려받은 카드 input
     if base:
         # 추가-1 : 날짜를 말하지 않았으면 돌려받은 카드의 날짜를 유지
         date_said = rules.mentions_date(text)
         args = catalog.keep_prior_dates(card, args, base, date_said, today)
-    values = catalog.card_input(card, args, now, {}, base)
+    values = catalog.card_input(card, args, now, seen or {}, base)
     return values, tuple(_rejected(card, args, values))
 
 
@@ -602,7 +847,13 @@ def _route_mixed(
     shortcuts: list[Intent] = [intent]
     follow = _Follow(text, read, cards, notice_reads, shortcuts)
     answer = agent.answer(
-        context, decision, ROUTE_SHOWN.format(name=row.name), max_tokens, today, follow
+        context,
+        decision,
+        ROUTE_SHOWN.format(name=row.name),
+        max_tokens,
+        today,
+        follow,
+        **_code_kw(agent, follow),
     )
     return Judged(
         Intent(kind=IntentKind.SEARCH),
@@ -641,6 +892,120 @@ class ReadDeps:
     now: datetime | None = None
     # 돌려받은 확인 카드 : READ 뒤 같은 쓰기 도구를 고르면 그 input을 바탕으로 (2026-11-23)
     priors: tuple[ActionDraft, ...] = ()
+    # 에이전트 ③ : 이 턴 진행(READ 결과 글·번호 칸·도구 수). 카드로 멈출 때 pending 토큰에 담음
+    trace: "_Trace | None" = None
+
+
+class _Trace:
+    """[이 턴 에이전트 진행] (docs/design/agent.md 4절)
+    - used : 이어 가기 전 단계에서 이미 쓴 도구 호출 수, seen0 : 그때까지의 번호 칸 값
+    - done : 이 턴에서 실행이 끝난 카드 {tool, input} (같은 쓰기 반복 막기)
+    - notes : 이번 단계 READ 결과 글, follow : 결과 답변의 도구 실행(있으면 seen·calls를 씀)"""
+
+    def __init__(
+        self,
+        used: int = 0,
+        seen: dict[str, set[int]] | None = None,
+        done: Sequence[dict] = (),
+    ) -> None:
+        self.used = used
+        self.seen0 = seen or {}
+        self.done = list(done)
+        self.notes: list[str] = []
+        self.follow: _Follow | None = None
+        # 바로 실행 판정(_runs·_agent_allows)에 쓰는 이 턴과 이어 가기 키 : _run_turn이 채움
+        self.turn: Turn | None = None
+        self.key = ""
+        # 이력(최근 턴) AI 메시지의 결과 글 "✔ …" 줄 : 같은 쓰기 반복 막기(frontend-dc ③)
+        self.done_before: list[str] = []
+
+    def note(self, tool: str, result: str) -> None:
+        self.notes.append(rules.AGENT_READ_NOTE.format(tool=tool, result=result))
+
+    def seen(self) -> dict[str, set[int]]:
+        return self.follow.seen if self.follow is not None else self.seen0
+
+
+def _same_value(left: object, right: object) -> bool:
+    return json.dumps(left, ensure_ascii=False, default=str, sort_keys=True) == json.dumps(
+        right, ensure_ascii=False, default=str, sort_keys=True
+    )
+
+
+def _already_done(trace: _Trace, tool: str, values: dict) -> bool:
+    """이미 실행한 일 (6절 7번) : 같은 도구·같은 값, 또는 이어 가기에서 원래 문장의 쓰기를
+    다 실행했는데 실행한 카드와 같은 도구를 값만 바꿔 다시 고름(잘못 읽은 LLM의 중복 저장 막기)"""
+    if _repeats(trace.done, tool, values):
+        return True
+    turn = trace.turn
+    if turn is None or turn.agent is None:
+        return False
+    if not any(card.get("tool") == tool for card in trace.done):
+        return False
+    return rules.write_count(turn.question.cnvrs_cn) <= len(trace.done)
+
+
+# 결과 글 요약 칸의 시각 : 같은 날 같은 값이면 시각만 달라도 같은 기록으로 봄
+_RESULT_CLOCK = re.compile(r"^(\d{2}-\d{2}\(.\)) \d{2}:\d{2}$")
+
+
+def _result_key(text: str) -> tuple[str, set[str]]:
+    """'✔ <label> — <칸> · <칸>' -> (label, 칸 집합). 날짜 뒤 시각은 뗌"""
+    label, _, rest = text.removeprefix("✔ ").partition(" — ")
+    parts = {_RESULT_CLOCK.sub(r"\1", part) for part in rest.split(" · ") if part}
+    return label, parts
+
+
+def done_before(turn: "Turn", turns: int) -> list[str]:
+    """이력(build_context와 같은 범위, 이번 질문 앞)의 AI 메시지 결과 글 '✔ …' 줄"""
+    context = build_context(turn.messages, turn.question.msg_seq, turns, None, turn.summary_end)
+    return [
+        line
+        for message in context
+        if message["role"] == "assistant"
+        for line in str(message["content"]).splitlines()
+        if line.startswith("✔ ")
+    ]
+
+
+def _repeated(trace: "_Trace | None", cards: Sequence[ActionCard]) -> bool:
+    """같은 쓰기 반복 (frontend-dc ③, 2026-11-27) : 카드의 DONE 결과 글이 이력의 '✔' 글과
+    label이 같고 칸이 모두 들어 있으면(시각만 다름) 참. 삭제 카드·요약 칸 없는 카드는 보지 않음"""
+    if trace is None or not trace.done_before:
+        return False
+    before = [_result_key(line) for line in trace.done_before]
+    for card in cards:
+        entry = tools.card_entry(card.tool)
+        if entry is None or is_delete(card):
+            continue
+        label, parts = _result_key(_result_text(ActionStatus.DONE, entry, card.values, ()))
+        if parts and any(label == seen and parts <= given for seen, given in before):
+            return True
+    return False
+
+
+def repeat_ask_message(cards: list[ActionCard], said: str = "") -> str:
+    """반복 쓰기 확인 카드 턴의 저장 글 : 앞줄 반복 안내 + 카드 요약
+    (확인 말 안내 줄은 앞줄이 대신)"""
+    ask = action_ask_message(cards, said)
+    confirm = _confirm_line(cards)
+    if ask.endswith("\n" + confirm):
+        ask = ask[: -len(confirm) - 1]
+    return _worded(rules.WRITE_REPEAT_NOTICE, cards) + "\n" + ask
+
+
+def _repeats(done: Sequence[dict], tool: str, values: dict) -> bool:
+    """같은 쓰기 반복 (6절 7번) : 이미 실행한 같은 도구 카드에 이번 값이 모두 같게 들어 있음
+    - 칸 오류 고치기는 값이 달라지므로 해당 없음. 값이 비면 반복으로 보지 않음"""
+    if not values:
+        return False
+    for card in done:
+        given = card.get("input") or {}
+        if card.get("tool") == tool and all(
+            key in given and _same_value(given[key], value) for key, value in values.items()
+        ):
+            return True
+    return False
 
 
 class _ReadPets:
@@ -673,6 +1038,41 @@ class _ReadPets:
             return named
         tagged = [p for p in pets if p.pet_sn == self.read.room_pet]
         return tagged or pets
+
+
+PET_UNKNOWN_TAG = "pet_unknown"
+
+
+def unknown_pets(said: Sequence[str], pets: Sequence[PetInfo], text: str) -> list[str]:
+    """문장에 쓴 이름 중 반려동물 목록에 없는 것 (2026-11-26 추가-2)
+    - 문장에 없는 이름(LLM이 지어냄)은 버림. "탄이"·"탄"처럼 한쪽이 다른 쪽을 품으면 있는 이름"""
+    compact = re.sub(r"\s+", "", text)
+    known = [re.sub(r"\s+", "", pet.pet_nm) for pet in pets if pet.pet_nm]
+    found: list[str] = []
+    for name in said:
+        key = re.sub(r"\s+", "", name)
+        if not key or key not in compact or key in found:
+            continue
+        if any(key in pet or pet in key for pet in known):
+            continue
+        # 문장에 쓴 형태 : "구름" + 문장 "구름이 …" -> "구름이" (받침 있는 이름만)
+        if _batchim(key) and key + "이" in compact:
+            key += "이"
+        if key not in found:
+            found.append(key)
+    return found
+
+
+def pet_unknown_text(template: str, unknown: Sequence[str], **values: str) -> str:
+    # 없는 반려동물 안내 : 마지막 이름 받침이면 "'구름'라는" -> "'구름'이라는"
+    text = template.format(names="', '".join(unknown), **values)
+    if unknown and _batchim(unknown[-1]):
+        text = text.replace("'라는", "'이라는", 1)
+    return text
+
+
+def _pet_names(pets: Sequence[PetInfo]) -> str:
+    return ", ".join(dict.fromkeys(pet.pet_nm for pet in pets))
 
 
 def _same_name_kind(pet: PetInfo, pets: list[PetInfo]) -> str:
@@ -709,12 +1109,21 @@ async def _read_once(
     today = pets.read.now.date() if pets.read.now is not None else rules.today_kst()
     values = catalog.fill_default_period(entry, values, today)
     targets: list[PetInfo | None] = [None]
+    unknown: list[str] = []
+    if catalog.PET_HOOKS & set(entry.hooks):
+        # 문장에 쓴 이름이 목록에 없음(추가-2) : 아는 이름이 하나도 없으면 Java 미호출 안내
+        found = await pets.pets()
+        unknown = unknown_pets(catalog.said_pet_names(values), found, pets.compact)
+        if unknown and not pets.named(found):
+            turnlog.tag(PET_UNKNOWN_TAG)
+            return _ReadOutcome(ask=pet_unknown_text(PET_UNKNOWN, unknown, pets=_pet_names(found)))
     if "pet" in entry.hooks:
         # 읽을 반려동물 : 이름 > 펫 태그 > 모두. 상한을 넘으면 Java 미호출·이름 되물음
         found = await pets.pets()
         chosen = pets.targets(found)
         if not chosen or len(chosen) > READ_MAX_PETS:
             names = ", ".join(p.pet_nm for p in found)
+            turnlog.tag("pet_ask" if found else "no_pet")
             return _ReadOutcome(ask=READ_PET_ASK.format(names=names) if found else READ_NO_PET)
         # 앞 결과의 번호로 상세를 읽을 때는 그 번호가 나온 아이만
         owners = {
@@ -733,6 +1142,7 @@ async def _read_once(
         # 여러 아이 일정 : Java 1번 호출. 모두면 petSns를 비워 Java가 양육 중인 전체를 준다
         found = await pets.pets()
         if not found:
+            turnlog.tag("no_pet")
             return _ReadOutcome(ask=READ_NO_PET)
         chosen = pets.targets(found)
         if len(chosen) < len(found):
@@ -745,6 +1155,7 @@ async def _read_once(
     ]
     if any(request is None for request in requests):
         logger.info("READ 도구 필수 칸 없음: %s", entry.name)
+        turnlog.tag(turnlog.READ_NO_ARGS)
         return _ReadOutcome(result=rules.READ_FAILED)
     gate = asyncio.Semaphore(READ_CONCURRENCY)
 
@@ -758,6 +1169,9 @@ async def _read_once(
 
     started = time.perf_counter()
     datas = await asyncio.gather(*(fetch(r) for r in requests if r is not None))
+    turnlog.read(len(requests))
+    if any(data is None for data in datas):
+        turnlog.tag(turnlog.READ_FAILED)
     logger.info(
         "READ 도구 시간: %s Java %d번 %dms",
         entry.name,
@@ -788,6 +1202,8 @@ async def _read_once(
         blocks.append(text)
     if notice_reads is not None and entry.notice:
         notice_reads.add(entry.name)
+    if unknown:
+        blocks.insert(0, pet_unknown_text(READ_PET_UNKNOWN_NOTE, unknown))
     return _ReadOutcome(result="\n\n".join(blocks))
 
 
@@ -803,18 +1219,56 @@ async def _read_answer(
     cards: list[ActionCard] | None = None,
     notice_reads: set[str] | None = None,
     shortcuts: list[Intent] | None = None,
+    follow: "_Follow | None" = None,
 ) -> AsyncIterator[str]:
-    follow = _Follow(text, read, cards, notice_reads, shortcuts)
+    if follow is None:
+        follow = _Follow(text, read, cards, notice_reads, shortcuts)
     # 되물음·실패만이거나 고지 READ가 아니면 notice_reads가 비어 고지 없음(FN-AIM-002-03)
-    first = await _read_once(
-        entry, decision.call, follow.pets, follow.seen, notice_reads, follow.rows
+    # 한 응답의 읽기 도구 여럿(2026-11-26) : 첫 도구와 함께 한 턴 TOOL_LIMIT까지 동시에 실행
+    # 같은 응답의 카드·이동은 실행하지 않고 결과를 본 뒤 다시 고르게(READ_LATER)
+    rest = decision.all_calls()[1:]
+    reads = [c for c in rest if tools.read_entry(c.name) is not None]
+    extra = reads[: TOOL_LIMIT - 1]
+    for call in extra:
+        turnlog.picked(call.name)
+    if len(reads) > len(extra):
+        skipped = len(reads) - len(extra)
+        logger.info("첫 응답 읽기 도구 상한(%d): %d개 실행 안 함", TOOL_LIMIT, skipped)
+        turnlog.tag(turnlog.AGENT_LIMIT)
+    if extra:
+        logger.info("첫 응답 읽기 도구 %d개 동시 실행", len(extra) + 1)
+    _step(entry, "READ")
+    for call in extra:
+        if call.args is not None:
+            _step(tools.read_entry(call.name), "READ")
+    outcomes = await asyncio.gather(
+        _read_once(entry, decision.call, follow.pets, follow.seen, notice_reads, follow.rows),
+        *(_extra_read(call, follow, notice_reads) for call in extra),
     )
+    first = outcomes[0]
     if first.ask is not None:
         yield first.ask
         return
-    follow.reads = 1
+    follow.reads = 1 + len(extra)
+    # 이어 가기면 앞 단계 도구 수(trace.used)부터 : _Follow가 1 + used로 시작
+    follow.calls += len(extra)
+    if read.trace is not None:
+        read.trace.note(decision.call.name, first.result)
+        for call, outcome in zip(extra, outcomes[1:], strict=True):
+            if outcome.ask is None:
+                read.trace.note(call.name, outcome.result)
+    results: dict[str, str] = {}
+    for call in rest:
+        if tools.read_entry(call.name) is None:
+            results[call.use_id] = rules.READ_LATER
+    for call, outcome in zip(extra, outcomes[1:], strict=True):
+        results[call.use_id] = outcome.result if outcome.ask is None else rules.READ_FAILED
+    if results:
+        decision = replace(decision, results=tuple(results.items()))
 
-    answer = agent.answer(context, decision, first.result, max_tokens, today, follow)
+    answer = agent.answer(
+        context, decision, first.result, max_tokens, today, follow, **_code_kw(agent, follow)
+    )
     produced = False
     try:
         async for chunk in answer:
@@ -828,11 +1282,22 @@ async def _read_answer(
         yield _worded(READ_EMPTY_CARD_MESSAGE, cards) if cards else READ_EMPTY_MESSAGE
 
 
+async def _extra_read(
+    call: tools.ToolCall, follow: "_Follow", notice_reads: set[str] | None
+) -> "_ReadOutcome":
+    # 첫 응답의 두 번째부터 읽기 도구 : 인자 거부면 불러오지 못함
+    entry = tools.read_entry(call.name)
+    if entry is None or call.args is None:
+        logger.info("같이 고른 읽기 도구 인자 거부: %s", call.name)
+        return _ReadOutcome(result=rules.READ_FAILED)
+    return await _read_once(entry, call, follow.pets, follow.seen, notice_reads, follow.rows)
+
+
 class _Follow:
     """결과 답변 중 LLM이 고른 도구 실행(FollowRead). READ 답변·사용법 답변이 같이 쓴다
     - 쓰기 도구 : 번호 칸은 이 턴 READ 결과 값만, 카드 1개로 끝냄(목록→완료 체크)
     - 이동·사용법 : 화면을 옮기지 않고 바로가기(한 메시지 여러 일 ①)
-    - 읽기 도구 : 한 턴 최대 READ_LIMIT번, 반려동물을 못 정하면 불러오지 못함"""
+    - 읽기 도구 : 반려동물을 못 정하면 불러오지 못함. 모든 도구 합쳐 한 턴 TOOL_LIMIT번까지"""
 
     def __init__(
         self,
@@ -845,48 +1310,155 @@ class _Follow:
         self.text = text
         self.read = read
         self.pets = _ReadPets(text, read)
-        # 번호 칸은 이 턴 READ 결과에 나온 값만 (catalog.read_request)
-        self.seen: dict[str, set[int]] = {}
+        # 번호 칸은 이 턴 READ 결과에 나온 값만 (catalog.read_request). 이어 가기면 앞 단계 값부터
+        trace = read.trace
+        self.seen: dict[str, set[int]] = (
+            {key: set(ids) for key, ids in trace.seen0.items()} if trace is not None else {}
+        )
         # 번호별 원래 행 : 수정 카드가 날짜만 바꿀 때 원래 시간을 씀(추가-3)
         self.rows: catalog.Rows = {}
         self.cards = cards
         self.notice_reads = notice_reads
         self.shortcuts = shortcuts
         self.reads = 0
+        # 이 턴 도구 호출 수(첫 고르기 도구 포함, 이어 가기면 앞 단계 수부터) : TOOL_LIMIT까지
+        self.calls = 1 + (trace.used if trace is not None else 0)
+        # 코드 실행 안 도구 호출 수 : TOOL_LIMIT과 따로 PTC_CALL_LIMIT까지
+        self.code_calls = 0
+        if trace is not None:
+            trace.follow = self
 
     async def __call__(self, call: tools.ToolCall) -> str | None:
+        turnlog.picked(call.name)
+        # 한 응답 읽기 여럿은 동시에 불리지만 첫 await 전에 세어 상한을 넘지 않음
+        if self.calls >= TOOL_LIMIT:
+            logger.info("한 턴 도구 상한(%d): %s 실행 안 함", TOOL_LIMIT, call.name)
+            turnlog.tag(turnlog.AGENT_LIMIT)
+            return rules.TOOL_LIMIT_REACHED
+        self.calls += 1
         card = tools.card_entry(call.name)
         if card is not None and call.args is not None and self.cards is not None:
             if self.cards:
                 logger.info("쓰기 도구 두 번째 실행 안 함: %s", call.name)
                 return None
+            _step(card, "CARD")
             found = await self.pets.pets() if _uses_pets(card) else []
             raw = call.args.model_dump(exclude_none=True)
             # 돌려받은 같은 도구 카드가 있으면 그 input에 이 턴 값을 덮어씀(검사 수치 카드 검진기록)
             prior = next((d for d in self.read.priors if d.tool == call.name), None)
             base = prior.values if prior is not None else None
             values = catalog.card_input(card, raw, self.read.now, self.seen, base, self.rows)
+            if prior is None:
+                values = _carry_lesion(card, values, self.read.priors)
+            trace = self.read.trace
+            if trace is not None and _already_done(trace, call.name, values):
+                logger.info("이미 실행한 쓰기 다시 고름: %s", call.name)
+                turnlog.tag(AGENT_REPEAT)
+                return rules.AGENT_ALREADY_DONE
             if catalog.missing_target_ids(card, values):
                 logger.info("쓰기 도구 대상 번호 없음: %s", call.name)
+                turnlog.tag("target_missing")
                 return _target_missing_note(card)
+            unknown = unknown_pets(catalog.said_pet_names(raw), found, self.text)
+            if unknown and _uses_pets(card):
+                logger.info("쓰기 도구 반려동물 이름 목록에 없음: %s", call.name)
+                turnlog.tag(PET_UNKNOWN_TAG)
+                return pet_unknown_text(CARD_PET_UNKNOWN_NOTE, unknown, pets=_pet_names(found))
             named = self.pets.named(found)
             rejected = _rejected(card, raw, values)
             draft_pet = base.get(catalog.PET_SN) if base else None
-            shown = action_card(card, values, found, named, draft_pet, self.read.room_pet, rejected)
+            target = delete_target_text(card, values, self.rows) if is_delete(card) else None
+            shown = action_card(
+                card, values, found, named, draft_pet, self.read.room_pet, rejected, target
+            )
+            shown = await fill_current_values(shown, self.read.reader)
             self.cards.append(shown)
-            return _worded(ACTION_SHOWN, [shown]).format(summary=action_summary(shown))
+            shown_text = ACTION_SHOWN
+            if self.runs_now():
+                shown_text = rules.AGENT_RUN_SHOWN if self._continues() else ACTION_RUN_SHOWN
+            elif self._would_run() and _repeated(self.read.trace, self.cards):
+                # frontend-dc ③ : 이력에 같은 결과 글 -> 확인 카드, 반복이라고 먼저 알리게
+                logger.info("같은 쓰기 반복, 확인 카드로: %s", call.name)
+                turnlog.tag(WRITE_REPEAT)
+                shown_text = f"{ACTION_SHOWN} {rules.WRITE_REPEAT_SHOWN}"
+            return _worded(shown_text, [shown]).format(summary=action_summary(shown))
         if call.name in (tools.NAVIGATE, tools.SEARCH_GUIDE) and call.args is not None:
             return _follow_screen(call, self.text, self.shortcuts)
         entry = tools.read_entry(call.name)
-        if entry is None or call.args is None or self.reads >= READ_LIMIT:
+        if entry is None or call.args is None:
             logger.info("결과 뒤 도구 실행 안 함: %s", call.name)
             return None
         self.reads += 1
+        _step(entry, "READ")
         outcome = await _read_once(entry, call, self.pets, self.seen, self.notice_reads, self.rows)
         if outcome.ask is not None:
             return rules.READ_FAILED
+        if self.read.trace is not None:
+            self.read.trace.note(call.name, outcome.result)
         # READ 뒤에도 쓰기 카드는 한 번 고를 수 있게 (2단계 ②, 목록 두 번 → 수정 카드)
         return ReadMore(outcome.result)
+
+    def runs_now(self) -> bool:
+        # 돌려받은 카드가 없는 턴의 명령형 문장이고 카드에 빈 칸이 없음 (_search_answer와 같은 판정)
+        # frontend-dc ③ : 이력에 같은 결과 글이 있는 쓰기는 바로 실행하지 않음
+        return self._would_run() and not _repeated(self.read.trace, self.cards or [])
+
+    def _would_run(self) -> bool:
+        # 에이전트 ③ : 이어 가기 키가 있으면 "기록하고 … 알려 줘" 꼴도, 이어 가기면 말한 쓰기만
+        trace = self.read.trace
+        cards = self.cards or []
+        if trace is not None and trace.turn is not None:
+            turn = trace.turn
+            return (
+                not self.read.priors
+                and _runs(turn, cards, trace.key)
+                and _agent_allows(turn, cards)
+            )
+        return not self.read.priors and runs_now(cards, self.text)
+
+    def _continues(self) -> bool:
+        # 바로 실행한 뒤 이어 가는 카드인지(_pending과 같은 문장 판정) : 키 있음 + 카드 뒤 할 일
+        trace = self.read.trace
+        if trace is None or not trace.key:
+            return False
+        # _pending과 같은 판정 : 이 턴 실행 끝난 카드 + 지금까지 보인 카드
+        return rules.agent_pending(self.text, len(trace.done) + len(self.cards or []))
+
+    async def code(self, call: tools.ToolCall) -> str:
+        """코드 실행 안에서 부른 도구(프로그래밍식 도구 호출 시험, 2026-11-26)
+        - 읽기 도구만 실행(지금 READ와 같은 반려동물·번호 칸 규칙). 카드·이동·사용법·decline은 거부
+        - 결과 글은 코드로 돌아감(회원에게 안 보임). 되물음 문구도 그대로 돌려줌"""
+        turnlog.code_call()
+        self.code_calls += 1
+        if self.code_calls > PTC_CALL_LIMIT:
+            logger.info("코드 안 도구 상한: %s", call.name)
+            turnlog.tag("code_limit")
+            return CODE_LIMIT.format(limit=PTC_CALL_LIMIT)
+        entry = tools.read_entry(call.name)
+        if entry is None:
+            logger.info("코드 안 도구 거부: %s", call.name)
+            turnlog.tag("code_refused")
+            return CODE_NOT_READ
+        if call.args is None:
+            logger.info("코드 안 도구 인자 거부: %s", call.name)
+            turnlog.tag(turnlog.BAD_ARGS)
+            return rules.READ_FAILED
+        outcome = await _read_once(entry, call, self.pets, self.seen, self.notice_reads, self.rows)
+        return outcome.ask if outcome.ask is not None else outcome.result
+
+
+def _ptc_follow(agent: ToolAgent, text: str, read: "ReadDeps | None") -> "_Follow | None":
+    # 프로그래밍식 도구 호출을 켠 에이전트(ptc)이고 READ를 할 수 있을 때만
+    if getattr(agent, "ptc", None) is None or read is None:
+        return None
+    return _Follow(text, read, [], set(), [])
+
+
+def _code_kw(agent: ToolAgent, follow: "_Follow | None") -> dict:
+    # ptc를 켠 에이전트에만 code를 넘김(가짜 에이전트·지금 방식은 인자 그대로)
+    if follow is None or getattr(agent, "ptc", None) is None:
+        return {}
+    return {"code": follow.code}
 
 
 def _follow_screen(call: tools.ToolCall, text: str, shortcuts: list[Intent] | None) -> str | None:
@@ -960,6 +1532,11 @@ class Turn:
     action: ActionDraft | None = None
     # 한 메시지 여러 명령 ② : React가 돌려보낸 확인 카드 목록. 있으면 action 대신
     actions: tuple[ActionDraft, ...] = ()
+    # 추가 요청(2026-11-24) : 방 요약과 경계선(이 msgSeq까지 요약됨)
+    summary: str | None = None
+    summary_end: int | None = None
+    # 에이전트 ③ : agent-continue로 이어 가는 턴(사용자 메시지 저장 없음). 없으면 보통 턴
+    agent: "AgentCarry | None" = None
 
     def priors(self) -> list[ActionDraft]:
         if self.actions:
@@ -989,23 +1566,119 @@ async def prepare_turn(
     question = next((m for m in reversed(room.messages) if m.role_cd == ROLE_USER), None)
     if question is None:
         raise AppError("INVALID_REQUEST", 400, "답할 메시지가 없습니다.")
-    return Turn(room_sn, question, room.messages, room.pet_sn, draft, action, tuple(actions or ()))
+    return Turn(
+        room_sn,
+        question,
+        room.messages,
+        room.pet_sn,
+        draft,
+        action,
+        tuple(actions or ()),
+        getattr(room, "smry_cn", None),
+        getattr(room, "smry_end_msg_seq", None),
+    )
 
 
-def build_context(messages: list[ConversationMessage], question_seq: int, turns: int) -> list[dict]:
-    # FN-AIM-002-11·011-15 : 현재 대화의 답할 메시지까지, 미완료 답변 제외, 최근 turns턴(질문+답변)
-    usable = [m for m in messages if m.msg_seq <= question_seq and m.cmptn_yn]
-    recent = usable[-turns * 2 :]
+SUMMARY_PREFIX = "이전 대화 요약:\n"
+SUMMARY_SUFFIX = "\n\n이어지는 메시지:\n"
+
+
+def build_context(
+    messages: list[ConversationMessage],
+    question_seq: int,
+    turns: int,
+    summary: str | None = None,
+    summary_end: int | None = None,
+) -> list[dict]:
+    # FN-AIM-002-11·011-15 : 현재 대화의 답할 메시지까지, 미완료 답변 제외, 최근 turns턴
+    # 추가 요청(2026-11-24) : 요약 경계선 뒤만, 턴은 사용자 메시지로 셈
+    # (카드·실행 결과는 AI 메시지만 저장돼 메시지 수 ÷ 2가 턴 수가 아님)
+    usable = [
+        m
+        for m in messages
+        if m.msg_seq <= question_seq
+        and m.cmptn_yn
+        and (summary_end is None or m.msg_seq > summary_end)
+    ]
     # Messages API는 사용자 메시지로 시작 필수
-    while recent and recent[0].role_cd != ROLE_USER:
-        recent = recent[1:]
+    starts = [i for i, m in enumerate(usable) if m.role_cd == ROLE_USER]
+    recent = usable[starts[max(0, len(starts) - turns)] :] if starts else []
     # 저장된 답변의 고지는 떼고 넘김 : 모델이 따라 써 고지가 두 번 붙는 것 방지
-    return [
+    context = [
         {"role": "user", "content": m.cnvrs_cn}
         if m.role_cd == ROLE_USER
         else {"role": "assistant", "content": m.cnvrs_cn.removesuffix(DISCLAIMER)}
         for m in recent
     ]
+    if summary and context:
+        # 요약은 첫 사용자 메시지 앞 : system에 두면 도구 고르기·답변 호출 모양이 바뀜
+        first = context[0]["content"]
+        context[0] = {"role": "user", "content": SUMMARY_PREFIX + summary + SUMMARY_SUFFIX + first}
+    return context
+
+
+class _SavedMessages:
+    # 이번 턴에 저장한 메시지 기록 : 요약 경계선(방금 저장한 답변 msgSeq)용, 방 다시 조회 없음
+    def __init__(self, repo: ConversationRepository) -> None:
+        self._repo = repo
+        self.saved: list[ConversationMessage] = []
+
+    def __getattr__(self, name: str):
+        return getattr(self._repo, name)
+
+    async def add_message(
+        self, room_sn: int, role_cd: str, cn: str, cmptn_yn: bool = True
+    ) -> ConversationMessage:
+        message = await self._repo.add_message(room_sn, role_cd, cn, cmptn_yn=cmptn_yn)
+        self.saved.append(message)
+        return message
+
+
+def _transcript(messages: list[ConversationMessage]) -> str:
+    # 날짜를 붙여 요약에 남김 : 오래된 방의 지난 일을 지금 일로 읽지 않게
+    return "\n".join(
+        f"[{m.reg_dt.month}월 {m.reg_dt.day}일] "
+        f"{'회원' if m.role_cd == ROLE_USER else 'AI'}: {m.cnvrs_cn.removesuffix(DISCLAIMER)}"
+        for m in messages
+    )
+
+
+async def compact_summary(
+    turn: Turn,
+    saved: Sequence[ConversationMessage],
+    repo: ConversationRepository,
+    summarizer: ConversationSummarizer,
+    turns: int,
+) -> None:
+    """추가 요청(2026-11-24) : 경계선 뒤 사용자 메시지가 turns개 이상이면
+    이전 요약 + 경계선 뒤 전부를 새 요약으로 저장
+    - 앞선 요약이 실패했어도 빠지는 턴 없음
+    - 실패는 경고 로그만(답변과 무관)"""
+    try:
+        end = turn.summary_end or 0
+        earlier = [m for m in turn.messages if m.msg_seq <= turn.question.msg_seq]
+        after = sorted(
+            (m for m in [*earlier, *saved] if m.msg_seq > end and m.cmptn_yn),
+            key=lambda m: m.msg_seq,
+        )
+        if sum(m.role_cd == ROLE_USER for m in after) < turns:
+            return
+        if after[-1].role_cd == ROLE_USER:
+            # 답변 저장 전 실패한 턴 : 다음 턴에 다시
+            return
+        summary = await summarizer.summarize(turn.summary, _transcript(after))
+        if not summary:
+            return
+        await repo.save_summary(turn.room_sn, summary, after[-1].msg_seq)
+        logger.info(
+            "대화 요약 저장: room=%d 경계선 %d → %d (%d자)",
+            turn.room_sn,
+            end,
+            after[-1].msg_seq,
+            len(summary),
+        )
+    except Exception as error:
+        logger.warning("대화 요약 실패: room=%d (%s)", turn.room_sn, type(error).__name__)
 
 
 # 브라우저 연결이 끊겨도 답변 생성·저장을 끝까지 하도록 별도 작업으로 분리 (architecture.md)
@@ -1021,15 +1694,51 @@ async def answer_turn(
     register: "RegisterDeps | None" = None,
     titles: TitleGenerator | None = None,
     reader: ToolReader | None = None,
+    summarizer: ConversationSummarizer | None = None,
+    agent_key: str = "",
 ) -> AsyncIterator[Event]:
+    # agent_key : 에이전트 이어 가기 서명 키(라우터가 agentstate.key_of로 늘 줌)
+    # 비면 done.pending 없음
     queue: asyncio.Queue[Event | None] = asyncio.Queue()
     task = asyncio.create_task(
-        _run_turn(turn, repo, agent, ai, limits, queue.put_nowait, register, titles, reader)
+        _run_and_compact(
+            turn,
+            repo,
+            agent,
+            ai,
+            limits,
+            queue.put_nowait,
+            register,
+            titles,
+            reader,
+            summarizer,
+            agent_key,
+        )
     )
     _running.add(task)
     task.add_done_callback(_running.discard)
     while (event := await queue.get()) is not None:
         yield event
+
+
+async def _run_and_compact(
+    turn: Turn,
+    repo: ConversationRepository,
+    agent: ToolAgent,
+    ai: AiSettings,
+    limits: AnswerLimits,
+    emit: Callable[[Event | None], None],
+    register: "RegisterDeps | None",
+    titles: TitleGenerator | None,
+    reader: ToolReader | None,
+    summarizer: ConversationSummarizer | None,
+    agent_key: str = "",
+) -> None:
+    # 요약은 스트림을 닫은(done 뒤) 다음 : 회원이 요약 LLM을 기다리지 않음
+    saved = _SavedMessages(repo)
+    await _run_turn(turn, saved, agent, ai, limits, emit, register, titles, reader, agent_key)  # type: ignore[arg-type]
+    if summarizer is not None:
+        await compact_summary(turn, saved.saved, repo, summarizer, ai.context_turns)
 
 
 async def _run_turn(
@@ -1042,16 +1751,45 @@ async def _run_turn(
     register: "RegisterDeps | None" = None,
     titles: TitleGenerator | None = None,
     reader: ToolReader | None = None,
+    agent_key: str = "",
 ) -> None:
+    # 추가 요청(2026-11-26) : 턴 기록 한 줄. 이벤트를 보며 종류·결과·고정 문구 태그를 모음
+    record = turnlog.start(turn.room_sn, turn.question.cnvrs_cn, _previous_ai_text(turn))
+    forward = emit
+    emit = record.wrap(emit)
     try:
         text = turn.question.cnvrs_cn
         card = None
         priors = turn.priors()
+        carry = turn.agent
+        if carry is not None and carry.stop:
+            # 이어 갈 일 없음(취소만·고칠 수 없는 실패만) : LLM 없이 짧은 글
+            logger.info("에이전트 이어 가기 없음: 실행 완료·고칠 칸 없음")
+            emit(("intent", Intent(kind=IntentKind.SEARCH)))
+            saved = await _save(repo, turn.room_sn, rules.AGENT_STOPPED, True)
+            emit(("done", AnswerDone(message=saved)))
+            return
+        trace = _trace_of(carry)
+        trace.turn = turn
+        trace.key = agent_key
+        trace.done_before = done_before(turn, ai.context_turns)
         if register is not None and priors:
             # 돌려받은 확인 카드 + 확인·취소 말 : LLM 없이 실행 지시·취소 (2026-11-13)
             # 여러 명령 ② : 카드가 여럿이면 확인 말 한 번에 모두, 취소 말이면 모두 버림
             reply = rules.action_reply_kind(text)
+            if reply == rules.ACTION_CONFIRM and rules.says_delete(text):
+                # "삭제해 줘"는 삭제 카드가 있을 때만 확인 말 : 등록·수정 카드는 실행 안 함
+                methods = [e.call.method for d in priors if (e := tools.card_entry(d.tool))]
+                if DELETE not in {method.upper() for method in methods}:
+                    reply = None
+            said = rules.says_card_verb(text) if reply is None else None
+            if said is not None:
+                # "수락해 줘"·"구매해 줘" 등 도구별 동사는 그 동사 카드가 있을 때만 확인 말
+                verbs = {entry_verb(e) for d in priors if (e := tools.card_entry(d.tool))}
+                if said in verbs:
+                    reply = rules.ACTION_CONFIRM
             if reply is not None:
+                record.reply = reply
                 await _action_answer(reply, turn, priors, repo, register, emit)
                 return
         if register is not None and turn.draft is not None:
@@ -1062,11 +1800,17 @@ async def _run_turn(
             judged = Judged(Intent(kind=IntentKind.REGISTER))
         else:
             # 항상 이 흐름(2026-11-09) : 분류·목차 선택·등록 칸 추출을 도구 고르기 한 번으로
-            context = build_context(turn.messages, turn.question.msg_seq, ai.context_turns)
+            context = build_context(
+                turn.messages,
+                turn.question.msg_seq,
+                ai.context_turns,
+                turn.summary,
+                turn.summary_end,
+            )
             today = register.today if register is not None else rules.today_kst()
             now = datetime.combine(today, datetime.now(rules.KST).time())
             read = (
-                ReadDeps(reader, register.contexts, turn.pet_sn, now, tuple(priors))
+                ReadDeps(reader, register.contexts, turn.pet_sn, now, tuple(priors), trace)
                 if reader is not None and register is not None
                 else None
             )
@@ -1081,7 +1825,10 @@ async def _run_turn(
                 turn.action,
                 now,
                 priors,
+                carry,
             )
+            if judged.intent.kind is IntentKind.ACTION and judged.pet_names:
+                judged = await _unknown_pet_judged(judged, text, register.contexts)
         emit(("intent", judged.intent))
         kind = judged.intent.kind
         if kind is IntentKind.SEARCH:
@@ -1098,6 +1845,8 @@ async def _run_turn(
                 judged.cards,
                 _notice(judged),
                 judged.follow_shortcuts,
+                trace,
+                agent_key,
             )
             if answer is not None and titles is not None and _is_first_answer(turn):
                 await _retitle(repo, titles, turn, answer)
@@ -1115,8 +1864,37 @@ async def _run_turn(
             await _register_reply(repo, turn.room_sn, card, emit)
         elif kind is IntentKind.ACTION and register is not None:
             cards = await _action_reply(text, turn, judged, register)
+            if reader is not None:
+                cards = [await merge_pet_lists(card, text, reader) for card in cards]
+                cards = [await fill_current_values(card, reader) for card in cards]
+            runs = (
+                _fills_only_blanks(turn.priors(), cards)
+                and _runs(turn, cards, agent_key)
+                and _agent_allows(turn, cards)
+            )
+            if runs and _repeated(trace, cards):
+                # frontend-dc ③ : 이력에 같은 결과 글이 있으면 바로 실행하지 않고 확인 카드로
+                logger.info("같은 쓰기 반복, 확인 카드로: %s", ", ".join(c.tool for c in cards))
+                turnlog.tag(WRITE_REPEAT)
+                saved = await _save(repo, turn.room_sn, repeat_ask_message(cards, text), True)
+                emit(("done", AnswerDone(message=saved, action=cards[0], actions=cards)))
+                return
+            if runs:
+                # 동사형 명령(2026-11-26) : 빈 칸이 없으면 확인 말 없이 첫 턴에 실행 지시
+                # 돌려받은 카드를 고치는 말("4.5로 바꿔 줘")은 지금처럼 확인 말을 기다림
+                logger.info("명령 바로 실행 지시: %s", ", ".join(card.tool for card in cards))
+                turnlog.tag(turnlog.RUN_NOW)
+                saved = await _save(repo, turn.room_sn, action_run_message(cards, text), True)
+                # 에이전트 ③ : 첫 고르기 1번 + 이어 고른 카드 수
+                calls = trace.used + 1 + len(judged.more)
+                pending = _pending(turn, agent_key, trace, cards, calls)
+                done = AnswerDone(
+                    message=saved, action=cards[0], actions=cards, execute=True, pending=pending
+                )
+                emit(("done", done))
+                return
             # 카드 요약을 글로 저장 : 모달 대신 채팅으로 확인, 다음 턴 맥락에도 남음 (2026-11-13)
-            saved = await _save(repo, turn.room_sn, action_ask_message(cards), True)
+            saved = await _save(repo, turn.room_sn, action_ask_message(cards, text), True)
             emit(("done", AnswerDone(message=saved, action=cards[0], actions=cards)))
         else:
             # RECEIPT는 SCR-AIM-013에서 잇는다
@@ -1126,9 +1904,19 @@ async def _run_turn(
         emit(("error", StreamError(code="EXTERNAL_API_ERROR", message=ANSWER_ERROR_MESSAGE)))
     except Exception:
         logger.exception("대화 응답 처리 실패")
+        record.tag(turnlog.EXCEPTION)
         emit(("error", StreamError(code="EXTERNAL_API_ERROR", message=ANSWER_ERROR_MESSAGE)))
     finally:
-        emit(None)
+        turnlog.finish(record)
+        forward(None)
+
+
+def _previous_ai_text(turn: Turn) -> str | None:
+    # 이번 질문 바로 앞 AI 메시지 글 : 직전 실패 태그(재요청 후보)용, 로그에는 태그만
+    before = [m for m in turn.messages if m.msg_seq < turn.question.msg_seq]
+    if not before or before[-1].role_cd != ROLE_AI:
+        return None
+    return before[-1].cnvrs_cn
 
 
 async def _search_answer(
@@ -1141,28 +1929,49 @@ async def _search_answer(
     cards: list[ActionCard] | None = None,
     notice: Callable[[], bool] = lambda: True,
     follow_shortcuts: list[Intent] | None = None,
+    trace: "_Trace | None" = None,
+    agent_key: str = "",
 ) -> str | None:
     # FN-AIM-002-02·07 : 완료면 고지 전 본문 반환(제목 요약용), 실패·미완료면 None
+    # trace·agent_key : 에이전트 ③, READ 뒤 카드를 바로 실행할 때 done.pending
     # follow_shortcuts : 결과 뒤 고른 이동·사용법 화면, 스트림이 끝난 뒤 첫 READ 화면보다 우선
     # stream : 도구 흐름이 이미 시작한 답변 스트림
     loop = asyncio.get_running_loop()
     started_at = loop.time()
     deadline = started_at + limits.total_sec
     first_deadline = started_at + limits.first_token_sec
+    # 첫 이벤트 제한(docs/design/agent.md 3절) : step이 먼저 오면 첫 글자는 전체 제한까지만
+    waiting: list[asyncio.Timeout] = []
+    stepped = False
+
+    def on_step(event: StepEvent) -> None:
+        nonlocal stepped
+        emit(("step", event))
+        stepped = True
+        if waiting:
+            waiting.pop().reschedule(deadline)
+
+    sink = _STEP_SINK.set(on_step)
     try:
         # 첫 글자 전 실패 : 미저장·안내, 사용자 메시지는 남아 [다시 시도]로 재호출
         reason = "empty"
         try:
-            async with asyncio.timeout_at(min(deadline, first_deadline)):
+            async with asyncio.timeout_at(min(deadline, first_deadline)) as timer:
+                waiting.append(timer)
                 first = await anext(stream, None)
         except TimeoutError:
             first = None
-            reason = "total_timeout" if deadline <= first_deadline else "first_token_timeout"
+            total = deadline <= first_deadline or stepped
+            reason = "total_timeout" if total else "first_token_timeout"
         except AnswerError as error:
             first = None
             reason = error.reason
+        finally:
+            waiting.clear()
         if first is None:
             # 추가 요청 : 실패 이유 한 줄(원문 없음)
+            if reason.endswith("timeout"):
+                turnlog.tag(turnlog.TIMEOUT)
             logger.warning(
                 "답변 실패: 첫 글자 전 %s room=%d (%.0fms)",
                 reason,
@@ -1182,6 +1991,7 @@ async def _search_answer(
             complete = True
         except (TimeoutError, AnswerError) as error:
             # 전체 시간 초과·도중 오류 : 부분 답변을 미완료로 저장
+            turnlog.tag(turnlog.INCOMPLETE)
             logger.warning(
                 "답변 미완료: 도중 %s room=%d %d자 (%.0fms)",
                 error.reason if isinstance(error, AnswerError) else "total_timeout",
@@ -1191,6 +2001,7 @@ async def _search_answer(
             )
     finally:
         await stream.aclose()
+        _STEP_SINK.reset(sink)
     body = "".join(chunks)
     text = body
     if complete and notice():
@@ -1204,9 +2015,265 @@ async def _search_answer(
     # FN-AIM-002-04 : 확인 카드가 같이 나가는 턴은 바로가기 없음
     shortcut = None if action is not None else shortcut
     actions = [action] if action is not None else None
-    done = AnswerDone(message=message, shortcut=shortcut, action=action, actions=actions)
+    # 동사형 명령(2026-11-26) : READ 뒤 카드도 빈 칸이 없으면 이 턴에 실행 지시(완료 답변만)
+    execute = (
+        complete
+        and action is not None
+        and _fills_only_blanks(turn.priors(), [action])
+        and _runs(turn, [action], agent_key)
+        and _agent_allows(turn, [action])
+        and not _repeated(trace, [action])
+    )
+    if execute and rules.asks_confirm(body):
+        # frontend-dc ② : 바로 실행된 턴의 답이 확인 말을 안내함(글은 이미 흘림, 빈도만 남김)
+        logger.info("바로 실행 턴 답에 확인 말 안내: %s", action.tool)
+        turnlog.tag(RUN_CONFIRM_TEXT)
+    pending = None
+    if execute:
+        logger.info("READ 뒤 카드 바로 실행 지시: %s", action.tool)
+        turnlog.tag(turnlog.RUN_NOW)
+        if trace is not None:
+            calls = trace.follow.calls if trace.follow is not None else trace.used + 1
+            pending = _pending(turn, agent_key, trace, [action], calls)
+    done = AnswerDone(
+        message=message,
+        shortcut=shortcut,
+        action=action,
+        actions=actions,
+        execute=execute,
+        pending=pending,
+    )
     emit(("done", done))
     return body if complete else None
+
+
+@dataclass
+class AgentCarry:
+    """[에이전트 이어 가기 한 번] (docs/design/agent.md 2·5절)
+    - state : 검사한 토큰, notes_list : 앞 진행 기록 + 이번 실행 결과 줄, notes : LLM에 줄 글
+    - fix_tools : 칸 오류를 이번에 한 번 고칠 도구, fixed : 칸 오류를 고친 적 있음
+    - done : 이 턴에서 실행이 끝난 카드, seen : 번호 칸에 쓸 값(앞 READ + 실행 결과 data)
+    - stop : 이어 갈 일 없음(취소만·고칠 수 없는 실패만)"""
+
+    state: agentstate.AgentState
+    notes_list: list[str]
+    notes: str
+    fix_tools: frozenset[str]
+    fixed: bool
+    done: list[dict]
+    seen: dict[str, set[int]]
+    stop: bool
+
+
+def _trace_of(carry: AgentCarry | None) -> _Trace:
+    if carry is None:
+        return _Trace()
+    return _Trace(TOOL_LIMIT - carry.state.left, carry.seen, carry.done)
+
+
+def _runs(turn: Turn, cards: Sequence[ActionCard], key: str) -> bool:
+    """바로 실행 판정 : 지금 동사형 명령(runs_now) 또는 이어 가기 키가 있을 때 쓰기 뒤 다른 일이
+    이어지는 명령("기록하고 … 알려 줘", rules.agent_command). 빈 칸·삭제 동사 규칙은 같음"""
+    text = turn.question.cnvrs_cn
+    if runs_now(cards, text):
+        return True
+    if not key or not cards or not rules.agent_command(text):
+        return False
+    return not _missing_lines(list(cards)) and _delete_confirmed(cards, text)
+
+
+def _fills_only_blanks(priors: Sequence[ActionDraft], cards: Sequence[ActionCard]) -> bool:
+    """돌려받은 카드가 있을 때 바로 실행해도 되는지 (2026-11-27 사람 결정 A)
+    - 돌려받은 카드가 없으면 참(첫 턴 동사형 명령 그대로)
+    - 같은 도구 카드가 같은 수이고 돌려받은 칸 값을 하나도 바꾸지 않고 빈 칸만 채웠으면 참
+      ("일반진료로 저장해 줘"). 있던 값을 바꾸는 말("4.5로 바꿔 줘")은 지금처럼 확인을 기다림"""
+    if not priors:
+        return True
+    if len(priors) != len(cards) or [p.tool for p in priors] != [c.tool for c in cards]:
+        return False
+    return all(_kept(p.values, c.values) for p, c in zip(priors, cards, strict=True))
+
+
+def _kept(old: object, new: object) -> bool:
+    # old의 빈 값이 아닌 칸이 new에 같은 값으로 남아 있는지(배열은 줄 수가 같고 줄마다)
+    if isinstance(old, dict):
+        return isinstance(new, dict) and all(
+            key in new and _kept(value, new[key])
+            for key, value in old.items()
+            if value not in (None, "")
+        )
+    if isinstance(old, list):
+        return (
+            isinstance(new, list)
+            and len(old) == len(new)
+            and all(_kept(a, b) for a, b in zip(old, new, strict=True))
+        )
+    return old == new
+
+
+def _agent_allows(turn: Turn, cards: Sequence[ActionCard]) -> bool:
+    """이어 가기에서 고른 카드를 바로 실행해도 되는지 (6절 4번 말하지 않은 쓰기)
+    - 보통 턴이면 늘 참(지금 판정 그대로)
+    - 칸 오류를 고치는 같은 도구 카드면 참
+    - 원래 문장의 쓰기 동사가 이미 실행한 카드 수보다 많을 때만 참 : 아니면 확인 카드로 멈춤"""
+    carry = turn.agent
+    if carry is None:
+        return True
+    if all(card.tool in carry.fix_tools for card in cards):
+        return True
+    return rules.write_count(turn.question.cnvrs_cn) > len(carry.done)
+
+
+def _card_json(card: ActionCard) -> dict:
+    return {"tool": card.tool, "input": card.model_dump(mode="json", by_alias=True)["input"]}
+
+
+def _pending(
+    turn: Turn,
+    key: str,
+    trace: _Trace,
+    cards: Sequence[ActionCard],
+    calls: int,
+) -> AgentPending | None:
+    """done.pending (4절) : 바로 실행하는 카드이고 카드 뒤 할 일이 남은 문장일 때만
+    - 키 없음·단순 명령·도구 상한 다 씀·토큰 48KB 넘음이면 None(지금 흐름)
+    - calls : 이 턴(이어 가기 포함) 지금까지 쓴 도구 호출 수"""
+    if not key or not cards:
+        return None
+    said = turn.question.cnvrs_cn
+    if not rules.agent_pending(said, len(trace.done) + len(cards)):
+        return None
+    left = TOOL_LIMIT - calls
+    if left <= 0:
+        logger.info("에이전트 도구 상한: pending 없음")
+        turnlog.tag(turnlog.AGENT_LIMIT)
+        return None
+    carry = turn.agent
+    state = agentstate.AgentState(
+        room=turn.room_sn,
+        q=turn.question.msg_seq,
+        said=said,
+        left=left,
+        seen={name: sorted(ids) for name, ids in trace.seen().items()},
+        notes=[*(carry.notes_list if carry is not None else []), *trace.notes],
+        cards=[_card_json(card) for card in cards],
+        done=list(trace.done),
+        fixed=carry.fixed if carry is not None else False,
+    )
+    token = agentstate.sign(state, key, time.time())
+    if token is None:
+        logger.info("에이전트 토큰 크기 상한(%dB): pending 없음", agentstate.MAX_BYTES)
+        return None
+    turnlog.tag(AGENT_PENDING)
+    return AgentPending(agent_token=token, cards=len(cards))
+
+
+def _stale_read(note: str) -> str:
+    # "읽기 X 결과:" -> "읽기 X 결과(쓰기 실행 전 …):" (이미 표시한 줄은 그대로)
+    head, sep, rest = note.partition("\n")
+    match = re.fullmatch(r"읽기 (\S+) 결과:", head)
+    if match is None:
+        return note
+    return rules.AGENT_STALE_READ_NOTE.format(tool=match.group(1)) + sep + rest
+
+
+def _result_cards(state: agentstate.AgentState, results: Sequence[AgentResult]) -> list[dict]:
+    """결과마다 이 멈춤의 카드 : 같은 도구의 아직 안 쓴 카드를 차례로. 없으면 400"""
+    used: set[int] = set()
+    matched: list[dict] = []
+    for result in results:
+        no = next(
+            (
+                no
+                for no, card in enumerate(state.cards)
+                if no not in used and card.get("tool") == result.tool
+            ),
+            None,
+        )
+        if no is None:
+            raise AppError("INVALID_REQUEST", 400, "이 카드의 결과가 아닙니다.")
+        used.add(no)
+        matched.append(state.cards[no])
+    return matched
+
+
+def agent_carry(state: agentstate.AgentState, results: Sequence[AgentResult]) -> AgentCarry:
+    """실행 결과 -> 이어 가기 상태 (5절)
+    - DONE : 실행 완료 줄, data의 번호 칸(…Sn 정수)은 이 턴 번호 칸 값으로
+    - FAILED + errors : 칸 오류를 아직 안 고쳤으면 칸 표시 이름으로 한 번 고치게(Java 문구는 안 줌)
+    - FAILED(두 번째·errors 없음)·CANCELED : 다시 하지 않음"""
+    cards = _result_cards(state, results)
+    seen = {name: set(ids) for name, ids in state.seen.items()}
+    done = list(state.done)
+    lines: list[str] = []
+    fix: set[str] = set()
+    for result, card in zip(results, cards, strict=True):
+        entry = tools.card_entry(result.tool)
+        label = (entry.label if entry is not None else None) or result.tool
+        given = json.dumps(card.get("input") or {}, ensure_ascii=False, default=str)
+        if result.status is ActionStatus.DONE:
+            line = rules.AGENT_DONE_NOTE.format(label=label, tool=result.tool, input=given)
+            if result.data:
+                data = json.dumps(result.data, ensure_ascii=False, default=str)
+                line += rules.AGENT_DONE_DATA.format(data=data)
+                for name, ids in catalog.seen_ids(result.data).items():
+                    seen.setdefault(name, set()).update(ids)
+            lines.append(line)
+            done.append(card)
+        elif result.status is ActionStatus.FAILED and result.errors and not state.fixed:
+            fields = [error.field for error in result.errors]
+            names = _field_names(result.tool, fields) or fields
+            note = rules.AGENT_FIX_NOTE.format(
+                label=label, tool=result.tool, input=given, names=", ".join(names)
+            )
+            lines.append(note)
+            fix.add(result.tool)
+        elif result.status is ActionStatus.FAILED:
+            lines.append(rules.AGENT_FAILED_NOTE.format(label=label, tool=result.tool))
+        else:
+            lines.append(rules.AGENT_CANCELED_NOTE.format(label=label, tool=result.tool))
+    # 실행한 일이 있으면 앞 READ 결과는 실행 전 것 : 그 값으로 답하지 않고 다시 읽게 표시
+    before = (
+        [_stale_read(note) for note in state.notes] if len(done) > len(state.done) else state.notes
+    )
+    notes_list = [*before, *lines]
+    notes = "\n".join([rules.AGENT_NOTES_HEAD, *notes_list, rules.AGENT_NOTES_TAIL])
+    stop = len(done) == len(state.done) and not fix
+    return AgentCarry(
+        state, notes_list, notes, frozenset(fix), state.fixed or bool(fix), done, seen, stop
+    )
+
+
+async def continue_turn(
+    repo: ConversationRepository, room_sn: int, body: AgentContinueRequest, key: str
+) -> Turn:
+    """POST …/agent-continue : 토큰 검사 -> 방(소유는 Java) -> 이어 갈 턴. 사용자 메시지 저장 안 함
+    - 400 INVALID_REQUEST : 키 없음·서명 틀림·만료·다른 방·버전 다름·토큰에 없는 tool
+    - 404 : 남의 대화·없는 방(Java 그대로)"""
+    # 방 확인(남의 대화·없는 방 404)을 먼저 : 그 뒤 토큰 검사
+    room = await repo.get_room(room_sn)
+    if not key:
+        raise AppError("INVALID_REQUEST", 400, "이어 갈 수 없는 요청입니다.")
+    try:
+        state = agentstate.verify(body.agent_token, key, room_sn, time.time())
+    except agentstate.AgentStateError as error:
+        logger.info("에이전트 토큰 거부: %s room=%d", error.reason, room_sn)
+        raise AppError("INVALID_REQUEST", 400, "이어 갈 수 없는 요청입니다.") from None
+    carry = agent_carry(state, body.results)
+    question = next(
+        (m for m in room.messages if m.msg_seq == state.q and m.role_cd == ROLE_USER), None
+    )
+    if question is None:
+        raise AppError("INVALID_REQUEST", 400, "이어 갈 메시지가 없습니다.")
+    return Turn(
+        room_sn,
+        question,
+        room.messages,
+        room.pet_sn,
+        summary=getattr(room, "smry_cn", None),
+        summary_end=getattr(room, "smry_end_msg_seq", None),
+        agent=carry,
+    )
 
 
 def _notice(judged: Judged) -> Callable[[], bool]:
@@ -1542,6 +2609,291 @@ async def save_receipt_result(
     return saved
 
 
+# 대화창 영수증 저장 카드 (SCR-AIM-013, 2026-11-27)
+# React가 /ai/receipts 결과(recptSn·ocr)를 보내면 요약 글 저장 + 영수증 저장 확인 카드(ACTION)
+# 카드 값은 본창 영수증 확인 모달(FN-AIM-009, 프론트 receiptUtils.js)과 같은 규칙
+RECEIPT_TOOL = "draft_receipt_save"
+RECEIPT_ROWS = "pets"
+RECEIPT_CONTENT_MAX = 500
+RECEIPT_HOSPITAL_MAX = 50
+RECEIPT_PLACE_MAX = 80
+RECEIPT_DRUG_NAME_MAX = 40
+# 처방 상태(Java HLTG06, 패턴 HLTC001[01]) : 프론트 checkupTypes.js DOSING·DOSE_ENDED와 같음
+DRUG_DOSING = "HLTC0010"
+DRUG_ENDED = "HLTC0011"
+_PER_DAY = re.compile(r"(\d+)\s*회")
+RECEIPT_ASK = "이렇게 저장할까요?"
+RECEIPT_NEEDS_FORM = "반려동물별로 나눌 줄이 있어 영수증 확인 화면에서 저장해 주세요."
+RECEIPT_NO_TOOL = "영수증 확인 화면에서 저장할 수 있어요."
+RECEIPT_DRUGS_SKIPPED = "처방약 {count}건은 건강 일지에서 직접 입력해 주세요."
+RECEIPT_DUPLICATE = (
+    "{pet}: 가계부에 같은 지출이 있어 가계부 기록은 빼 두었어요. 가계부에도 적으려면 말해 주세요."
+)
+RECEIPT_NEARBY = "{pet}: {day} {hospital} 병원 일정에 연결해요. 연결하지 않으려면 말해 주세요."
+RECEIPT_CHECK_FAILED = "가계부 중복·가까운 일정은 확인하지 못했어요."
+
+
+@dataclass
+class _ReceiptRow:
+    pet: PetInfo
+    contents: list[str]
+    amount: int | None
+    drugs: list[dict]
+
+
+def _compact_name(name: str) -> str:
+    return re.sub(r"\s", "", name)
+
+
+def _join_content(names: Sequence[str]) -> str:
+    # 진료 품목명을 ", "로, 500자를 넘으면 잘라 "…" (receiptUtils joinContent)
+    text = ", ".join(name for name in names if name)
+    if len(text) > RECEIPT_CONTENT_MAX:
+        return text[: RECEIPT_CONTENT_MAX - 1] + "…"
+    return text
+
+
+def split_discount(subtotals: Sequence[int | None], discount: int) -> list[int | None]:
+    """하단 할인을 소계 비율로 나눠 뺀다 : 원 단위 버림, 남는 금액은 마지막 줄
+    소계가 None(인식 못 함)인 줄의 금액은 None (receiptUtils splitDiscount)"""
+    values = [subtotal or 0 for subtotal in subtotals]
+    total = sum(values)
+    discounts = [0] * len(values)
+    if discount > 0 and total > 0 and values:
+        discounts = [discount * value // total for value in values]
+        discounts[-1] += discount - sum(discounts)
+    return [
+        None if subtotal is None else subtotal - cut
+        for subtotal, cut in zip(subtotals, discounts, strict=True)
+    ]
+
+
+def _drug_row(drug: ReceiptOcrDrug, ckup_ymd: date | None, today: date) -> dict | None:
+    # 칸을 다 채울 수 있는 약만 : 시작일 = 검진일, 종료일 = 검진일 + 일수 − 1, 용법의 "N회"
+    name = (drug.mdcn_nm or "").strip()
+    per_day = _PER_DAY.search(drug.mdcn_usage or "")
+    days = drug.mdcn_days
+    if not name or len(name) > RECEIPT_DRUG_NAME_MAX or ckup_ymd is None or not days or days < 1:
+        return None
+    if per_day is None or int(per_day.group(1)) < 1:
+        return None
+    end = ckup_ymd + timedelta(days=days - 1)
+    return {
+        "mdcnNm": name,
+        "mdcnBgngYmd": ckup_ymd.isoformat(),
+        "mdcnEndYmd": end.isoformat(),
+        "dayMdcnNmtm": int(per_day.group(1)),
+        "prscSttsCd": DRUG_ENDED if end < today else DRUG_DOSING,
+    }
+
+
+def receipt_rows(
+    ocr: ReceiptOcr, pets: Sequence[PetInfo], pet_sn: int | None, today: date
+) -> tuple[list[_ReceiptRow], int] | None:
+    """인식 결과 -> 반려동물별 줄과 못 실은 약 수. 줄 배정이 필요하면 None(NEEDS_FORM)
+    - 구역 없는 영수증 : pet_sn 한 줄에 전부, 하단 할인 + 구역 할인을 나눔
+    - 구역 있는 영수증 : 구역 이름과 같은 반려동물(공백 무시), 같은 아이 여러 구역은 한 줄로"""
+    sections = ocr.sections
+    skipped = 0
+    if all(section.section_nm is None for section in sections):
+        pet = next((p for p in pets if p.pet_sn == pet_sn), None)
+        if pet is None:
+            return None
+        amounts = [line.item_amt for section in sections for line in section.items] + [
+            drug.mdcn_amt for section in sections for drug in section.drugs
+        ]
+        subtotal = sum(a or 0 for a in amounts) if amounts else None
+        discount = (ocr.btm_dscnt_amt or 0) + sum(s.dscnt_amt or 0 for s in sections)
+        drugs = [_drug_row(d, ocr.ckup_ymd, today) for s in sections for d in s.drugs]
+        skipped = sum(d is None for d in drugs)
+        names = [line.item_nm or "" for s in sections for line in s.items]
+        row = _ReceiptRow(
+            pet,
+            [_join_content(names)],
+            split_discount([subtotal], discount)[0],
+            [d for d in drugs if d is not None],
+        )
+        return [row], skipped
+    matched: list[PetInfo] = []
+    for section in sections:
+        name = _compact_name(section.section_nm or "")
+        pet = next((p for p in pets if name and _compact_name(p.pet_nm) == name), None)
+        if pet is None:
+            return None
+        matched.append(pet)
+    subtotals = [
+        None if s.sbttl_amt is None else s.sbttl_amt - (s.dscnt_amt or 0) for s in sections
+    ]
+    amounts = split_discount(subtotals, ocr.btm_dscnt_amt or 0)
+    rows: dict[int, _ReceiptRow] = {}
+    for pet, section, amount in zip(matched, sections, amounts, strict=True):
+        drugs = [_drug_row(d, ocr.ckup_ymd, today) for d in section.drugs]
+        skipped += sum(d is None for d in drugs)
+        row = rows.setdefault(pet.pet_sn, _ReceiptRow(pet, [], None, []))
+        row.contents.append(_join_content([line.item_nm or "" for line in section.items]))
+        if amount is not None and amount >= 1:
+            row.amount = (row.amount or 0) + amount
+        row.drugs += [d for d in drugs if d is not None]
+    return list(rows.values()), skipped
+
+
+def _receipt_values(request: ReceiptCardRequest, rows: Sequence[_ReceiptRow]) -> dict:
+    ocr = request.ocr
+    assert ocr is not None
+    values: dict = {"recptSn": request.recpt_sn}
+    hospital = (ocr.hsptl_nm or "").strip()
+    if hospital and len(hospital) <= RECEIPT_HOSPITAL_MAX:
+        values["hsptlNm"] = hospital
+        if len(hospital) <= RECEIPT_PLACE_MAX:
+            values["expndPlcusNm"] = hospital
+    if ocr.ckup_ymd is not None:
+        values["ckupYmd"] = ocr.ckup_ymd.isoformat()
+    lines = []
+    for row in rows:
+        line: dict = {catalog.PET_SN: row.pet.pet_sn}
+        content = _join_content([text.strip() for text in row.contents])
+        if content:
+            line["ckupCn"] = content
+        amount = row.amount if row.amount is not None and row.amount >= 1 else None
+        if amount is not None:
+            line["amt"] = amount
+        line["expenseYn"] = amount is not None
+        if row.drugs:
+            line["drugs"] = row.drugs
+        lines.append(line)
+    values[RECEIPT_ROWS] = lines
+    return values
+
+
+async def _receipt_check(
+    checker: ReceiptSaveChecker, recpt_sn: int, values: dict, rows: Sequence[_ReceiptRow]
+) -> list[str]:
+    """저장 전 확인(Java save-check) : 겹치는 지출 줄은 가계부 기록을 끄고, 가까운 일정은 연결
+    - 실패하면 카드 그대로 두고 안내 한 줄"""
+    lines = values[RECEIPT_ROWS]
+    if "ckupYmd" not in values:
+        return []
+    body = {
+        "ckupYmd": values["ckupYmd"],
+        "pets": [
+            {
+                catalog.PET_SN: line[catalog.PET_SN],
+                "amt": line.get("amt"),
+                "expenseYn": line["expenseYn"],
+            }
+            for line in lines
+        ],
+    }
+    try:
+        data = await checker.check(recpt_sn, body)
+    except (AppError, BackendError) as error:
+        logger.info("영수증 저장 전 확인 실패: %s", type(error).__name__)
+        return [RECEIPT_CHECK_FAILED]
+    data = data if isinstance(data, dict) else {}
+    names = {row.pet.pet_sn: row.pet.pet_nm for row in rows}
+    notes: list[str] = []
+    duplicated = {
+        item.get(catalog.PET_SN)
+        for item in data.get("duplicateExpenses") or []
+        if isinstance(item, dict)
+    }
+    nearby = {
+        item.get(catalog.PET_SN): item
+        for item in data.get("nearbySchedules") or []
+        if isinstance(item, dict) and item.get("schdlSn") is not None
+    }
+    for line in lines:
+        pet_sn = line[catalog.PET_SN]
+        pet = names.get(pet_sn, "")
+        if pet_sn in duplicated and line["expenseYn"]:
+            line["expenseYn"] = False
+            notes.append(RECEIPT_DUPLICATE.format(pet=pet))
+        schedule = nearby.get(pet_sn)
+        if schedule is not None:
+            line["schdlSn"] = schedule["schdlSn"]
+            notes.append(
+                RECEIPT_NEARBY.format(
+                    pet=pet,
+                    day=_schedule_day(schedule.get("schdlDt")),
+                    hospital=schedule.get("hsptlNm") or "",
+                ).replace("  ", " ")
+            )
+    return notes
+
+
+def _schedule_day(value: object) -> str:
+    try:
+        day = datetime.fromisoformat(str(value))
+    except ValueError:
+        return ""
+    return f"{day.month}월 {day.day}일"
+
+
+def _receipt_line(line: dict, names: dict[int, str]) -> str:
+    parts = [names.get(line[catalog.PET_SN], "")]
+    if line.get("amt") is not None:
+        parts.append(f"{line['amt']:,}원")
+    if line.get("drugs"):
+        parts.append(f"약 {len(line['drugs'])}건")
+    return "- " + " · ".join(part for part in parts if part)
+
+
+async def save_receipt_card(
+    repo: ConversationRepository,
+    contexts: RegisterContextRepository,
+    checker: ReceiptSaveChecker,
+    room_sn: int,
+    request: ReceiptCardRequest,
+) -> ReceiptCardResult:
+    """영수증 분석 결과 요약 AI 메시지 + 영수증 저장 확인 카드(카드는 미저장)
+    - 줄 배정이 필요하면(구역 이름 불일치·반려동물 없음) 카드 없이 NEEDS_FORM
+    - 도구 목록에 없으면 NO_TOOL"""
+    ocr = request.ocr
+    summary = receipt_result_message(
+        ReceiptResultRequest(
+            result=request.result,
+            hsptl_nm=ocr.hsptl_nm if ocr else None,
+            ckup_ymd=ocr.ckup_ymd if ocr else None,
+            recpt_amt=ocr.recpt_amt if ocr else None,
+        )
+    )
+    lines = [summary]
+    card: ActionCard | None = None
+    reason: ReceiptNoCardReason | None = None
+    entry = tools.card_entry(RECEIPT_TOOL)
+    if request.result is ReceiptResult.RECOGNIZED and ocr is not None:
+        if entry is None:
+            logger.info("영수증 저장 도구 없음: 카드 없이 안내")
+            lines.append(RECEIPT_NO_TOOL)
+            reason = ReceiptNoCardReason.NO_TOOL
+        else:
+            pets = await contexts.get_pets()
+            built = receipt_rows(ocr, pets, request.pet_sn, rules.today_kst())
+            if built is None:
+                logger.info("영수증 저장 카드 없음: 줄 배정 필요")
+                lines.append(RECEIPT_NEEDS_FORM)
+                reason = ReceiptNoCardReason.NEEDS_FORM
+            else:
+                rows, skipped = built
+                values = _receipt_values(request, rows)
+                assert request.recpt_sn is not None
+                notes = await _receipt_check(checker, request.recpt_sn, values, rows)
+                card = action_card(entry, values, list(pets), [], None, None)
+                names = {pet.pet_sn: pet.pet_nm for pet in pets}
+                lines.append(RECEIPT_ASK)
+                lines += [_receipt_line(line, names) for line in values[RECEIPT_ROWS]]
+                if skipped:
+                    lines.append(RECEIPT_DRUGS_SKIPPED.format(count=skipped))
+                lines += notes
+                lines += _missing_lines([card]) or [ACTION_ASK_CONFIRM]
+                logger.info("영수증 저장 카드: %d줄 약 못 실음 %d", len(rows), skipped)
+    saved: list[ConversationMessage] = []
+    if request.cnvrs_cn is not None:
+        saved.append(await repo.add_message(room_sn, ROLE_USER, request.cnvrs_cn))
+    saved.append(await repo.add_message(room_sn, ROLE_AI, "\n".join(lines)))
+    return ReceiptCardResult(messages=saved, action=card, no_card_reason=reason)
+
+
 def _rejected(entry: "catalog.CatalogEntry", values: dict, card: dict) -> list[str]:
     # LLM 값이 Java 칸 규칙 밖이라 카드에서 비운 칸 : 되물음(배열·번호·날짜 hook 칸 제외)
     plain = {name: value for name, value in values.items() if name not in entry.hook_roles}
@@ -1564,8 +2916,10 @@ def action_card(
     draft_pet: int | None,
     room_pet: int | None,
     rejected: Sequence[str] = (),
+    target_text: str | None = None,
 ) -> ActionCard:
-    """확인 카드(2단계 쓰기) : Java 칸 그대로 + 검증한 input + 빈 필수 칸"""
+    """확인 카드(2단계 쓰기) : Java 칸 그대로 + 검증한 input + 빈 필수 칸
+    - target_text : 삭제 카드의 대상 글(READ 행 또는 돌려받은 카드). 삭제 카드가 아니면 버림"""
     values = dict(values)
     pet = None
     choices: list[PetChoice] = []
@@ -1581,6 +2935,17 @@ def action_card(
             values[catalog.PET_SN] = pet.pet_sn
         else:
             choices = pet_choices(pets, named)
+    elif "pet_optional" in entry.hooks:
+        # 지출 조건 삭제 : 문장 속 이름이 하나면 그 아이, 아니면 모든 아이(돌려받은 카드 값 그대로)
+        if len(named) == 1:
+            pet = named[0]
+            values[catalog.PET_SN] = pet.pet_sn
+        elif draft_pet is not None:
+            values[catalog.PET_SN] = draft_pet
+            pet = next((p for p in pets if p.pet_sn == draft_pet), None)
+    if is_delete(entry) and target_text is None and pet is not None and _pet_target(entry):
+        # 반려동물 삭제 : 경로 번호가 petSn뿐이라 READ 행 대신 고른 아이 이름·종·품종
+        target_text = " · ".join(p for p in (pet.pet_nm, pet.pet_se_nm, pet.vrty_nm) if p)
     notice = None
     name = values.get("careArtclNm")
     warn = "same_name_warning" in entry.hooks and pet is not None and isinstance(name, str)
@@ -1606,8 +2971,63 @@ def action_card(
             "petChoices": choices,
             "petNm": pet.pet_nm if pet else None,
             "notice": notice,
+            "targetText": target_text if is_delete(entry) else None,
         }
     )
+
+
+# 반려동물 수정 카드의 목록 칸 : Java PATCH는 칸 전체를 바꿔 기존 항목이 지워진다 (2026-11-25)
+DRAFT_PET_UPDATE = "draft_pet_update"
+PET_LIST_FIELDS = ("algyCn", "dssCn", "chrcCn")
+
+
+async def merge_pet_lists(card: ActionCard, text: str, reader: ToolReader) -> ActionCard:
+    """알레르기·질환·특징을 말했으면 지금 값(GET /api/pets/{petSn})을 읽어 더하기·빼기·바꾸기로 합침
+    - 읽기 실패면 카드 그대로(말한 값만) : 로그만 남김"""
+    said = {name: card.values[name] for name in PET_LIST_FIELDS if card.values.get(name)}
+    pet_sn = card.values.get(catalog.PET_SN)
+    if card.tool != DRAFT_PET_UPDATE or not said or pet_sn is None:
+        return card
+    mode = rules.list_edit_mode(text)
+    current: object = {}
+    if mode != rules.LIST_REPLACE:
+        try:
+            current = await reader.read(f"/api/pets/{pet_sn}", {})
+        except (AppError, BackendError) as error:
+            logger.info("반려동물 목록 칸 합치기 읽기 실패: %s", type(error).__name__)
+            return card
+    now = current if isinstance(current, dict) else {}
+    merged = {name: rules.merge_list(now.get(name), value, mode) for name, value in said.items()}
+    return card.model_copy(update={"values": card.values | merged})
+
+
+# 칸 전체를 보내는 PUT 카드 : 말하지 않은 칸은 지금 값(이 READ)으로 채움 (2026-11-27 알림 설정)
+CURRENT_VALUE_READS = {"draft_notification_settings": "get_notification_settings"}
+
+
+async def fill_current_values(card: ActionCard, reader: ToolReader) -> ActionCard:
+    """빈 칸을 지금 설정값으로 : 읽기 실패·도구 없음이면 카드 그대로(빈 칸은 되물음)"""
+    entry = tools.card_entry(card.tool)
+    read_name = CURRENT_VALUE_READS.get(card.tool)
+    read = tools.read_entry(read_name) if read_name else None
+    if entry is None or read is None:
+        return card
+    blank = [name for name in entry.params if card.values.get(name) is None]
+    request = catalog.read_request(read, {}, None) if blank else None
+    if request is None:
+        return card
+    try:
+        current = await reader.read(*request)
+    except (AppError, BackendError) as error:
+        logger.info("지금 값 읽기 실패: %s %s", read.name, type(error).__name__)
+        return card
+    if not isinstance(current, dict):
+        return card
+    found = {name: current[name] for name in blank if current.get(name) is not None}
+    wrong = set(catalog.invalid_input(entry, found))
+    filled = {name: value for name, value in found.items() if name not in wrong}
+    missing = [name for name in card.missing if name not in filled]
+    return card.model_copy(update={"values": card.values | filled, "missing": missing})
 
 
 async def _action_reply(
@@ -1640,12 +3060,37 @@ async def _action_reply(
     cards: list[ActionCard] = []
     for (item, values, rejected), group in zip(picked, groups, strict=True):
         prior = next((draft for draft in priors if draft.tool == item.name), None)
+        if prior is None:
+            values = _carry_lesion(item, values, priors)
         draft_pet = prior.values.get(catalog.PET_SN) if prior is not None else None
+        target = prior.target_text if prior is not None else None
         for pets_of in group or [named]:
-            cards.append(action_card(item, values, pets, pets_of, draft_pet, turn.pet_sn, rejected))
+            cards.append(
+                action_card(item, values, pets, pets_of, draft_pet, turn.pet_sn, rejected, target)
+            )
     if len(cards) > len(picked):
         logger.info("반려동물별 쓰기 카드 %d장", len(cards))
     return cards
+
+
+# 분석 카드 뒤 이미 관찰 중인 항목에 더하기 (SCR-AIM-013, 2026-11-26)
+# 돌려받은 관찰 항목 카드(lesion-card) -> 관찰 기록 카드 : LLM이 주지 않은 메모·관찰 일시를 옮김
+OBSERVATION_CYCLE_TOOL = "draft_observation_cycle"
+LESION_CARRY_FIELDS = ("memoCn", "obsrvDt")
+
+
+def _carry_lesion(entry: "catalog.CatalogEntry", values: dict, priors: list[ActionDraft]) -> dict:
+    if entry.name != OBSERVATION_CYCLE_TOOL:
+        return values
+    source = next((draft for draft in priors if draft.tool == OBSERVATION_TOOL), None)
+    if source is None:
+        return values
+    carried = dict(values)
+    for name in LESION_CARRY_FIELDS:
+        value = source.values.get(name)
+        if name in entry.params and carried.get(name) is None and value not in (None, ""):
+            carried[name] = value
+    return carried
 
 
 def _pet_groups(entry: "catalog.CatalogEntry", named: list[PetInfo]) -> list[list[PetInfo]]:
@@ -1688,12 +3133,14 @@ def _kept_cards(
             values, rejected = per_prior[no]
             # 이름으로 고른 카드면 그 이름, 아니면 카드의 반려동물 그대로
             own = [pet for pet in named if pet.pet_sn == draft_pet] if named_sns else []
-            found = action_card(spec[0], values, pets, own, draft_pet, room_pet, rejected)
+            found = action_card(
+                spec[0], values, pets, own, draft_pet, room_pet, rejected, draft.target_text
+            )
         else:
             if draft.tool not in built:
                 entry, values, rejected = spec
                 built[draft.tool] = action_card(
-                    entry, values, pets, named, draft_pet, room_pet, rejected
+                    entry, values, pets, named, draft_pet, room_pet, rejected, draft.target_text
                 )
             found = built[draft.tool]
         if found is not None:
@@ -1707,7 +3154,8 @@ def _prior_card(draft: ActionDraft, pets: list[PetInfo], room_pet: int | None) -
     if entry is None:
         return None
     values = catalog.card_input(entry, {}, None, {}, draft.values)
-    return action_card(entry, values, pets, [], draft.values.get(catalog.PET_SN), room_pet)
+    pet_sn = draft.values.get(catalog.PET_SN)
+    return action_card(entry, values, pets, [], pet_sn, room_pet, (), draft.target_text)
 
 
 def action_summary(card: ActionCard) -> str:
@@ -1717,20 +3165,211 @@ def action_summary(card: ActionCard) -> str:
     if entry is None:
         return label
     values = {name: value for name, value in card.values.items() if value is not None}
-    clock = values.get(catalog.HR_INPUT) is not False
-    parts = [
-        _input_text(param, values[name], clock, _count_word(entry.name, name))
-        for name, param in entry.params.items()
-        if name in values and name not in entry.fixed and _summarized(name, param)
-    ]
-    parts = [part for part in parts if part]
+    parts = _value_parts(entry, values)
+    if card.target_text:
+        # 삭제 카드 : 본문 칸이 없어 대상 글로
+        parts = [card.target_text, *parts]
     head = f"{card.pet_nm} " if card.pet_nm else ""
     return f"{head}{label}" + (f" — {' · '.join(parts)}" if parts else "")
 
 
-def action_ask_message(card: ActionCard | list[ActionCard]) -> str:
-    """확인 카드 턴의 저장 글 : 요약 + 빈 칸 안내 또는 확인 말 안내
-    - 카드가 둘 이상이면 번호 붙은 요약 줄, 빈 칸은 카드 번호로 (여러 명령 ②)"""
+def delete_target_text(
+    entry: "catalog.CatalogEntry", values: dict, rows: "catalog.Rows"
+) -> str | None:
+    """삭제 카드의 대상 글 : 경로 번호(petSn 빼고)의 이 턴 READ 행에서 target_fields 칸 (2026-11-25)
+    - "칸:단위"는 값 뒤 단위, "번호칸>칸"은 그 번호의 다른 READ 행에서 칸을 읽음
+    - 코드 칸은 이름(행의 …Nm 칸, 없으면 도구 목록 코드). 이름을 모르면 그 칸은 뺀다
+    - 일지 수치(rcdNvl)는 같은 행 항목 이름의 단위(체중 kg 등)"""
+    ids = [
+        name
+        for name, param in entry.params.items()
+        if param.loc == "path" and catalog.is_id(name) and name != catalog.PET_SN
+    ]
+    if ids:
+        row = rows.get((ids[0], values.get(ids[0])))
+        return _target_row_text(entry, row, rows) if row is not None else None
+    lists = [
+        name for name, param in entry.params.items() if catalog.is_id_list(param) and param.required
+    ]
+    if lists:
+        # 여러 건 삭제(지출 번호 목록, 2026-11-27) : 번호마다 READ 행 글을 " / "로
+        key = catalog.id_list_key(lists[0])
+        found = [rows.get((key, sn)) for sn in values.get(lists[0]) or []]
+        texts = [_target_row_text(entry, row, rows) for row in found if row is not None]
+        return " / ".join(text for text in texts if text) or None
+    if _pet_target(entry):
+        # 반려동물 삭제 : action_card가 고른 아이 이름으로
+        return None
+    # 번호 없는 삭제(지출 조건 삭제) : 카드 값 요약 + 공용 + 지울 건수
+    parts = _value_parts(entry, {k: v for k, v in values.items() if k != EXPECTED_COUNT})
+    if values.get("common") is True:
+        parts.append(COMMON_EXPENSE)
+    if isinstance(values.get(EXPECTED_COUNT), int):
+        parts.append(f"{values[EXPECTED_COUNT]:,}건")
+    return " · ".join(parts) or None
+
+
+# 지출 조건 삭제(delete_expenses_by_condition)의 지울 건수 칸·공용 지출 글
+EXPECTED_COUNT = "expectedCnt"
+COMMON_EXPENSE = "공용 지출"
+
+
+def _pet_target(entry: "catalog.CatalogEntry") -> bool:
+    # 경로 칸이 petSn 하나뿐인 도구(반려동물 삭제)
+    path = [name for name, param in entry.params.items() if param.loc == "path"]
+    return path == [catalog.PET_SN]
+
+
+def _target_row_text(entry: "catalog.CatalogEntry", row: dict, rows: "catalog.Rows") -> str | None:
+    parts: list[str] = []
+    indicator = None
+    for spec in entry.target_fields:
+        field, _, unit = spec.partition(":")
+        source: dict | None = row
+        if ">" in field:
+            sn_name, _, field = field.partition(">")
+            source = rows.get((sn_name, row.get(sn_name)))
+        if source is None:
+            continue
+        text = _row_value(source, field)
+        if text is None:
+            continue
+        if field == "dailyRcdIdctCd":
+            indicator = text
+        if field == "rcdNvl" and indicator in VALUE_UNITS:
+            unit = VALUE_UNITS[indicator]
+        parts.append(f"{text}{unit}")
+    return " · ".join(parts) or None
+
+
+def _row_value(row: dict, field: str) -> str | None:
+    # READ 행의 값 하나를 글로 : 날짜는 "11-24(월)", 일시는 시간까지(hrInptYn false면 날짜만)
+    value = row.get(field)
+    if value is None or value == "" or isinstance(value, bool):
+        return None
+    if field.endswith("Cd"):
+        return row.get(f"{field}Nm") or _code_name(field, str(value))
+    if isinstance(value, int):
+        return f"{value:,}"
+    if isinstance(value, float):
+        return f"{value:g}"
+    text = str(value)
+    try:
+        if "T" in text:
+            moment = datetime.fromisoformat(text)
+            if row.get(catalog.HR_INPUT) is False:
+                return _md(moment.date())
+            return f"{_md(moment.date())} {moment:%H:%M}"
+        if len(text) == 10:
+            return _md(date.fromisoformat(text))
+    except ValueError:
+        pass
+    return text
+
+
+def _code_name(field: str, value: str) -> str | None:
+    # 도구 목록에서 같은 Java 칸 이름의 코드 값 이름(삭제 도구는 코드 칸이 없어 다른 도구에서 찾음)
+    active = tools.active_catalog()
+    for entry in active.entries.values() if active is not None else ():
+        param = entry.params.get(field)
+        if param is None or not param.codes:
+            continue
+        name = next((code.nm for code in param.codes if code.cd == value), None)
+        if name is not None:
+            return name
+    return None
+
+
+def _value_parts(entry: "catalog.CatalogEntry", values: dict) -> list[str]:
+    # 카드·결과 요약의 값 글 : 번호·petSn·참거짓·파일·고정 칸 빼고, 수치(decimal)에는 단위
+    clock = values.get(catalog.HR_INPUT) is not False
+    unit = _value_unit(entry, values)
+    parts: list[str] = []
+    for name, param in entry.params.items():
+        if name not in values or name in entry.fixed or not _summarized(name, param):
+            continue
+        text = _input_text(param, values[name], clock, _count_word(entry.name, name))
+        if text and param.type == "decimal":
+            text += unit or _param_unit(entry, name)
+        if text:
+            parts.append(text)
+    return parts
+
+
+def _value_unit(entry: "catalog.CatalogEntry", values: dict) -> str:
+    # 같은 카드의 코드 칸 이름(체중·식사량 등) -> 수치 단위, 모르면 빈 글
+    for name, param in entry.params.items():
+        if param.type != "code" or values.get(name) is None:
+            continue
+        nm = next((code.nm for code in param.codes or () if code.cd == values[name]), None)
+        if nm in VALUE_UNITS:
+            return VALUE_UNITS[nm]
+    return ""
+
+
+_PARAM_UNIT = re.compile(r"(?<![A-Za-z])(kg|ml|cm)(?![A-Za-z])")
+
+
+def _param_unit(entry: "catalog.CatalogEntry", java: str) -> str:
+    # 코드 칸이 없는 수치 칸(등록 몸무게 petBdwg 등) : LLM 칸 설명의 단위("kg 숫자만")
+    prompt = catalog.tool_prompts().get(entry.name)
+    llm = next((name for name, to in entry.to_java_name.items() if to == java), None)
+    if prompt is None or llm is None or llm not in prompt.params:
+        return ""
+    found = _PARAM_UNIT.search(prompt.params[llm].description)
+    return found.group(1) if found else ""
+
+
+def _photo_missing(card: ActionCard) -> bool:
+    # 사진(file) 칸이 빈 카드 : React가 카드에 붙일 칸
+    return any(m in card.params and card.params[m].type == catalog.FILE for m in card.missing)
+
+
+def _photo_lines(cards: list[ActionCard]) -> list[str]:
+    if len(cards) == 1:
+        return [ACTION_ASK_PHOTO] if _photo_missing(cards[0]) else []
+    return [
+        ACTION_ASK_PHOTO_NO.format(no=no)
+        for no, item in enumerate(cards, start=1)
+        if _photo_missing(item)
+    ]
+
+
+_SAID_DECIMAL = re.compile(r"\d+\.\d+")
+
+
+def _rounded_lines(cards: list[ActionCard], said: str) -> list[str]:
+    # 회원이 말한 수(4.567)가 Java 소수 자리(scale)보다 길어 카드 값(4.57)으로 반올림됐으면 알림
+    numbers = [Decimal(n) for n in _SAID_DECIMAL.findall(said)]
+    lines: list[str] = []
+    for card in cards:
+        entry = tools.card_entry(card.tool)
+        if entry is None:
+            continue
+        unit = _value_unit(entry, card.values)
+        for name, param in entry.params.items():
+            value = card.values.get(name)
+            scale = param.scale
+            if param.type != "decimal" or scale is None or not isinstance(value, (int, float)):
+                continue
+            step = Decimal(1).scaleb(-scale)
+            rounded = any(
+                -n.as_tuple().exponent > scale
+                and n.quantize(step, rounding=ROUND_HALF_UP) == Decimal(str(value))
+                for n in numbers
+            )
+            if rounded and scale in DECIMAL_PLACES:
+                shown = f"{value:g}{unit or _param_unit(entry, name)}"
+                line = ACTION_ROUNDED.format(place=DECIMAL_PLACES[scale], value=shown)
+                if line not in lines:
+                    lines.append(line)
+    return lines
+
+
+def action_ask_message(card: ActionCard | list[ActionCard], said: str = "") -> str:
+    """확인 카드 턴의 저장 글 : 요약 + 반올림·사진 안내 + 빈 칸 안내 또는 확인 말 안내
+    - 카드가 둘 이상이면 번호 붙은 요약 줄, 빈 칸은 카드 번호로 (여러 명령 ②)
+    - said : 회원이 이 턴에 한 말(반올림 알림용)"""
     cards = card if isinstance(card, list) else [card]
     if len(cards) == 1:
         summary = action_summary(cards[0])
@@ -1740,9 +3379,18 @@ def action_ask_message(card: ActionCard | list[ActionCard]) -> str:
             for no, item in enumerate(cards, start=1)
         )
     lines = [ACTION_ASK_TEMPLATE.format(summary=summary)]
+    lines += _rounded_lines(cards, said)
+    lines += _photo_lines(cards)
     missing = _missing_lines(cards)
-    lines.extend(missing or [_worded(ACTION_ASK_CONFIRM, cards)])
+    lines.extend(missing or [_confirm_line(cards)])
     return "\n".join(lines)
+
+
+def _confirm_line(cards: Sequence[ActionCard]) -> str:
+    # 확인 말 안내 : 모두 삭제 카드면 고칠 칸이 없어 "삭제해 줘"만
+    if cards and all(is_delete(card) for card in cards):
+        return ACTION_ASK_DELETE
+    return _worded(ACTION_ASK_CONFIRM, cards)
 
 
 def _missing_lines(cards: list[ActionCard]) -> list[str]:
@@ -1810,15 +3458,19 @@ def _said_missing(card: ActionCard) -> list[str]:
 
 
 def _missing_names(card: ActionCard) -> list[str]:
-    # 빈 Java 칸 -> 도구 설명의 LLM 칸 설명 앞부분("기록 날짜"). 설명이 없으면 이름을 빼고
+    return _field_names(card.tool, _said_missing(card))
+
+
+def _field_names(tool: str, fields: Sequence[str]) -> list[str]:
+    # Java 칸 -> 도구 설명의 LLM 칸 설명 앞부분("기록 날짜"). 설명이 없으면 이름을 빼고
     # Java 칸 이름은 보이지 않는다. date hook이 만드는 칸(hrInptYn)은 날짜 칸 이름으로 합침
-    entry = tools.card_entry(card.tool)
-    prompt = catalog.tool_prompts().get(card.tool)
+    entry = tools.card_entry(tool)
+    prompt = catalog.tool_prompts().get(tool)
     by_java = {java: name for name, java in entry.to_java_name.items()} if entry else {}
     roles = entry.hook_roles if entry else {}
     ymd = next((name for name, role in roles.items() if role == "date:ymd"), None)
     names: list[str] = []
-    for java in _said_missing(card):
+    for java in fields:
         if java == catalog.PET_SN:
             names.append(PET_LABEL)
             continue
@@ -1840,9 +3492,18 @@ def _missing_names(card: ActionCard) -> list[str]:
 def _names_subject(names: list[str]) -> str:
     # "기록 날짜, 반려동물" + 이/가 (마지막 글자 받침 기준)
     joined = ", ".join(names)
-    last = joined[-1] if joined else ""
-    batchim = "가" <= last <= "힣" and (ord(last) - ord("가")) % 28 != 0
-    return joined + ("이" if batchim else "가")
+    return joined + ("이" if _batchim(joined) else "가")
+
+
+def _names_object(names: list[str]) -> str:
+    # "수치" + 을/를
+    joined = ", ".join(names)
+    return joined + ("을" if _batchim(joined) else "를")
+
+
+def _batchim(text: str) -> bool:
+    last = text[-1] if text else ""
+    return "가" <= last <= "힣" and (ord(last) - ord("가")) % 28 != 0
 
 
 async def _action_answer(
@@ -1857,7 +3518,7 @@ async def _action_answer(
     # 여러 명령 ② : 카드가 여럿이면 모두 빈 칸이 없을 때만 실행 지시, 취소 말은 모두 버림
     entries = [e for draft in priors if (e := tools.card_entry(draft.tool)) is not None]
     emit(("intent", Intent(kind=IntentKind.ACTION)))
-    verb = action_verb([entry.call.method for entry in entries])
+    verb = _joined_verb([entry_verb(entry) for entry in entries])
     if reply == rules.ACTION_CANCEL or not entries:
         drop = ACTION_DROP_MESSAGE.replace(ACTION_VERB_ADD, verb)
         saved = await _save(repo, turn.room_sn, drop, True)
@@ -1870,20 +3531,66 @@ async def _action_answer(
         saved = await _save(repo, turn.room_sn, "\n".join(missing), True)
         emit(("done", AnswerDone(message=saved, action=cards[0], actions=cards)))
         return
+    if not _delete_confirmed(cards, turn.question.cnvrs_cn):
+        # 삭제 카드는 "응"·"네"만으로 지우지 않음 : 삭제 동사(섞이면 "진행"도)가 든 말만
+        saved = await _save(repo, turn.room_sn, ACTION_DELETE_CONFIRM, True)
+        emit(("done", AnswerDone(message=saved, action=cards[0], actions=cards)))
+        return
     logger.info("확인 카드 실행 지시: %s", ", ".join(card.tool for card in cards))
-    execute = ACTION_EXECUTE_MESSAGE.replace(ACTION_VERB_ADD, verb)
-    saved = await _save(repo, turn.room_sn, execute, True)
+    saved = await _save(repo, turn.room_sn, _execute_line(cards), True)
     done = AnswerDone(message=saved, action=cards[0], actions=cards, execute=True)
     emit(("done", done))
 
 
+def _execute_line(cards: Sequence[ActionCard]) -> str:
+    # 실행 지시 글 : "등록할게요."(동사는 카드 종류, 사진 칸만 빈 카드가 있으면 "사진과 함께 …")
+    photo = any(_photo_missing(card) for card in cards)
+    return _worded(ACTION_EXECUTE_PHOTO_MESSAGE if photo else ACTION_EXECUTE_MESSAGE, cards)
+
+
+def runs_now(cards: Sequence[ActionCard], text: str) -> bool:
+    """동사형 명령(2026-11-26 팀 합의) : 첫 턴에 확인 말 없이 바로 실행할지
+    - 쓰기 명령형 문장이고 말로 물을 빈 칸(같은 이름 반려동물 포함)이 없을 때
+    - 삭제 카드는 삭제 동사가 든 말일 때만(섞이면 "진행"도)"""
+    if not cards or not rules.commands_now(text):
+        return False
+    return not _missing_lines(list(cards)) and _delete_confirmed(cards, text)
+
+
+def action_run_message(cards: list[ActionCard], said: str = "") -> str:
+    """바로 실행 턴의 저장 글 : 요약(여럿이면 번호 줄) + 반올림 안내 + 실행 지시 글"""
+    if len(cards) == 1:
+        lines = [action_summary(cards[0])]
+    else:
+        lines = [
+            ACTION_ASK_LINE.format(no=no, summary=action_summary(item))
+            for no, item in enumerate(cards, start=1)
+        ]
+    lines += _rounded_lines(cards, said)
+    lines.append(_execute_line(cards))
+    return "\n".join(lines)
+
+
+def _delete_confirmed(cards: Sequence[ActionCard], text: str) -> bool:
+    # 삭제 카드가 없으면 늘 참. 모두 삭제면 삭제 동사, 섞이면 삭제 동사 또는 "진행"
+    if not any(is_delete(card) for card in cards):
+        return True
+    if rules.says_delete(text):
+        return True
+    return not all(is_delete(card) for card in cards) and rules.says_proceed(text)
+
+
 def _uses_pets(entry: "catalog.CatalogEntry") -> bool:
-    # 반려동물 목록이 필요한 카드 : 카드의 petSn(pet) 또는 배열 줄의 petSn(line_pet)
-    return "pet" in entry.hooks or "line_pet" in entry.hooks
+    # 반려동물 목록이 필요한 카드 : 카드의 petSn(pet·pet_optional) 또는 배열 줄의 petSn(line_pet)
+    return bool({"pet", "line_pet", "pet_optional"} & set(entry.hooks))
 
 
+# 값 목록 칸이 빈 목록일 때 요약 글
+VALUE_LIST_EMPTY = "없음"
 ACTION_FAILED_MESSAGE = "실패 — {label} · 저장하지 못했어요."
 ACTION_CANCELED_MESSAGE = "취소됨 — {label} · 저장하지 않았어요."
+ACTION_FAILED_DELETE_MESSAGE = "실패 — {label} · 삭제하지 못했어요."
+ACTION_CANCELED_DELETE_MESSAGE = "취소됨 — {label} · 삭제하지 않았어요."
 # 배열 칸이 2줄 이상이면 펼치지 않고 줄 수로 (2026-11-24)
 ARRAY_COUNT = "{count}건"
 
@@ -1901,6 +3608,10 @@ def _input_text(
     clock: bool = True,
     count: str | None = None,
 ) -> str:
+    if catalog.is_value_list(param):
+        # 값 목록(사전 알림 시점) : 값 이름을 ", "로, 빈 목록은 "없음"
+        items = value if isinstance(value, list) else []
+        return ", ".join(str(item) for item in items) or VALUE_LIST_EMPTY
     if param.type == catalog.ARRAY:
         # 배열 : 1줄이면 값(번호·uuid·petSn·참거짓 칸 빼고)을 " / "로 펼치고,
         # 2줄 이상이거나 줄 수 말(count)이 있으면 줄 수만
@@ -1935,7 +3646,16 @@ def _input_text(
 def action_result_message(request: ActionResultRequest, head: Sequence[str] = ()) -> str:
     # 확인 카드 결과 요약 : 도구 표시 이름 + input(번호 칸·참거짓 제외). 저장 글은 서버가 정함
     entry, values = _result_values(request)
-    return _result_text(request.status, entry, values, head)
+    return _result_text(
+        request.status, entry, values, head, _error_fields(request), request.target_text
+    )
+
+
+def _error_fields(request: ActionResultRequest) -> list[str]:
+    # FAILED의 Java 400 칸 오류(React가 data를 그대로) : 칸 이름만 쓰고 Java 문구는 버림
+    if request.status is not ActionStatus.FAILED:
+        return []
+    return [error.field for error in request.errors]
 
 
 def _result_values(request: ActionResultRequest) -> tuple["catalog.CatalogEntry", dict]:
@@ -1958,23 +3678,34 @@ def _result_values(request: ActionResultRequest) -> tuple["catalog.CatalogEntry"
 
 
 def _result_text(
-    status: ActionStatus, entry: "catalog.CatalogEntry", values: dict, head: Sequence[str]
+    status: ActionStatus,
+    entry: "catalog.CatalogEntry",
+    values: dict,
+    head: Sequence[str],
+    errors: Sequence[str] = (),
+    target_text: str | None = None,
 ) -> str:
     # DONE "✔ <label> — <요약>", CANCELED·FAILED "<말> — <label> · <요약> · <끝말>"
     # (요약이 없으면 label만)
+    # 삭제 카드 : 요약은 대상 글, 끝말은 "삭제하지 않았어요"·"삭제하지 못했어요"(실패는 label만)
     label = entry.label or entry.name
-    clock = values.get(catalog.HR_INPUT) is not False
-    texts = (
-        _input_text(param, values[name], clock, _count_word(entry.name, name))
-        for name, param in entry.params.items()
-        if name in values and name not in entry.fixed and _summarized(name, param)
-    )
-    parts = [*head, *(text for text in texts if text)]
+    deleting = is_delete(entry)
+    target = [target_text] if deleting and target_text else []
+    parts = [*head, *target, *_value_parts(entry, values)]
     summary = " · ".join(parts)
     if status is ActionStatus.CANCELED:
-        return ACTION_CANCELED_MESSAGE.format(label=f"{label} · {summary}" if parts else label)
+        canceled = ACTION_CANCELED_DELETE_MESSAGE if deleting else ACTION_CANCELED_MESSAGE
+        return canceled.format(label=f"{label} · {summary}" if parts else label)
     if status is ActionStatus.FAILED:
-        return ACTION_FAILED_MESSAGE.format(label=f"{label} · {summary}" if parts else label)
+        if deleting:
+            failed = ACTION_FAILED_DELETE_MESSAGE.format(label=label)
+        else:
+            failed = ACTION_FAILED_MESSAGE.format(label=f"{label} · {summary}" if parts else label)
+        if not errors:
+            return failed
+        names = _field_names(entry.name, errors)
+        fix = ACTION_FAILED_FIX.format(names=_names_object(names)) if names else None
+        return f"{failed} {fix or ACTION_FAILED_FIX_UNNAMED}"
     return f"✔ {label}" + (f" — {summary}" if parts else "")
 
 
@@ -2001,7 +3732,9 @@ async def save_action_result(
     head = []
     if entry.name == INSPECTION_TOOL:
         head = await _inspection_head(reader, contexts, values)
-    text = _result_text(request.status, entry, values, head)
+    errors = _error_fields(request)
+    turnlog.card_result(room_sn, entry.name, request.status.value, len(errors))
+    text = _result_text(request.status, entry, values, head, errors, request.target_text)
     return await repo.add_message(room_sn, ROLE_AI, text)
 
 
@@ -2330,6 +4063,13 @@ LESION_MESSAGES = {
 LESION_ASK = "{pet}지속 관찰 항목으로 남길까요? 카드에 분석한 사진을 붙여 저장해요."
 LESION_EYE_REGION = "부위는 얼굴로 골라 두었어요. 왼쪽 눈인지 오른쪽 눈인지 말해 주시면 적을게요."
 LESION_NO_TOOL = "건강기록의 지속 관찰에서 직접 남길 수 있어요."
+# 이미 관찰 중인 항목 (2026-11-26) : 자동으로 바꾸지 않고 회원이 이름으로 고른다
+OBSERVATION_LIST_TOOL = "list_observation_items"
+OBSERVATION_STATUS = "obsrvSttsCd"
+OBSERVATION_ONGOING = "관찰중"
+OBSERVATION_SHOW_ITEMS = 3
+LESION_ONGOING_HEAD = "이미 관찰 중인 항목이 있어요."
+LESION_ONGOING_ASK = "이미 관찰 중인 항목에 기록을 더하려면 '{name}에 추가해 줘'처럼 말해 주세요."
 
 
 def _lesion_memo(request: LesionCardRequest, title: str, limit: int | None) -> str:
@@ -2352,8 +4092,60 @@ def _region_code(entry: "catalog.CatalogEntry", name: str) -> str | None:
     return next((c.cd for c in codes or [] if c.nm == name), None)
 
 
+def _ongoing_text(item: dict) -> str:
+    # "흰자 충혈 (얼굴 왼쪽 눈·11월 24일)" : 부위·최근 관찰일이 없으면 뺌
+    region = " ".join(
+        str(item[key]) for key in ("obsrvRegnCdNm", "obsrvRegnDtlNm") if item.get(key)
+    )
+    parts = [region] if region else []
+    last = item.get("lastCycle")
+    seen = last.get("obsrvDt") if isinstance(last, dict) else None
+    try:
+        day = datetime.fromisoformat(str(seen))
+        parts.append(f"{day.month}월 {day.day}일")
+    except ValueError:
+        pass
+    name = str(item["obsrvArtclNm"])
+    return f"{name} ({'·'.join(parts)})" if parts else name
+
+
+async def _ongoing_items(reader: ToolReader, pet_sn: int) -> list[dict]:
+    """그 아이의 관찰 중인 항목(list_observation_items). 도구 없음·읽기 실패면 빈 목록"""
+    entry = tools.read_entry(OBSERVATION_LIST_TOOL)
+    if entry is None:
+        return []
+    request = catalog.read_request(entry, {}, pet_sn)
+    if request is None:
+        return []
+    path, query = request
+    status = entry.params.get(OBSERVATION_STATUS)
+    code = next(
+        (c.cd for c in (status.codes if status else None) or [] if c.nm == OBSERVATION_ONGOING),
+        None,
+    )
+    if code is not None:
+        query = query | {OBSERVATION_STATUS: code}
+    try:
+        data = await reader.read(path, query)
+    except (AppError, BackendError) as error:
+        logger.info("관찰 중인 항목 읽기 실패: %s", type(error).__name__)
+        return []
+    rows = data.get("content") if isinstance(data, dict) else data
+    if not isinstance(rows, list):
+        return []
+    return [
+        row
+        for row in rows
+        if isinstance(row, dict)
+        and isinstance(row.get("obsrvArtclNm"), str)
+        and row["obsrvArtclNm"].strip()
+        and (code is None or row.get(OBSERVATION_STATUS) in (None, code))
+    ]
+
+
 async def save_lesion_card(
     repo: ConversationRepository,
+    reader: ToolReader,
     contexts: RegisterContextRepository,
     room_sn: int,
     request: LesionCardRequest,
@@ -2399,6 +4191,11 @@ async def save_lesion_card(
         lines.append(LESION_ASK.format(pet=pet))
         if region is not None:
             lines.append(LESION_EYE_REGION)
+        ongoing = await _ongoing_items(reader, request.pet_sn)
+        if ongoing:
+            lines.append(LESION_ONGOING_HEAD)
+            lines += [f"- {_ongoing_text(item)}" for item in ongoing[:OBSERVATION_SHOW_ITEMS]]
+            lines.append(LESION_ONGOING_ASK.format(name=ongoing[0]["obsrvArtclNm"]))
         # 사진 칸 : 카드에서 분석한 사진을 붙이므로 말로 묻지 않음(_missing_lines가 뺌)
         lines += _missing_lines([card]) or [ACTION_ASK_CONFIRM]
         logger.info(

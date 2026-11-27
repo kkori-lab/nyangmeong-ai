@@ -547,9 +547,9 @@ def test_턴_수는_설정값을_따른다():
     assert len(build_context(messages, 7, 1)) == 1
 
 
-def test_설정값_기본은_4500토큰과_6턴(client, java, answers):
-    # 가짜 설정(Java 설정값 조회 API 연결 전) : 명세 기본값
-    assert repository.get_ai_settings() == repository.AiSettings(4500, 6)
+def test_설정값_기본은_4500토큰과_15턴(client, java, answers):
+    # 가짜 설정(Java 설정값 조회 API 연결 전) : 15턴은 2026-11-24 사람 결정(명세 기본값 6 수정 예정)
+    assert repository.get_ai_settings() == repository.AiSettings(4500, 15)
     as_member(client, 1)
     room = java.add_room(1, "제목")
     send(client, room, SEARCH_TEXT)

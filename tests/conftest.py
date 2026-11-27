@@ -5,7 +5,8 @@ from app.core.config import get_settings
 # 각자 PC의 .env.local에 있는 외부 AI 키
 AI_KEYS = ("LLM_API_KEY", "OPENAI_API_KEY", "GOOGLE_VISION_API_KEY")
 # 개발 PC 값이 테스트에 새지 않게 : 테스트는 로그 파일을 만들지 않음
-EMPTY_KEYS = (*AI_KEYS, "LOG_DIR")
+# 에이전트 이어 가기 서명 키(2026-11-26) : 개발 PC 값이 있으면 기존 테스트의 실행 판정이 바뀜
+EMPTY_KEYS = (*AI_KEYS, "LOG_DIR", "AGENT_STATE_KEY")
 
 
 @pytest.fixture(autouse=True)

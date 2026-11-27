@@ -5,13 +5,14 @@ from collections.abc import AsyncIterator
 from datetime import date
 
 from app.chat import catalog, tools
-from app.chat.clients import FOLLOW_ROUNDS, ClassifyError, ReadMore, ToolDecision
+from app.chat.clients import FOLLOW_ROUNDS, ClassifyError, ReadMore, ToolDecision, with_notes
 from app.chat.rules import RouteRow
 from app.core.backend import external_error
 
 TITLE_LENGTH = 30
 # 검사 수치 저장 확인 카드 (SCR-AIM-013 대화창 PDF, 2026-11-23)
 INSPECTION_TOOL = "draft_inspection_values"
+RECEIPT_TOOL = "draft_receipt_save"
 # 기본 가짜 도구 고르기가 질문으로 보는 표현
 QUESTION = re.compile(r"[?？]|뭐|왜|어떻게|알려|어때|될까|되나|나요|까요")
 
@@ -71,6 +72,8 @@ class FakeToolAgent:
         self.follows = ((follow_tool, self.follow_raw),) if follow_tool is not None else follows
         self.decides: list[tuple[list[dict], date, RouteRow | None]] = []
         self.results: list[str | None] = []
+        # 이어 가기(agent-continue)로 받은 진행 기록
+        self.resumes: list[str] = []
 
     async def decide(
         self, messages: list[dict], max_tokens: int, today: date, hint: RouteRow | None = None
@@ -104,6 +107,13 @@ class FakeToolAgent:
                     break
         for chunk in self.answer_chunks:
             yield chunk
+
+    async def resume(
+        self, messages: list[dict], notes: str, max_tokens: int, today: date
+    ) -> ToolDecision:
+        # 이어 가기 : 진행 기록을 남기고 실제처럼 붙인 메시지로 decide
+        self.resumes.append(notes)
+        return await self.decide(with_notes(messages, notes), max_tokens, today)
 
 
 class FakeBasicToolAgent(FakeToolAgent):
@@ -308,6 +318,20 @@ FAKE_CODES: dict[str, list[dict]] = {
         {"cd": "MYPC0005", "nm": "가방"},
         {"cd": "MYPC0006", "nm": "신발"},
     ],
+    # 2026-11-27 새 도구(반복 예방 등록·검진 첨부·1:1 문의) 코드
+    "HLTG07": [
+        {"cd": "HLTC0012", "nm": "심장사상충 예방"},
+        {"cd": "HLTC0013", "nm": "구충제"},
+    ],
+    "HLTG20": [
+        {"cd": "HLTC0061", "nm": "검사결과지"},
+        {"cd": "HLTC0062", "nm": "접종 증명서"},
+        {"cd": "HLTC0064", "nm": "영상 사진"},
+    ],
+    "CSCG03": [
+        {"cd": "CSCC0012", "nm": "접수"},
+        {"cd": "CSCC0013", "nm": "답변 완료"},
+    ],
 }
 
 
@@ -321,6 +345,12 @@ def fake_catalog_json(structure_version: str | None = None) -> dict:
             # 배열 항목 코드 칸(inspArtclCd)도 Java처럼 코드 값을 싣는다 (2026-11-23)
             item = tool["params"]["values"]["items"]["inspArtclCd"]
             item["codes"] = FAKE_CODES[item["group"]]
+        if tool["name"] == RECEIPT_TOOL:
+            # 영수증 저장 카드(2026-11-27) : 반려동물 줄·약 줄의 코드 칸도 Java처럼 코드 값을 싣는다
+            pets = tool["params"]["pets"]["items"]
+            pets["ckupTypeCd"]["codes"] = FAKE_CODES[pets["ckupTypeCd"]["group"]]
+            drug = pets["drugs"]["items"]["prscSttsCd"]
+            drug["codes"] = FAKE_CODES[drug["group"]]
     if structure_version is not None:
         raw["structureVersion"] = structure_version
     return raw
@@ -347,3 +377,56 @@ class FakeToolCatalogClient:
 @functools.cache
 def fake_catalog() -> catalog.Catalog:
     return catalog.build(catalog.ToolCatalogResponse.model_validate(fake_catalog_json()))
+
+
+# 프로그래밍식 도구 호출 평가용 가짜 Java 읽기 (scripts/tool_eval.py --ptc, 2026-11-26)
+# 테스트·평가 둘 다 외부 API 없이. 경로 말로 대충 맞춘 행을 돌려준다(값은 평가에 의미 없음)
+EVAL_PET_NAMES = ("코코", "뭉치", "초코", "까미", "보리", "두부", "콩이", "별이", "하루", "모카")
+
+
+class FakeEvalPets:
+    """양육 중인 반려동물 10마리(register-context get_pets 흉내)"""
+
+    async def get_pets(self) -> list:
+        from app.chat.repository import PetInfo
+
+        return [PetInfo(n, name, pet_se_nm="강아지") for n, name in enumerate(EVAL_PET_NAMES, 1)]
+
+
+class FakeEvalReader:
+    """READ 도구 Java 응답 흉내 : 경로 말로 가계부·일정·건강·검진 행, 나머지는 기록 한 줄
+    받은 경로·query(calls) 기록"""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+        # POST READ(저장 전 확인)의 본문 : (경로, 본문)
+        self.bodies: list[tuple[str, dict]] = []
+
+    async def read(self, path: str, params: dict, body: dict | None = None) -> object:
+        self.calls.append((path, params))
+        if body is not None:
+            self.bodies.append((path, body))
+            return []
+        pet = params.get("petSn", 1)
+        if "expense" in path:
+            return [
+                {
+                    "expndSn": 10 + n,
+                    "petSn": pet,
+                    "expndYmd": f"2026-1{n}-05",
+                    "expndAmt": 30000 * n,
+                }
+                for n in (0, 1)
+            ]
+        if "schedule" in path:
+            return [
+                {"schdlSn": 5, "petSn": pet, "schdlNm": "병원", "schdlBgngDt": "2026-11-28 15:00"}
+            ]
+        if "checkup" in path:
+            return [{"ckupRcdSn": 7, "petSn": pet, "ckupYmd": "2026-10-02", "hsptlNm": "메이병원"}]
+        if "health" in path or "daily" in path:
+            return [
+                {"dailyRcdSn": 20 + n, "rcdYmd": f"2026-11-{20 + n}", "bdwg": round(4 + n * 0.1, 2)}
+                for n in range(3)
+            ]
+        return [{"sn": 1, "petSn": pet, "memo": "기록"}]

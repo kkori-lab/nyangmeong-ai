@@ -177,7 +177,7 @@ draft_expense_limit:
 # 배열·파일 칸 확인 카드 (SCR-AIM-012 2단계 ③)
 # - java "lines[].expndAmt" : 배열 lines의 첫 줄 항목 칸. fixed : Java 칸에 늘 넣는 값(불러올 때 검사)
 # - 파일 칸(사진)은 Python이 채우지 않는다. 회원이 카드에서 첨부한다
-# - draft_receipt_save(영수증 저장)는 아직 싣지 않는다 : 저장 전 영수증 번호를 주는 READ가 없음
+# - draft_receipt_save(영수증 저장)는 receipt-card가 만든 카드를 고칠 때만 쓴다(2026-11-27)
 
 draft_expense:
   label: 지출 등록
@@ -224,6 +224,7 @@ draft_inspection_values:
       또는 혈액검사 수치 한 항목을 검진기록에 넣어 달라는 말.
       예) "9월 1일 튼튼 병원 검진에 넣어줘", "10월 20일 거로 저장해 줘", "BUN 25 mg/dL 검진기록에 넣어 줘"
     쓰지 않을 때: 혈액 수치를 묻기만 하는 말은 list_inspection_values. 검진 기록을 묻는 말은 list_checkups.
+      엑스레이·초음파처럼 수치가 아닌 검사 결과는 draft_etc_inspection.
     인자: ckup_rcd_sn은 먼저 list_checkups를 읽고 그 결과에 있는 번호만 쓴다(날짜·병원 이름으로 고른다).
       검사결과지 분석 카드의 검진기록만 고를 때는 수치 칸(rslt_nvl·unit_nm·insp_artcl_drct_inpt_nm)을 비운다
       (카드의 수치는 서버가 그대로 둔다). 말하지 않은 칸은 비운다. 반려동물은 고르지 않는다(서버가 정한다).
@@ -250,8 +251,10 @@ draft_observation_cycle:
     지켜보는 관찰 항목(혹·상처 등)에 오늘의 관찰 기록 하나를 더하는 확인 카드를 대화창에 띄운다.
     회원이 카드에서 사진을 붙이고 대화로 확인 말을 하기 전에는 아무것도 저장하지 않는다.
 
-    쓸 때: 관찰 중인 부위의 크기·변화를 기록해 달라는 말.
-      예) "초코 등에 난 혹 오늘 1.2cm야 기록해 줘", "다리 상처 좀 작아졌어 관찰 기록 남겨 줘"
+    쓸 때: 관찰 중인 부위의 크기·변화를 기록해 달라는 말. 피부·눈 분석 카드(대화 직전
+      "피부 분석 — …"·"눈 분석 — …" 글) 뒤 이미 관찰 중인 항목 이름에 더하라는 말도 여기다.
+      예) "초코 등에 난 혹 오늘 1.2cm야 기록해 줘", "다리 상처 좀 작아졌어 관찰 기록 남겨 줘",
+      (분석 카드 뒤) "흰자 충혈에 추가해 줘", "전에 등록한 털 빠짐에 넣어 줘"
     쓰지 않을 때: 관찰 기록을 묻기만 하는 말은 list_observation_items·list_observation_cycles.
       체중·식사량 등 일지는 draft_daily_health_record.
     인자: obsrv_artcl_sn은 이 턴에 받은 list_observation_items 결과의 obsrvArtclSn만 쓴다.
@@ -290,6 +293,8 @@ draft_observation_item:
       "피부 분석 — …"·"눈 분석 — …" 글)의 빈 칸(부위 등)을 채우는 말.
       예) "초코 배에 난 혹 관찰 항목으로 등록해 줘", "부위는 등이야", "왼쪽 눈이야"
     쓰지 않을 때: 이미 관찰 중인 항목에 오늘 기록을 더하는 말은 draft_observation_cycle.
+      피부·눈 분석 카드 뒤라도 이미 관찰 중인 항목 이름에 더하라는 말("흰자 충혈에 추가해 줘")은
+      draft_observation_cycle.
       관찰 기록을 묻기만 하는 말은 list_observation_items·list_observation_cycles.
     인자: 말하지 않은 칸은 비운다. 부위는 목록의 이름으로 고르고, 눈이면 얼굴과 부위 상세("왼쪽 눈")를 쓴다.
       날짜는 시스템의 오늘 날짜 기준으로 계산한다. 크기는 단위 없이 숫자만(cm). 사진은 다루지 않는다.
@@ -441,8 +446,11 @@ draft_pet_update:
       예) "코코 목표 체중 4kg로 바꿔 줘", "초코 중성화했어 정보 바꿔 줘", "알레르기에 닭고기 넣어 줘"
     쓰지 않을 때: 오늘·어제 체중을 기록하는 말("체중 4.2kg 기록해줘")은 draft_daily_health_record.
       등록 정보를 묻기만 하는 말은 get_pet.
+      새 반려동물을 등록하는 말은 draft_pet.
     인자: 바꾸지 않는 칸은 비운다(문장 속 반려동물 이름은 pet_nm에 넣지 않는다). 몸무게는 kg 숫자만.
       반려동물은 고르지 않는다(서버가 정한다).
+      특징·알레르기·질환은 더하기·빼기·바꾸기 모두 말한 항목만 쉼표로 넣는다. 지금 값과 합치는 것은
+      서버가 한다("새우 알레르기 빼 줘" → algy_cn "새우").
       칩 번호 자릿수·몸무게처럼 값이 규칙에 맞지 않아 보여도 글로 되묻지 말고 도구를 부른다
       (서버가 비우고 되묻는다).
     말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
@@ -467,13 +475,13 @@ draft_pet_update:
       description: 바꿀 동물등록 인식칩 번호(숫자 12자리 또는 15자리)
     chrc_cn:
       java: chrcCn
-      description: 바꿀 특징
+      description: 더하거나 빼거나 바꿀 특징(말한 항목만, 쉼표로 구분)
     algy_cn:
       java: algyCn
-      description: 바꿀 알레르기 내용
+      description: 더하거나 빼거나 바꿀 알레르기(말한 항목만, 쉼표로 구분)
     dss_cn:
       java: dssCn
-      description: 바꿀 질환 내용
+      description: 더하거나 빼거나 바꿀 질환(말한 항목만, 쉼표로 구분)
 
 # 건강 READ 도구 (docs/design/tool-catalog.md 8절 4번) : Python이 바로 실행, 결과로 답한다
 # get_checkup·list_etc_inspections·list_observation_cycles는 싣지 않는다 :
@@ -481,6 +489,7 @@ draft_pet_update:
 # 앞 결과의 번호 칸(careArtclSn·ckupRcdSn·obsrvCyclSn)도 같은 이유로 LLM 칸에 두지 않는다
 
 get_health_indicators:
+  label: 건강 지표
   screen: SCR-HLT-002
   hooks: [pet]
   notice: true
@@ -500,6 +509,7 @@ get_health_indicators:
       정수로 반올림한다(식사량 61.4 → 약 61g, 음수량 683.024 → 약 683ml).
 
 list_daily_health_records:
+  label: 건강 일지
   screen: SCR-HLT-002
   hooks: [pet]
   default_days: 7
@@ -513,6 +523,7 @@ list_daily_health_records:
     인자: 기간은 시스템의 오늘 날짜 기준으로 계산하고, 말한 날·기간이 있으면 from_ymd·to_ymd를 채운다.
       말하지 않은 칸은 비운다. 기간을 말하지 않았으면 둘 다 비운다(서버가 최근 7일로 읽는다).
     말하는 법: 받은 기록만 쓴다. 기록이 없으면 없다고 말한다.
+      메모(…Cn)가 있으면 회원이 쓴 그대로 옮기거나 짧게 요약한다.
       수치에는 단위를 붙인다: 체중 kg, 식사량 g, 음수량 ml, 산책 분.
       체중만 소수 한 자리까지 쓴다. 식사량·음수량·산책은 모든 값을 소수점 없이
       정수로 반올림한다(식사량 61.4 → 약 61g, 음수량 683.024 → 약 683ml).
@@ -531,6 +542,7 @@ list_daily_health_records:
       description: 가져올 기록 수
 
 list_my_care_schedules:
+  label: 일정
   screen: SCR-HLT-003
   hooks: [pet_list]
   description: |
@@ -544,6 +556,7 @@ list_my_care_schedules:
     인자: 반려동물은 고르지 않는다(서버가 문장 속 이름, 없으면 대화의 반려동물, 그것도 없으면 모든 아이로 정한다).
       기간은 시스템의 오늘 날짜 기준으로 계산한다. 말하지 않은 칸은 비운다.
     말하는 법: 받은 일정만 날짜순으로 쓴다. 일정이 없으면 없다고 말한다.
+      메모(…Cn)가 있으면 회원이 쓴 그대로 옮기거나 짧게 요약한다.
       결과 첫 줄의 "이름(petSn 번호)"로 각 일정 행의 petSn을 아이 이름으로 바꿔 말한다. 번호는 말하지 않는다.
   params:
     from_ymd:
@@ -563,8 +576,11 @@ list_my_care_schedules:
       description: 아이마다 가져올 일정 수
 
 list_care_items:
+  label: 케어 항목
   screen: SCR-HLT-003
   hooks: [pet]
+  # 답에 안 쓰는 칸(코드·아이콘·연결 번호) : 항목이 많으면 결과가 잘려 뒤 항목 번호가 안 보임(2026-11-27)
+  result_drop: [bscArtclYn, careZoneCd, careCycleCd, ckupRcdSn, prscSn, reptPrvntMngSn, rprsIconId, indctYn, msnPnt]
   description: |
     반복 케어 항목(산책·발톱 깎기·예방약 등)과 다음 예정일·마지막 한 날을 읽어 와 답한다.
     아무것도 저장하지 않는다.
@@ -582,6 +598,7 @@ list_care_items:
       description: 케어 항목 이름(일부만 말해도 됨)
 
 list_care_completions:
+  label: 케어 완료 기록
   screen: SCR-HLT-003
   hooks: [pet]
   description: |
@@ -604,6 +621,7 @@ list_care_completions:
       description: 케어 항목 번호. list_care_items 결과의 careArtclSn만, 모르면 비운다
 
 list_checkups:
+  label: 검진 기록
   screen: SCR-HLT-002
   hooks: [pet]
   description: |
@@ -612,8 +630,10 @@ list_checkups:
     쓸 때: 언제 어느 병원에 다녀왔는지, 검진·접종을 언제 했는지 묻는 말.
       예) "마지막으로 병원 간 게 언제야?", "올해 예방접종 했어?", "작년 검진 기록 알려 줘"
     쓰지 않을 때: 앞으로 갈 병원 일정은 list_my_care_schedules. 혈액 수치는 list_inspection_values.
+      검진에 붙인 파일은 list_checkup_attachments. 새 검진기록을 남기는 말은 draft_checkup.
     인자: 연도를 말했으면 year. 말하지 않은 칸은 비운다.
-    말하는 법: 받은 기록만 쓴다. 진료 내용·메모는 받지 않으므로 지어내지 않는다.
+    말하는 법: 받은 기록만 쓴다. 메모(…Cn)가 있으면 회원이 쓴 그대로 옮기거나 짧게 요약하고,
+      없는 진료 내용은 지어내지 않는다.
   params:
     year:
       java: year
@@ -629,6 +649,7 @@ list_checkups:
       description: 한 페이지 기록 수
 
 list_inspection_values:
+  label: 혈액검사 수치
   screen: SCR-HLT-011
   hooks: [pet]
   notice: true
@@ -650,6 +671,7 @@ list_inspection_values:
       description: 검진 기록 번호. list_checkups 결과의 ckupRcdSn만, 모르면 비운다
 
 list_prescriptions:
+  label: 처방약
   screen: SCR-HLT-011
   hooks: [pet]
   notice: true
@@ -659,8 +681,10 @@ list_prescriptions:
     쓸 때: 먹고 있는 약, 약을 언제까지 먹는지 묻는 말.
       예) "지금 먹는 약 뭐야?", "항생제 언제까지 먹어?"
     쓰지 않을 때: 반복 예방(심장사상충·구충 등)은 list_repeat_preventions.
+      새 처방약을 남기는 말은 draft_prescription.
     인자: 지금 먹는 약만 물으면 prsc_stts_cd는 복용중. 말하지 않았으면 비운다.
     말하는 법: 받은 기록만 쓴다. 복용량을 바꾸라고 하지 않는다.
+      메모(…Cn)가 있으면 회원이 쓴 그대로 옮기거나 짧게 요약한다.
   params:
     prsc_stts_cd:
       java: prscSttsCd
@@ -670,6 +694,7 @@ list_prescriptions:
       description: 검진 기록 번호. list_checkups 결과의 ckupRcdSn만, 모르면 비운다
 
 list_repeat_preventions:
+  label: 반복 예방
   screen: SCR-HLT-011
   hooks: [pet]
   description: |
@@ -678,6 +703,7 @@ list_repeat_preventions:
     쓸 때: 예방 일정·주기, 다음 예방이 언제인지 묻는 말.
       예) "다음 심장사상충 언제야?", "구충제 주기 어떻게 돼?"
     쓰지 않을 때: 처방약은 list_prescriptions. 지난 병원 기록은 list_checkups.
+      새 반복 예방을 남기는 말은 draft_repeat_prevention.
     인자: 반려동물은 고르지 않는다(서버가 문장 속 이름, 없으면 대화의 반려동물로 정하고 여러 마리도 읽는다).
     말하는 법: 받은 기록만 쓴다.
   params:
@@ -686,6 +712,7 @@ list_repeat_preventions:
       description: 검진 기록 번호. list_checkups 결과의 ckupRcdSn만, 모르면 비운다
 
 list_observation_items:
+  label: 관찰 항목
   screen: SCR-HLT-002
   hooks: [pet]
   notice: true
@@ -698,12 +725,14 @@ list_observation_items:
     쓰지 않을 때: 건강 지표(체중 등)는 get_health_indicators.
     인자: 관찰 중인 것만 물으면 obsrv_stts_cd는 관찰중. 말하지 않았으면 비운다.
     말하는 법: 받은 기록만 쓴다. 진단하지 않고, 크기가 커지면 수의사 상담을 권한다.
+      메모(…Cn)가 있으면 회원이 쓴 그대로 옮기거나 짧게 요약한다.
   params:
     obsrv_stts_cd:
       java: obsrvSttsCd
       description: 관찰 상태
 
 get_checkup:
+  label: 검진 기록 상세
   screen: SCR-HLT-002
   hooks: [pet]
   description: |
@@ -713,13 +742,15 @@ get_checkup:
       예) "마지막 검진 자세히 알려 줘"
     쓰지 않을 때: 검진 목록은 list_checkups. 그 검진의 혈액 수치는 list_inspection_values.
     인자: ckup_rcd_sn은 list_checkups 결과의 ckupRcdSn만 쓴다. 결과가 없으면 list_checkups를 먼저 부른다.
-    말하는 법: 받은 기록만 쓴다. 진료 내용·메모는 받지 않으므로 지어내지 않는다.
+    말하는 법: 받은 기록만 쓴다. 메모(…Cn)가 있으면 회원이 쓴 그대로 옮기거나 짧게 요약하고,
+      없는 진료 내용은 지어내지 않는다.
   params:
     ckup_rcd_sn:
       java: ckupRcdSn
       description: 검진 기록 번호(list_checkups 결과의 ckupRcdSn)
 
 list_etc_inspections:
+  label: 기타 검사
   screen: SCR-HLT-011
   hooks: [pet]
   description: |
@@ -728,14 +759,17 @@ list_etc_inspections:
     쓸 때: 그 검진 때 어떤 검사를 받았는지 묻는 말.
       예) "지난 검진 때 엑스레이도 찍었어?", "그때 받은 검사 뭐야?"
     쓰지 않을 때: 혈액검사 수치는 list_inspection_values.
+      새 기타검사를 남기는 말은 draft_etc_inspection.
     인자: ckup_rcd_sn은 list_checkups 결과의 ckupRcdSn만 쓴다. 결과가 없으면 list_checkups를 먼저 부른다.
-    말하는 법: 받은 검사 이름만 쓴다. 검사 결과 글은 받지 않으므로 지어내지 않는다.
+    말하는 법: 받은 검사만 쓴다. 검사 결과 글(…Cn)이 있으면 그대로 옮기거나 짧게 요약하고,
+      없으면 지어내지 않는다.
   params:
     ckup_rcd_sn:
       java: ckupRcdSn
       description: 검진 기록 번호(list_checkups 결과의 ckupRcdSn)
 
 list_observation_cycles:
+  label: 관찰 기록
   screen: SCR-HLT-002
   hooks: [pet]
   notice: true
@@ -756,6 +790,7 @@ list_observation_cycles:
       description: 관찰 회차 번호. 앞 결과의 obsrvCyclSn만, 모르면 비운다
 
 list_expenses:
+  label: 지출 목록
   screen: SCR-MYP-031
   hooks: [pet_filter]
   description: |
@@ -789,6 +824,7 @@ list_expenses:
       description: 한 페이지 기록 수
 
 get_expense_total:
+  label: 지출 합계
   screen: SCR-MYP-030
   hooks: [pet_filter]
   description: |
@@ -815,6 +851,7 @@ get_expense_total:
       description: 지출 카테고리
 
 get_expense_statistics:
+  label: 지출 통계
   screen: SCR-MYP-030
   description: |
     한 달 지출 통계(합계·월 한도·지난달 합계·카테고리별·반려동물별·큰 지출)를 읽어 와 답한다.
@@ -833,6 +870,7 @@ get_expense_statistics:
       description: 연월 YYYY-MM
 
 list_expense_months:
+  label: 지출 기록이 있는 달
   screen: SCR-MYP-030
   description: |
     지출 기록이 있는 연월 목록을 읽어 와 답한다. 아무것도 저장하지 않는다.
@@ -843,6 +881,7 @@ list_expense_months:
     말하는 법: 받은 연월만 쓴다.
 
 list_expense_pets:
+  label: 가계부 반려동물
   screen: SCR-MYP-030
   description: |
     가계부에 지출이 걸린 반려동물 목록(연동 해제·삭제된 반려동물 포함)을 읽어 와 답한다.
@@ -854,6 +893,7 @@ list_expense_pets:
     말하는 법: 받은 이름만 쓴다.
 
 get_receipt:
+  label: 영수증
   screen: SCR-MYP-030
   description: |
     영수증 한 장의 분석 결과(병원·날짜·금액·항목·약)를 읽어 와 답한다. 아무것도 저장하지 않는다.
@@ -871,6 +911,7 @@ get_receipt:
 # 반려동물·캐릭터 READ (2026-11-11)
 
 list_pets:
+  label: 반려동물 목록
   screen: SCR-MYP-002
   description: |
     내 반려동물 목록(이름·종·품종·성별·생일 등 기본 정보)을 읽어 와 답한다. 아무것도 저장하지 않는다.
@@ -879,22 +920,34 @@ list_pets:
       예) "우리 애들 누구누구 있어?", "등록된 반려동물 몇 마리야?"
     쓰지 않을 때: 한 아이의 자세한 정보(등록 몸무게 등)는 get_pet. 반려동물을 등록·수정하는 화면으로
       가자는 말은 navigate.
+      등록 한도는 get_pet_limit. 대표 반려동물을 바꾸는 말은 set_representative_pet.
     말하는 법: 받은 아이만 이름과 함께 쓴다. 번호(petSn)는 말하지 않는다.
+      대표는 '대표 반려동물'이라고만 말하고 '대표 캐릭터'라고 하지 않는다. 대표 반려동물을 물으면 그 아이 이름으로 답하고,
+      캐릭터도 대표로 설정돼 있다고 따로 말하지 않는다. 대표를 바꿔 달라고 하면 set_representative_pet을 쓰고,
+      바꾸는 곳을 물으면 [픽셀 캐릭터 관리] 화면에서 바꾼다고 안내한다.
 
 get_pet:
+  label: 반려동물 정보
   screen: SCR-MYP-002
   hooks: [pet]
   description: |
-    반려동물 한 마리의 정보(종·품종·성별·생일·중성화·등록 몸무게 등)를 읽어 와 답한다. 아무것도 저장하지 않는다.
+    반려동물 한 마리의 정보(종·품종·성별·생일·중성화·등록 몸무게·특징·알레르기·질환 등)를 읽어 와 답한다.
+    아무것도 저장하지 않는다.
 
     쓸 때: 한 아이의 등록 정보를 묻는 말. 체중 기록이 없을 때 등록된 몸무게를 묻는 말.
-      예) "코코 생일 언제야?", "코코 등록 몸무게 몇이야?", "보리 중성화 했었나?"
+      예) "코코 생일 언제야?", "코코 등록 몸무게 몇이야?", "보리 중성화 했었나?", "루루 알레르기 있어?",
+      "보리 지병 있어?"
     쓰지 않을 때: 날짜별 체중 기록·추이는 get_health_indicators·list_daily_health_records.
       몸무게를 바꿔 달라는 말은 draft_pet_update.
     인자: 반려동물은 고르지 않는다(서버가 문장 속 이름, 없으면 대화의 반려동물로 정한다).
     말하는 법: 받은 칸만 쓴다. 등록 몸무게는 기록이 아니라 등록할 때 넣은 값이라고 밝히고 kg를 붙인다.
+      대표는 '대표 반려동물'이라고만 말하고 '대표 캐릭터'라고 하지 않는다.
+      알레르기(algyCn)·질환(dssCn)·특징(chrcCn)은 회원이 등록한 그대로 말하고 진단·처방처럼 말하지 않는다.
+      그 칸이 비어(null) 있으면 등록된 내용이 없다고 하고, 불러오지 못했다고 하지 않는다.
+      고치려면 대화로 바꿔 달라고 하거나 [반려동물 수정] 화면에서 바꾼다고 안내한다.
 
 list_caregivers:
+  label: 공동양육자
   screen: SCR-MYP-004
   hooks: [pet]
   description: |
@@ -908,6 +961,7 @@ list_caregivers:
     말하는 법: 받은 사람을 닉네임으로만 쓴다. 이메일·전화번호 같은 연락처는 결과에 있어도 말하지 않는다.
 
 list_sent_caregiver_invitations:
+  label: 보낸 공동양육 초대
   screen: SCR-MYP-004
   description: |
     내가 보낸 공동양육 초대 목록(받는 사람·반려동물·상태)을 읽어 와 답한다. 아무것도 저장하지 않는다.
@@ -915,9 +969,11 @@ list_sent_caregiver_invitations:
     쓸 때: 보낸 초대가 수락됐는지, 아직 남아 있는지 묻는 말.
       예) "내가 보낸 초대 수락됐어?", "공동양육 초대 보낸 거 있어?"
     쓰지 않을 때: 이미 같이 돌보는 사람은 list_caregivers. 초대하는 방법은 search_guide.
+      보낸 초대를 거두는 말은 cancel_caregiver_invitation. 받은 초대는 get_caregiver_invitation.
     말하는 법: 받는 사람은 닉네임으로만 쓴다. 이메일·전화번호 같은 연락처는 결과에 있어도 말하지 않는다.
 
 list_daily_missions:
+  label: 케어미션
   screen: SCR-MYP-020
   hooks: [pet]
   description: |
@@ -927,6 +983,7 @@ list_daily_missions:
       예) "오늘 미션 뭐야?", "코코 어제 미션 다 했어?"
     쓰지 않을 때: 반복 케어 항목(약·영양제 등)과 그 완료 기록은 list_care_items·list_care_completions.
       포인트 잔액은 get_points.
+      오늘 케어 항목 진행률은 get_care_mission_progress.
     인자: 반려동물은 고르지 않는다(서버가 문장 속 이름, 없으면 대화의 반려동물로 정한다).
       날짜를 말하지 않으면 비운다(서버가 오늘로 읽는다). 날짜는 시스템의 오늘 날짜 기준으로 계산한다.
     말하는 법: 받은 미션만 완료 여부와 함께 쓴다.
@@ -936,16 +993,18 @@ list_daily_missions:
       description: 미션 날짜 YYYY-MM-DD
 
 get_points:
+  label: 포인트
   screen: SCR-MYP-020
   description: |
     내 포인트 잔액을 읽어 와 답한다. 아무것도 저장하지 않는다.
 
-    쓸 때: 지금 포인트가 얼마인지 묻는 말.
-      예) "내 포인트 얼마야?", "포인트 몇 점 남았어?"
+    쓸 때: 지금 포인트가 얼마인지 묻는 말. "포인트" 한 마디만 말해도 잔액을 묻는 말로 본다.
+      예) "내 포인트 얼마야?", "포인트 몇 점 남았어?", "포인트", "ㄹㄹ 포인트"
     쓰지 않을 때: 포인트가 언제 얼마나 들어오고 나갔는지는 list_point_ledgers. 돈 지출은 가계부 도구.
     말하는 법: 받은 숫자만 쓰고 "P"를 붙인다.
 
 list_point_ledgers:
+  label: 포인트 내역
   screen: SCR-MYP-020
   description: |
     포인트 적립·사용 내역을 한 달 단위로 읽어 와 답한다. 아무것도 저장하지 않는다.
@@ -953,6 +1012,7 @@ list_point_ledgers:
     쓸 때: 포인트를 언제 얼마나 받고 썼는지 묻는 말.
       예) "이번 달 포인트 내역 보여 줘", "지난달에 포인트 어디에 썼어?"
     쓰지 않을 때: 지금 잔액만 묻는 말은 get_points. 돈 지출 내역은 list_expenses.
+      내역이 있는 달 목록은 list_point_ledger_months.
     인자: 달은 시스템의 오늘 날짜 기준으로 계산한다. 말하지 않으면 비운다.
     말하는 법: 받은 내역만 날짜순으로 쓴다. 내역이 없으면 없다고 말한다.
   params:
@@ -961,6 +1021,7 @@ list_point_ledgers:
       description: 달 YYYY-MM
 
 list_pixel_characters:
+  label: 픽셀 캐릭터 목록
   screen: SCR-MYP-010
   description: |
     내 픽셀 캐릭터 목록(어느 반려동물의 캐릭터인지 등)을 읽어 와 답한다. 아무것도 저장하지 않는다.
@@ -969,9 +1030,11 @@ list_pixel_characters:
       pixelCharSn이 없을 때 먼저(상점·상세 도구는 이 번호 없이 읽을 수 없다).
       예) "내 캐릭터 뭐 있어?", "코코 캐릭터 만들었었나?", "상점에 모자 뭐 있어?"(번호를 모를 때)
     쓰지 않을 때: 캐릭터를 만드는 방법은 search_guide, 캐릭터 꾸미기 화면으로 가자는 말은 navigate.
-    말하는 법: 받은 캐릭터만 쓴다. 번호는 말하지 않는다.
+    말하는 법: 받은 캐릭터만 쓴다. 번호는 말하지 않는다. 대표는 '대표 반려동물'이라고만 말하고 '대표 캐릭터'라고 하지 않는다.
+      캐릭터도 대표로 설정돼 있다고 따로 말하지 않는다.
 
 get_pixel_character:
+  label: 픽셀 캐릭터
   screen: SCR-MYP-010
   description: |
     픽셀 캐릭터 하나의 정보(장착한 아이템 등)를 읽어 와 답한다. 아무것도 저장하지 않는다.
@@ -979,6 +1042,7 @@ get_pixel_character:
     쓸 때: 캐릭터가 지금 무엇을 입고 있는지 등 한 캐릭터를 자세히 묻는 말.
       예) "코코 캐릭터 지금 뭐 입고 있어?"
     쓰지 않을 때: 캐릭터 목록은 list_pixel_characters. 살 수 있는 아이템은 list_shop_items.
+      아이템을 입히는 말은 draft_equipped_items.
     인자: pixel_char_sn은 앞 결과의 pixelCharSn만 쓴다. 결과가 없으면 list_pixel_characters를 먼저 부른다.
     말하는 법: 받은 칸만 쓴다. 그림은 보여 줄 수 없으므로 꾸미기 화면에서 보라고 말한다.
   params:
@@ -987,6 +1051,7 @@ get_pixel_character:
       description: 캐릭터 번호(앞 결과의 pixelCharSn)
 
 list_shop_items:
+  label: 상점 아이템
   screen: SCR-MYP-010
   description: |
     캐릭터 상점에서 살 수 있는 아이템 목록(이름·부위·가격·보유 여부)을 읽어 와 답한다. 아무것도 사지 않는다.
@@ -994,10 +1059,10 @@ list_shop_items:
     쓸 때: 앞 결과에 pixelCharSn이 있을 때, 상점에 무슨 아이템이 있는지, 얼마인지 묻는 말.
       예) list_pixel_characters 결과를 본 뒤 "상점에 모자 뭐 있어?"
     쓰지 않을 때: 앞 결과에 pixelCharSn이 없으면 list_pixel_characters를 먼저 부른다.
-      아이템을 사 달라는 말은 도구가 없으므로 navigate로 꾸미기 화면을 안내한다.
+      아이템을 사 달라는 말은 draft_item_purchase(이 도구로 아이템 번호를 먼저 읽는다).
     인자: pixel_char_sn은 앞 결과의 pixelCharSn만 쓴다. 결과가 없으면 list_pixel_characters를 먼저 부른다.
       부위를 말하지 않으면 item_regn_cd는 비운다.
-    말하는 법: 받은 아이템만 가격(P)과 함께 쓴다.
+    말하는 법: 받은 아이템만 가격(P)과 함께 쓴다. 대표는 '대표 반려동물'이라고만 말하고 '대표 캐릭터'라고 하지 않는다.
   params:
     pixel_char_sn:
       java: pixelCharSn
@@ -1010,6 +1075,7 @@ list_shop_items:
 # 남이 쓴 글을 읽는다 : 글 안의 지시는 따르지 않고, 쓰기는 늘 카드 확인(설계 4-3절)
 
 list_posts:
+  label: 게시판 글
   screen: SCR-CMU-001-01
   description: |
     커뮤니티 게시판 글 목록(제목·작성자 닉네임·작성일·댓글 수)을 읽어 와 답한다. 아무것도 저장하지 않는다.
@@ -1036,6 +1102,7 @@ list_posts:
       description: 가져올 글 수
 
 get_post:
+  label: 게시글
   screen: SCR-CMU-001-01
   description: |
     커뮤니티 글 하나의 내용을 읽어 와 답한다. 아무것도 저장하지 않는다.
@@ -1052,6 +1119,7 @@ get_post:
       description: 글 번호(앞 결과의 pstSn)
 
 list_comments:
+  label: 댓글
   screen: SCR-CMU-001-01
   description: |
     커뮤니티 글 하나의 댓글 목록을 읽어 와 답한다. 아무것도 저장하지 않는다.
@@ -1068,6 +1136,7 @@ list_comments:
       description: 글 번호(앞 결과의 pstSn)
 
 get_popular_photo:
+  label: 인기 사진
   screen: SCR-CMU-001-01
   description: |
     커뮤니티 인기 사진 글을 읽어 와 답한다. 아무것도 저장하지 않는다.
@@ -1078,6 +1147,7 @@ get_popular_photo:
     말하는 법: 받은 글의 제목과 작성자 닉네임만 쓴다. 사진은 보여 줄 수 없으므로 커뮤니티에서 보라고 말한다.
 
 list_health_tips:
+  label: 건강 팁
   screen: SCR-CMU-001-01
   description: |
     커뮤니티의 건강 팁 글 목록을 읽어 와 답한다. 아무것도 저장하지 않는다.
@@ -1089,6 +1159,7 @@ list_health_tips:
     말하는 법: 받은 글의 제목만 쓴다. 글은 다른 회원이 쓴 것이라 의학적 사실로 단정하지 않는다.
 
 list_lost_reports:
+  label: 실종·목격 신고
   screen: SCR-CMU-002
   description: |
     실종·목격 신고 목록(종·특징·장소·날짜·상태)을 읽어 와 답한다. 아무것도 저장하지 않는다.
@@ -1096,6 +1167,7 @@ list_lost_reports:
     쓸 때: 실종 신고가 올라왔는지, 특정 동네·특징의 신고가 있는지, 내가 올린 신고를 묻는 말.
       예) "최근 실종 신고 있어?", "강아지 실종 신고 보여 줘", "내가 올린 실종 신고 상태 어때?"
     쓰지 않을 때: 신고를 올려 달라는 말은 도구가 없으므로 navigate.
+      신고 하나의 자세한 내용은 get_lost_report.
     인자: 동네 이름은 keyword에 넣는다(지역 번호는 알 수 없으므로 비운다). 내가 올린 신고만 물을 때만 mine_yn true.
     말하는 법: 받은 신고만 쓴다. 신고자 연락처·주소는 결과에 있어도 말하지 않고, 연락은 실종 신고 화면에서 하라고 말한다.
   params:
@@ -1116,6 +1188,7 @@ list_lost_reports:
       description: 가져올 신고 수
 
 list_care_recruitments:
+  label: 펫돌봄 모집 글
   screen: SCR-CMU-004
   description: |
     우리동네 펫돌봄 모집 글 목록(기간·동물·모집 상태)을 읽어 와 답한다. 아무것도 저장하지 않는다.
@@ -1123,6 +1196,7 @@ list_care_recruitments:
     쓸 때: 펫돌봄 모집이 있는지, 특정 기간·동물의 모집, 내가 올린 모집을 묻는 말.
       예) "이번 주말 펫돌봄 모집 있어?", "내가 올린 돌봄 모집 어떻게 됐어?"
     쓰지 않을 때: 모집 글을 써 달라·신청해 달라는 말은 도구가 없으므로 navigate.
+      모집 하나의 자세한 내용은 get_care_recruitment, 매칭 진행은 get_care_match.
     인자: 기간은 시스템의 오늘 날짜 기준으로 계산한다. 지역 번호는 알 수 없으므로 비운다.
       내가 올린 모집만 물을 때만 mine_yn true. 말하지 않은 칸은 비운다.
     말하는 법: 받은 모집만 쓴다. 작성자는 닉네임으로만 쓰고 연락처는 말하지 않는다.
@@ -1147,6 +1221,7 @@ list_care_recruitments:
       description: 가져올 모집 수
 
 list_news:
+  label: 펫뉴스
   screen: SCR-CMU-003-01
   description: |
     펫뉴스 목록(제목·분류·날짜)을 읽어 와 답한다. 아무것도 저장하지 않는다.
@@ -1154,6 +1229,7 @@ list_news:
     쓸 때: 반려동물 관련 최근 뉴스를 묻는 말.
       예) "요즘 펫 뉴스 뭐 있어?", "강아지 사료 관련 뉴스 있어?"
     쓰지 않을 때: 커뮤니티 회원 글은 list_posts.
+      뉴스 하나의 내용은 get_news.
     인자: 분류를 말하지 않으면 news_clsf_cd는 비운다.
     말하는 법: 받은 뉴스의 제목만 쓴다. 기사 내용을 지어내지 않는다.
   params:
@@ -1168,6 +1244,7 @@ list_news:
       description: 가져올 뉴스 수
 
 list_place_bookmarks:
+  label: 장소 즐겨찾기
   screen: SCR-PLC-001 / 002
   description: |
     내가 즐겨찾기한 장소 목록을 읽어 와 답한다. 말한 장소 분류만, 분류를 말하지 않으면 전체 분류를 읽는다.
@@ -1175,7 +1252,8 @@ list_place_bookmarks:
 
     쓸 때: 즐겨찾기(저장)한 장소를 묻는 말.
       예) "즐겨찾기한 동물병원 어디 있어?", "저장해 둔 애견카페 보여 줘", "즐겨찾기한 장소 다 보여 줘"
-    쓰지 않을 때: 장소를 새로 찾는 말은 list_places 또는 navigate.
+    쓰지 않을 때: 장소를 새로 찾는 말은 list_places 또는 navigate. 즐겨찾기에 더하는 말은 draft_place_bookmark,
+      빼는 말은 delete_place_bookmark.
     인자: plc_clsf_cd는 말한 장소 분류 하나. 분류를 말하지 않으면 비운다(전체 분류).
     말하는 법: 받은 장소의 이름과 주소만 쓴다.
   params:
@@ -1184,6 +1262,7 @@ list_place_bookmarks:
       description: 장소 분류
 
 list_places:
+  label: 장소 목록
   screen: SCR-PLC-001
   description: |
     지역이나 상호명으로 반려동물 장소(병원·미용·용품·호텔·동반 장소 등)를 찾아 읽어 와 답한다.
@@ -1195,7 +1274,7 @@ list_places:
       - "근처·가까운·여기·내 주변"처럼 내 위치 기준으로 찾는 말은 navigate로 플레이스 화면을 안내한다
         (내 위치를 모른다).
       - 지역도 상호명도 없이 분류만 말한 말("동물병원 찾아 줘")은 navigate로 플레이스 화면을 안내한다.
-      - 즐겨찾기한 장소는 list_place_bookmarks.
+      - 즐겨찾기한 장소는 list_place_bookmarks. 즐겨찾기해 달라는 말은 draft_place_bookmark.
     인자: plc_clsf_cd는 말한 장소 분류 하나. keyword에는 말한 지역·상호명만 넣는다(분류 이름은 넣지 않는다).
     말하는 법: 받은 장소의 이름·주소·전화번호만 쓴다. 좌표·거리·링크는 말하지 않는다.
       영업시간·평점·가격처럼 받지 않은 것은 지어내지 않는다. 결과가 없으면 플레이스 화면에서 찾아보라고 한다.
@@ -1207,10 +1286,292 @@ list_places:
       java: keyword
       description: 말한 지역·상호명
 
+# 2026-11-27 새 도구 싣기 ③ (백엔드 #326, 사람 결정 "전부 다 추가")
+
+delete_pet:
+  label: 반려동물 삭제
+  target: 반려동물
+  hooks: [pet]
+  description: |
+    반려동물 한 마리를 지우는 확인 카드를 대화창에 띄운다. 그 아이의 건강·일정·가계부·캐릭터 기록이
+    모두 함께 지워지고 되돌릴 수 없다. 회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 반려동물을 목록에서 지워 달라는 말.
+      예) "보리 삭제해 줘", "잘못 등록한 반려동물 지워 줘"
+    쓰지 않을 때: 반려동물 정보를 고치는 말은 draft_pet_update. 같이 돌보던 사람을 빼는 말은 unlink_caregiver.
+      반려동물을 묻기만 하는 말은 list_pets·get_pet.
+    인자: 반려동물은 고르지 않는다(서버가 문장 속 이름, 없으면 대화의 반려동물로 정하고 카드에 보인다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+
+unlink_caregiver:
+  label: 공동양육 해제
+  verb: 해제
+  target: 공동양육자
+  hooks: [pet]
+  target_fields: [mbrNcnm]
+  description: |
+    반려동물 한 마리를 같이 돌보는 사람(공동양육자) 하나를 빼는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 바꾸지 않는다.
+
+    쓸 때: 공동양육자를 해제해 달라는 말, 같이 돌보는 걸 그만두겠다는 말.
+      예) "코코 공동양육자 동생 해제해 줘", "보리 같이 키우는 거 그만할래"
+    쓰지 않을 때: 아직 수락 전인 보낸 초대를 거두는 말은 cancel_caregiver_invitation. 공동양육자를 묻기만 하는 말은
+      list_caregivers. 새로 초대하는 말은 draft_caregiver_invitation.
+    인자: brup_rel_sn은 이 턴 list_caregivers 결과의 brupRelSn만 쓴다. 결과가 없으면 list_caregivers를 먼저
+      부른다. 어느 사람인지 하나로 정할 수 없으면 비운다(지어내지 않는다). 반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    brup_rel_sn:
+      java: brupRelSn
+      description: 뺄 공동양육 관계 번호. 이 턴 list_caregivers 결과의 brupRelSn만, 모르면 비운다
+
+delete_caregiver_invitation:
+  label: 공동양육 초대 삭제
+  target: 취소한 초대장
+  target_fields: [invtnTrgtEmlMask]
+  description: |
+    내가 보낸 공동양육 초대 중 이미 취소한 초대 하나를 목록에서 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 취소한 초대를 목록에서 지워 달라는 말.
+      예) "취소한 초대 지워 줘", "보낸 초대 목록에서 취소된 거 삭제해 줘"
+    쓰지 않을 때: 아직 살아 있는 보낸 초대를 거두는 말은 cancel_caregiver_invitation. 받은 초대를 거절하는 말은
+      reject_caregiver_invitation. 보낸 초대를 묻기만 하는 말은 list_sent_caregiver_invitations.
+    인자: jnt_brup_invtn_sn은 이 턴 list_sent_caregiver_invitations 결과의 jntBrupInvtnSn만 쓴다. 결과가 없으면
+      list_sent_caregiver_invitations를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다.
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    jnt_brup_invtn_sn:
+      java: jntBrupInvtnSn
+      description: 지울 취소한 초대 번호. 이 턴 list_sent_caregiver_invitations 결과의 jntBrupInvtnSn만, 모르면 비운다
+
+delete_expenses:
+  label: 지출 여러 건 삭제
+  target: 지출 기록
+  target_fields: [expndYmd, expndClsfCd, expndAmt:원, expndPlcusNm]
+  description: |
+    이미 있는 가계부 지출 기록 여러 건을 한 번에 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 고를 수 있는 지출 두 건 이상을 지워 달라는 말.
+      예) "어제 지출 두 개 다 지워 줘", "중복으로 들어간 사료 지출 세 건 삭제해 줘"
+    쓰지 않을 때: 한 건만 지우는 말은 delete_expense. 기간·카테고리 같은 조건에 맞는 지출을 모두 지우는 말은
+      delete_expenses_by_condition. 지출을 묻기만 하는 말은 list_expenses.
+    인자: expnd_sns는 이 턴 list_expenses 결과의 expndSn만 쓴다. 결과가 없으면 list_expenses를 먼저 부른다.
+      어느 것인지 정할 수 없으면 비운다(지어내지 않는다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    expnd_sns:
+      java: expndSn
+      description: 지울 지출 번호 목록. 이 턴 list_expenses 결과의 expndSn만, 모르면 비운다
+
+delete_expenses_by_condition:
+  label: 지출 조건 삭제
+  verb: 삭제
+  target: 지출 기록
+  hooks: [pet_optional]
+  description: |
+    기간·반려동물·카테고리 조건에 맞는 가계부 지출을 모두 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 조건에 맞는 지출을 한꺼번에 지워 달라는 말.
+      예) "지난달 간식 지출 전부 지워 줘", "11월 공용 지출 다 삭제해 줘"
+    쓰지 않을 때: 고를 수 있는 몇 건을 지우는 말은 delete_expenses, 한 건은 delete_expense. 지출을 묻기만 하는 말은
+      list_expenses.
+    인자: 먼저 같은 조건으로 list_expenses를 불러 건수를 본다. expected_cnt는 그 결과의 전체 건수
+      (totalElements, 없으면 행 수)만 쓴다. 결과가 없거나 0건이면 카드를 띄우지 않고 지울 것이 없다고 안내한다.
+      기간은 시스템의 오늘 날짜 기준으로 계산한다. 말하지 않은 조건은 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 문장 속 이름으로 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    expected_cnt:
+      java: expectedCnt
+      description: 지울 건수. 이 턴 같은 조건 list_expenses 결과의 전체 건수
+    start_ymd:
+      java: startYmd
+      description: 기간 시작 YYYY-MM-DD
+    end_ymd:
+      java: endYmd
+      description: 기간 끝 YYYY-MM-DD
+    common:
+      java: common
+      description: 공용 지출(반려동물 없는 지출)만이면 true, 말하지 않았으면 비운다
+    expnd_clsf_cd:
+      java: expndClsfCd
+      description: 지출 카테고리
+
+draft_notification_settings:
+  label: 알림 설정 변경
+  verb: 변경
+  description: |
+    알림 받기 설정(이메일·앱 알림함, 케어 일정·사전 알림 시점·펫돌봄 거래·댓글·실종 제보 만료·월 지출 한도)을
+    바꾸는 확인 카드를 대화창에 띄운다. 회원이 대화로 확인 말을 하기 전에는 아무것도 바꾸지 않는다.
+
+    쓸 때: 알림을 켜거나 끄거나, 케어 일정 사전 알림 시점을 바꿔 달라는 말.
+      예) "댓글 알림 꺼 줘", "케어 일정 알림 3일 전이랑 당일로 바꿔 줘", "이메일 알림 다시 켜 줘"
+    쓰지 않을 때: 알림 설정을 묻기만 하는 말은 get_notification_settings. 알림 목록·읽음은 list_notifications·
+      mark_notification_read·mark_all_notifications_read.
+    인자: 회원이 말한 칸만 채우고 나머지는 비운다(서버가 지금 설정값으로 채운다). 켜기는 true, 끄기는 false.
+      lead_times는 사전 알림 시점 전체 목록이다(TODAY 당일, D1 1일 전, D3 3일 전, D7 7일 전). 하나를 더하거나 빼는
+      말이면 get_notification_settings로 지금 목록을 보고 그 목록에 더하거나 뺀 전체를 넣는다.
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    eml_noti_rcptn_yn:
+      java: emlNotiRcptnYn
+      description: 이메일로 받기. 켜기 true, 끄기 false
+    inapp_noti_rcptn_yn:
+      java: inappNotiRcptnYn
+      description: 앱 알림함으로 받기. 켜기 true, 끄기 false
+    care_schdl_noti_rcptn_yn:
+      java: careSchdlNotiRcptnYn
+      description: 케어 일정 알림. 켜기 true, 끄기 false
+    lead_times:
+      java: leadTimes
+      description: 케어 일정 사전 알림 시점 전체 목록
+    mtch_dlng_noti_rcptn_yn:
+      java: mtchDlngNotiRcptnYn
+      description: 펫돌봄 거래 상태 알림. 켜기 true, 끄기 false
+    cmnt_noti_rcptn_yn:
+      java: cmntNotiRcptnYn
+      description: 댓글 알림. 켜기 true, 끄기 false
+    lost_expry_noti_rcptn_yn:
+      java: lostExpryNotiRcptnYn
+      description: 실종 제보 글 만료 예고 알림. 켜기 true, 끄기 false
+    expnd_lim_noti_rcptn_yn:
+      java: expndLimNotiRcptnYn
+      description: 월 지출 한도 초과 알림. 켜기 true, 끄기 false
+
+check_expense_duplicates:
+  label: 지출 중복 확인
+  screen: SCR-MYP-030
+  description: |
+    가계부에 적으려는 지출과 같은 날·같은 카테고리·같은 금액의 지출이 이미 있는지 찾아 답한다.
+    아무것도 저장하지 않는다.
+
+    쓸 때: 이 지출을 이미 적었는지, 중복인지 묻는 말.
+      예) "어제 병원비 5만원 이미 가계부에 적었나?", "오늘 사료 3만원 지출 중복 아니야?"
+    쓰지 않을 때: 지출을 적어 달라는 말은 draft_expense. 지출 목록을 보여 달라는 말은 list_expenses.
+    인자: 회원이 말한 날짜·카테고리·금액을 넣는다. 날짜는 시스템의 오늘 날짜 기준으로 계산하고 말하지 않았으면 오늘.
+      금액은 원 단위 정수로 바꾼다.
+    말하는 법: 같은 지출이 있으면 그 날짜·금액·사용처를 말하고, 없으면 없다고 짧게 답한다.
+  params:
+    expnd_ymd:
+      java: expndYmd
+      description: 지출 날짜 YYYY-MM-DD
+    expnd_clsf_cd:
+      java: expndClsfCd
+      description: 지출 카테고리
+    expnd_amt:
+      java: lines[].expndAmt
+      description: 금액(원)
+    expnd_plcus_nm:
+      java: expndPlcusNm
+      description: 사용처 이름(가게·병원 이름)
+  fixed:
+    expndInptMthCd: MYPC0019
+
+check_receipt_save:
+  label: 영수증 저장 전 확인
+  screen: SCR-MYP-030
+  description: |
+    저장된 영수증 하나를 검진기록·가계부에 저장하기 전에, 가계부에 같은 지출이 있는지와 가까운 예정 일정이 있는지
+    찾아 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 그 영수증을 저장하면 중복인지, 연결할 병원 일정이 있는지 묻는 말.
+      예) "그 영수증 가계부에 이미 들어가 있어?", "이 영수증이랑 맞는 병원 일정 있어?"
+    쓰지 않을 때: 영수증 내용을 묻는 말은 get_receipt. 새 영수증은 사진으로 올린다.
+    인자: recpt_sn은 이 턴 list_expenses·get_receipt 결과의 recptSn만 쓴다. 결과가 없으면 list_expenses를 먼저
+      부른다. pet_sn은 같은 결과의 petSn, ckup_ymd는 그 영수증의 진료일. 모르면 비운다(지어내지 않는다).
+    말하는 법: 받은 중복 지출·일정만 말한다.
+  params:
+    recpt_sn:
+      java: recptSn
+      description: 영수증 번호. 이 턴 결과의 recptSn만
+    ckup_ymd:
+      java: ckupYmd
+      description: 진료일 YYYY-MM-DD
+    pet_sn:
+      java: pets[].petSn
+      description: 영수증 반려동물 번호. 이 턴 결과의 petSn만
+
+draft_receipt_checkup:
+  label: 영수증 검진기록 등록
+  target: 영수증
+  hooks: [pet]
+  description: |
+    저장된 영수증 하나로 검진기록을 새로 만드는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 이미 가계부에 있는 영수증(병원비)으로 검진기록을 만들어 달라는 말.
+      예) "그 병원비 영수증으로 검진기록 만들어 줘", "지난주 영수증 정기검진으로 기록해 줘"
+    쓰지 않을 때: 영수증 없이 검진기록을 남기는 말은 draft_checkup. 영수증 분석 카드를 고치는 말은
+      draft_receipt_save.
+    인자: recpt_sn은 이 턴 list_expenses·get_receipt 결과의 recptSn만 쓴다. 결과가 없으면 list_expenses를 먼저
+      부른다. 진료일·병원 이름은 그 결과 값이나 회원이 말한 값, 모르면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    recpt_sn:
+      java: recptSn
+      description: 영수증 번호. 이 턴 결과의 recptSn만, 모르면 비운다
+    ckup_ymd:
+      java: ckupYmd
+      description: 진료일 YYYY-MM-DD
+    hsptl_nm:
+      java: hsptlNm
+      description: 병원 이름
+    ckup_type_cd:
+      java: ckupTypeCd
+      description: 검진 종류
+    ckup_cn:
+      java: ckupCn
+      description: 진료 내용
+    ckup_memo_cn:
+      java: ckupMemoCn
+      description: 메모
+
+mark_service_tutorial_viewed:
+  label: 튜토리얼 그만 보기
+  verb: 저장
+  description: |
+    서비스 튜토리얼(처음 쓰는 법 안내)을 봤다고 저장해 다시 띄우지 않게 하는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 튜토리얼을 그만 보여 달라는 말, 이미 봤다는 말.
+      예) "튜토리얼 그만 보여 줘", "튜토리얼 다 봤어 이제 안 띄워도 돼"
+    쓰지 않을 때: 튜토리얼을 봤는지 묻는 말은 get_service_tutorial. 사용법을 묻는 말은 search_guide.
+    인자: 없다.
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+
 # 일부러 싣지 않는 Java 도구 (skip: 이유)
 
 draft_receipt_save:
-  skip: 저장 전 영수증 번호를 주는 READ 없음(SCR-AIM-013 ⑤ 팀 결정 대기)
+  label: 영수증 저장
+  verb: 저장
+  description: |
+    대화창 영수증 분석 카드(대화 직전 "영수증 분석 — …" 글)를 고쳐 검진기록·가계부에 저장하는 확인 카드를
+    대화창에 띄운다. 회원이 대화로 확인 말을 하기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 영수증 분석 카드를 돌려받았을 때 검진 종류·병원 이름·검진일을 고르거나 고치는 말.
+      예) (영수증 분석 카드 뒤) "일반진료로 저장해 줘", "정기검진이야", "병원 이름은 메이 동물병원이야"
+    쓰지 않을 때: 영수증 분석 카드가 없으면 쓰지 않는다(새 영수증은 사진으로 올린다).
+      영수증 없이 병원비를 적는 말은 draft_expense, 검진기록만 남기는 말은 draft_checkup.
+    인자: recpt_sn은 쓰지 않는다(카드 값을 서버가 그대로 둔다). 말하지 않은 칸은 비운다.
+      반려동물별 금액·약은 카드 값을 서버가 그대로 둔다.
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    recpt_sn:
+      java: recptSn
+      description: 영수증 번호. 쓰지 않는다(카드 값)
+    hsptl_nm:
+      java: hsptlNm
+      description: 병원 이름
+    ckup_ymd:
+      java: ckupYmd
+      description: 검진일 YYYY-MM-DD
+    ckup_type_cd:
+      java: pets[].ckupTypeCd
+      description: 검진 종류
 
 list_faqs:
   skip: 사용법 문항이 search_guide와 겹침(운영 FAQ 문항이 정해지면 다시)
@@ -1226,8 +1587,1301 @@ decline:
       예) "강아지 키우는 집 생활비 가계부 짜줘", "월급 300인데 한 달 예산 짜줘"
       뜻 없는 글자, 욕설, 무엇을 원하는지 알 수 없는 입력은 unclear true.
     쓰지 않을 때: 반려동물 건강·생활 질문과 이 앱의 화면·기능 질문은 범위 안이다.
+      뜻 없는 글자(ㄹㄹ·ㅁㄴㅇ 등)가 섞여도 알아들을 수 있는 말("포인트"·"일정")이 있으면
+      decline하지 않고 그 말에 맞는 도구를 고른다. 예) "ㄹㄹ 포인트"는 get_points.
       이 앱 가계부를 쓰는 법을 묻는 말("가계부는 어떻게 쓰는거야")은 search_guide.
     말하는 법: 글을 쓰지 않는다.
   params:
     unclear:
       description: 뜻을 알 수 없는 입력이면 true, 범위 밖 질문이면 false
+
+# 수정·삭제 도구 (SCR-AIM-012 2단계, 2026-11-25 LJS 결정 : 삭제도 확인 카드로)
+# - target_fields : 삭제 카드의 대상 글(targetText)에 쓸 READ 결과 행의 Java 칸. "칸:단위"는 값 뒤 단위,
+#   "번호칸>칸"은 그 번호의 다른 READ 행에서 칸을 읽음. 코드 칸은 이름(…Nm 칸 또는 도구 목록 코드)으로
+
+draft_daily_health_record_update:
+  label: 건강 일지 수정
+  target: 건강 일지 기록
+  hooks: [pet, date]
+  description: |
+    이미 있는 건강 일지 기록(체중·식사량·음수량·배변상태·산책) 하나를 고치는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 이미 적은 일지 기록의 수치·상태·시간을 바꿔 달라는 말.
+      예) "어제 체중 4.57로 바꿔줘", "오늘 아침 산책 기록 40분으로 고쳐 줘", "배변 기록 정상으로 바꿔 줘"
+    쓰지 않을 때: 새 기록을 넣는 말은 draft_daily_health_record. 반려동물 정보의 등록 몸무게를 바꾸는 말
+      ("탄이 몸무게 정보 바꿔 줘")은 draft_pet_update. 기록을 지우는 말은 delete_daily_health_record.
+    인자: daily_hlth_rcd_sn은 이 턴에 받은 list_daily_health_records 결과의 dailyHlthRcdSn만 쓴다. 결과가 없으면
+      list_daily_health_records를 먼저 부른다. 바꾸지 않는 칸은 비운다(말한 칸만 채운다).
+      수치는 단위 없이 숫자만 쓴다. 날짜만 바꾸면 시간은 읽기 결과의 원래 시간을 쓴다.
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    daily_hlth_rcd_sn:
+      java: dailyHlthRcdSn
+      description: 고칠 건강 일지 기록 번호. 이 턴 list_daily_health_records 결과의 dailyHlthRcdSn만, 모르면 비운다
+    rcd_ymd:
+      hook: date:ymd
+      description: 바꿀 기록 날짜 YYYY-MM-DD. 날짜·시간을 바꾸지 않으면 비운다
+    rcd_tm:
+      hook: date:tm
+      description: 바꿀 기록 시간 24시간 HH:MM. 말하지 않았으면 비운다
+    rcd_nvl:
+      java: rcdNvl
+      description: 바꿀 체중·식사량·음수량·산책의 수치(숫자만, 체중은 kg)
+    crsd_stts_cd:
+      java: crsdSttsCd
+      description: 바꿀 배변상태
+
+draft_checkup_update:
+  label: 검진기록 수정
+  target: 검진기록
+  hooks: [pet]
+  description: |
+    이미 있는 검진기록 하나를 고치는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 검진기록의 병원 이름·검진유형·진료 내용·메모를 바꿔 달라는 말.
+      예) "지난 검진 병원 이름 메이 동물병원으로 고쳐 줘", "어제 진료 내용에 귀 염증 적어 줘"
+    쓰지 않을 때: 검진 날짜를 바꾸는 말은 연결된 일정을 고치는 draft_schedule_update(검진기록에서는 날짜를 못 바꾼다).
+      검진기록을 지우는 말은 delete_checkup.
+    인자: ckup_rcd_sn은 이 턴에 받은 list_checkups 결과의 ckupRcdSn만 쓴다. 결과가 없으면
+      list_checkups를 먼저 부른다. 바꾸지 않는 칸은 비운다(말한 칸만 채운다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    ckup_rcd_sn:
+      java: ckupRcdSn
+      description: 고칠 검진기록 번호. 이 턴 list_checkups 결과의 ckupRcdSn만, 모르면 비운다
+    hsptl_nm:
+      java: hsptlNm
+      description: 바꿀 병원 이름
+    ckup_type_cd:
+      java: ckupTypeCd
+      description: 바꿀 검진유형
+    ckup_cn:
+      java: ckupCn
+      description: 바꿀 진료 내용
+    ckup_memo_cn:
+      java: ckupMemoCn
+      description: 바꿀 메모
+
+draft_prescription_update:
+  label: 처방약 수정
+  target: 처방약
+  hooks: [pet]
+  description: |
+    이미 있는 처방약 하나를 고치는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 처방약의 이름·복용 기간·하루 횟수·복용 상태를 바꿔 달라는 말.
+      예) "항생제 이틀 더 먹이게 종료일 바꿔 줘", "심장약 하루 두 번으로 고쳐 줘", "그 약 다 먹였어 복용 끝으로 바꿔 줘"
+    쓰지 않을 때: 약을 묻기만 하는 말은 list_prescriptions. 처방약을 지우는 말은 delete_prescription.
+    인자: prsc_sn은 이 턴에 받은 list_prescriptions 결과의 prscSn만 쓴다. 결과가 없으면
+      list_prescriptions를 먼저 부른다. 바꾸지 않는 칸은 비운다(말한 칸만 채운다).
+      날짜는 시스템의 오늘 날짜 기준으로 계산한다.
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    prsc_sn:
+      java: prscSn
+      description: 고칠 처방약 번호. 이 턴 list_prescriptions 결과의 prscSn만, 모르면 비운다
+    mdcn_nm:
+      java: mdcnNm
+      description: 바꿀 약 이름
+    mdcn_bgng_ymd:
+      java: mdcnBgngYmd
+      description: 바꿀 복용 시작일 YYYY-MM-DD
+    mdcn_end_ymd:
+      java: mdcnEndYmd
+      description: 바꿀 복용 종료일 YYYY-MM-DD
+    day_mdcn_nmtm:
+      java: dayMdcnNmtm
+      description: 바꿀 하루 복용 횟수(숫자만)
+    prsc_stts_cd:
+      java: prscSttsCd
+      description: 바꿀 복용 상태
+
+draft_etc_inspection_update:
+  label: 기타검사 수정
+  target: 기타검사
+  hooks: [pet]
+  description: |
+    이미 있는 기타검사 기록(영상·소변 등 수치 아닌 검사) 하나를 고치는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 기타검사의 검사 이름·결과·메모를 바꿔 달라는 말.
+      예) "엑스레이 결과 이상 없음으로 고쳐 줘", "소변검사 메모 지워진 거 다시 적어 줘"
+    쓰지 않을 때: 혈액검사 수치를 바꾸는 말은 draft_inspection_value_update. 기타검사를 지우는 말은 delete_etc_inspection.
+    인자: etc_insp_sn은 이 턴에 받은 list_etc_inspections 결과의 etcInspSn만 쓴다. 결과가 없으면
+      list_etc_inspections를 먼저 부른다. 바꾸지 않는 칸은 비운다(말한 칸만 채운다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    etc_insp_sn:
+      java: etcInspSn
+      description: 고칠 기타검사 번호. 이 턴 list_etc_inspections 결과의 etcInspSn만, 모르면 비운다
+    insp_nm:
+      java: inspNm
+      description: 바꿀 검사 이름
+    insp_rslt_cn:
+      java: inspRsltCn
+      description: 바꿀 검사 결과
+    memo_cn:
+      java: memoCn
+      description: 바꿀 메모
+
+draft_inspection_value_update:
+  label: 검사 수치 수정
+  target: 검사 수치
+  hooks: [pet]
+  description: |
+    이미 있는 혈액검사 수치 한 항목 하나를 고치는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 저장된 검사 수치 한 항목의 결과 값·단위·메모를 바꿔 달라는 말.
+      예) "지난 검사 BUN 수치 25로 고쳐 줘", "크레아티닌 단위 mg/dL로 바꿔 줘"
+    쓰지 않을 때: 수치를 묻기만 하는 말은 list_inspection_values. 참고범위는 바꾸지 못한다(검진 상세 화면에서).
+    인자: insp_nvl_sn은 이 턴에 받은 list_inspection_values 결과의 inspNvlSn만 쓴다. 결과가 없으면
+      list_inspection_values를 먼저 부른다. 바꾸지 않는 칸은 비운다(말한 칸만 채운다).
+      수치는 단위 없이 숫자만 쓴다.
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    insp_nvl_sn:
+      java: inspNvlSn
+      description: 고칠 검사 수치 번호. 이 턴 list_inspection_values 결과의 inspNvlSn만, 모르면 비운다
+    rslt_nvl:
+      java: rsltNvl
+      description: 바꿀 결과 수치(숫자만)
+    unit_nm:
+      java: unitNm
+      description: 바꿀 단위
+    memo_cn:
+      java: memoCn
+      description: 바꿀 메모
+
+draft_observation_cycle_update:
+  label: 관찰 기록 수정
+  target: 관찰 기록
+  hooks: [pet, date]
+  description: |
+    이미 있는 관찰 기록(관찰 항목의 한 회차) 하나를 고치는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 관찰 기록의 크기·변화·메모·시간을 바꿔 달라는 말.
+      예) "어제 관찰 기록 크기 1.5cm로 고쳐 줘", "그 관찰 기록 변화 없음으로 바꿔 줘"
+    쓰지 않을 때: 새 관찰 기록을 더하는 말은 draft_observation_cycle. 관찰 기록을 지우는 말은 delete_observation_cycle.
+    인자: obsrv_cycl_sn은 이 턴에 받은 list_observation_cycles 결과의 obsrvCyclSn만 쓴다. 결과가 없으면
+      list_observation_cycles를 먼저 부른다. 바꾸지 않는 칸은 비운다(말한 칸만 채운다).
+      크기는 단위 없이 숫자만(cm). 사진은 다루지 않는다(회원이 카드에서 바꾼다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    obsrv_cycl_sn:
+      java: obsrvCyclSn
+      description: 고칠 관찰 기록 번호. 이 턴 list_observation_cycles 결과의 obsrvCyclSn만, 모르면 비운다
+    obsrv_ymd:
+      hook: date:ymd
+      description: 바꿀 관찰 날짜 YYYY-MM-DD. 날짜·시간을 바꾸지 않으면 비운다
+    obsrv_tm:
+      hook: date:tm
+      description: 바꿀 관찰 시간 24시간 HH:MM. 말하지 않았으면 비운다
+    obsrv_sz:
+      java: obsrvSz
+      description: 바꿀 크기(숫자만, cm)
+    obsrv_chg_cd:
+      java: obsrvChgCd
+      description: 바꿀 크기 변화
+    memo_cn:
+      java: memoCn
+      description: 바꿀 메모
+
+delete_schedule:
+  label: 일정 삭제
+  target: 일정
+  hooks: [pet]
+  target_fields: [schdlDt, schdlKndCd, schdlNm, hsptlNm]
+  description: |
+    이미 있는 캘린더 일정 하나를 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 일정을 지우거나 없애 달라는 말, 예약을 취소했으니 일정을 빼 달라는 말.
+      예) "다음 주 미용 일정 지워 줘", "병원 예약 취소됐어 일정 삭제해 줘"
+    쓰지 않을 때: 날짜를 미루거나 바꾸는 말은 draft_schedule_update. 일정을 묻기만 하는 말은 list_my_care_schedules.
+    인자: schdl_sn은 이 턴에 받은 list_my_care_schedules 결과의 schdlSn만 쓴다. 결과가 없으면
+      list_my_care_schedules를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    schdl_sn:
+      java: schdlSn
+      description: 지울 일정 번호. 이 턴 list_my_care_schedules 결과의 schdlSn만, 모르면 비운다
+
+delete_care_item:
+  label: 케어 항목 삭제
+  target: 케어 항목
+  hooks: [pet]
+  target_fields: [careArtclNm, careCycleCd]
+  description: |
+    이미 있는 반복 케어 항목 하나를 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 케어 항목을 목록에서 지우거나 더 안 한다고 빼 달라는 말.
+      예) "발톱 깎기 항목 삭제해 줘", "양치 케어 항목 이제 없애 줘"
+    쓰지 않을 때: 주기·이름을 바꾸는 말은 draft_care_item_update. 오늘 체크한 것을 되돌리는 말은 cancel_care_completion.
+    인자: care_artcl_sn은 이 턴에 받은 list_care_items 결과의 careArtclSn만 쓴다. 결과가 없으면
+      list_care_items를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    care_artcl_sn:
+      java: careArtclSn
+      description: 지울 케어 항목 번호. 이 턴 list_care_items 결과의 careArtclSn만, 모르면 비운다
+
+cancel_care_completion:
+  label: 케어 완료 취소
+  target: 케어 완료 기록
+  hooks: [pet]
+  target_fields: [careArtclSn>careArtclNm, cmptnYmd]
+  description: |
+    이미 있는 케어 완료 체크 기록 하나를 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 잘못 체크한 케어 완료를 되돌려 달라는 말.
+      예) "오늘 산책 완료 체크 취소해 줘", "어제 양치 했다고 잘못 눌렀어 지워 줘"
+    쓰지 않을 때: 케어 항목 자체를 없애는 말은 delete_care_item. 했다고 체크하는 말은 draft_care_completion.
+      오늘 마지막으로 체크한 것을 되돌리는 말은 cancel_last_dose.
+    인자: care_cmptn_hstry_sn은 이 턴에 받은 list_care_completions 결과의 careCmptnHstrySn만 쓴다. 결과가 없으면
+      list_care_completions를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    care_cmptn_hstry_sn:
+      java: careCmptnHstrySn
+      description: 지울 케어 완료 기록 번호. 이 턴 list_care_completions 결과의 careCmptnHstrySn만, 모르면 비운다
+
+delete_daily_health_record:
+  label: 건강 일지 삭제
+  target: 건강 일지 기록
+  hooks: [pet]
+  target_fields: [rcdDt, dailyRcdIdctCd, rcdNvl, crsdSttsCd]
+  description: |
+    이미 있는 건강 일지 기록 하나를 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 잘못 적은 체중·식사량·음수량·배변·산책 기록을 지워 달라는 말.
+      예) "어제 체중 기록 지워 줘", "오늘 산책 기록 잘못 넣었어 삭제해 줘"
+    쓰지 않을 때: 값을 고치는 말은 draft_daily_health_record_update. 기록을 묻기만 하는 말은 list_daily_health_records.
+    인자: daily_hlth_rcd_sn은 이 턴에 받은 list_daily_health_records 결과의 dailyHlthRcdSn만 쓴다. 결과가 없으면
+      list_daily_health_records를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    daily_hlth_rcd_sn:
+      java: dailyHlthRcdSn
+      description: 지울 건강 일지 기록 번호. 이 턴 list_daily_health_records 결과의 dailyHlthRcdSn만, 모르면 비운다
+
+delete_checkup:
+  label: 검진기록 삭제
+  target: 검진기록
+  hooks: [pet]
+  target_fields: [ckupYmd, hsptlNm, ckupTypeCd]
+  description: |
+    이미 있는 검진기록 하나를 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 검진기록을 지워 달라는 말.
+      예) "지난달 검진기록 잘못 만들었어 지워 줘", "메이 동물병원 검진기록 삭제해 줘"
+    쓰지 않을 때: 병원·내용을 고치는 말은 draft_checkup_update. 검진기록을 묻기만 하는 말은 list_checkups.
+    인자: ckup_rcd_sn은 이 턴에 받은 list_checkups 결과의 ckupRcdSn만 쓴다. 결과가 없으면
+      list_checkups를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    ckup_rcd_sn:
+      java: ckupRcdSn
+      description: 지울 검진기록 번호. 이 턴 list_checkups 결과의 ckupRcdSn만, 모르면 비운다
+
+delete_prescription:
+  label: 처방약 삭제
+  target: 처방약
+  hooks: [pet]
+  target_fields: [mdcnNm, mdcnBgngYmd, mdcnEndYmd]
+  description: |
+    이미 있는 처방약 기록 하나를 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 처방약 기록을 지워 달라는 말.
+      예) "항생제 기록 삭제해 줘", "잘못 넣은 약 지워 줘"
+    쓰지 않을 때: 복용 기간·상태를 고치는 말은 draft_prescription_update. 약을 묻기만 하는 말은 list_prescriptions.
+    인자: prsc_sn은 이 턴에 받은 list_prescriptions 결과의 prscSn만 쓴다. 결과가 없으면
+      list_prescriptions를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    prsc_sn:
+      java: prscSn
+      description: 지울 처방약 번호. 이 턴 list_prescriptions 결과의 prscSn만, 모르면 비운다
+
+delete_etc_inspection:
+  label: 기타검사 삭제
+  target: 기타검사
+  hooks: [pet]
+  target_fields: [inspNm, inspRsltCn]
+  description: |
+    이미 있는 기타검사 기록 하나를 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 기타검사 기록을 지워 달라는 말.
+      예) "지난 검진 엑스레이 기록 삭제해 줘"
+    쓰지 않을 때: 결과·메모를 고치는 말은 draft_etc_inspection_update.
+    인자: etc_insp_sn은 이 턴에 받은 list_etc_inspections 결과의 etcInspSn만 쓴다. 결과가 없으면
+      list_etc_inspections를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    etc_insp_sn:
+      java: etcInspSn
+      description: 지울 기타검사 번호. 이 턴 list_etc_inspections 결과의 etcInspSn만, 모르면 비운다
+
+delete_observation_cycle:
+  label: 관찰 기록 삭제
+  target: 관찰 기록
+  hooks: [pet]
+  target_fields: [obsrvDt, obsrvSz:cm, obsrvChgCd]
+  description: |
+    이미 있는 관찰 기록(관찰 항목의 한 회차) 하나를 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 관찰 기록 한 회차를 지워 달라는 말.
+      예) "어제 남긴 혹 관찰 기록 지워 줘"
+    쓰지 않을 때: 크기·변화를 고치는 말은 draft_observation_cycle_update. 관찰 기록을 묻기만 하는 말은 list_observation_cycles.
+      다 나아서 관찰 항목을 끝내는 말은 end_observation_item.
+    인자: obsrv_cycl_sn은 이 턴에 받은 list_observation_cycles 결과의 obsrvCyclSn만 쓴다. 결과가 없으면
+      list_observation_cycles를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    obsrv_cycl_sn:
+      java: obsrvCyclSn
+      description: 지울 관찰 기록 번호. 이 턴 list_observation_cycles 결과의 obsrvCyclSn만, 모르면 비운다
+
+delete_repeat_prevention:
+  label: 반복 예방 삭제
+  target: 반복 예방 항목
+  hooks: [pet]
+  target_fields: [reptPrvntArtclCd, bgngYmd]
+  description: |
+    이미 있는 반복 예방(접종·구충 등) 관리 항목 하나를 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 반복 예방 관리 항목을 지워 달라는 말.
+      예) "심장사상충 반복 예방 항목 삭제해 줘"
+    쓰지 않을 때: 반복 예방을 묻기만 하는 말은 list_repeat_preventions.
+    인자: rept_prvnt_mng_sn은 이 턴에 받은 list_repeat_preventions 결과의 reptPrvntMngSn만 쓴다. 결과가 없으면
+      list_repeat_preventions를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    rept_prvnt_mng_sn:
+      java: reptPrvntMngSn
+      description: 지울 반복 예방 항목 번호. 이 턴 list_repeat_preventions 결과의 reptPrvntMngSn만, 모르면 비운다
+
+delete_expense:
+  label: 지출 삭제
+  target: 지출 기록
+  target_fields: [expndYmd, expndClsfCd, expndAmt:원, expndPlcusNm]
+  description: |
+    이미 있는 가계부 지출 기록 하나를 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 가계부 지출 하나를 지워 달라는 말.
+      예) "어제 사료 산 지출 지워 줘", "중복으로 들어간 병원비 지출 삭제해 줘"
+    쓰지 않을 때: 금액·카테고리를 고치는 말은 draft_expense_update. 지출을 묻기만 하는 말은 list_expenses.
+      두 건 이상을 지우는 말은 delete_expenses, 조건에 맞는 지출을 모두 지우는 말은 delete_expenses_by_condition.
+    인자: expnd_sn은 이 턴에 받은 list_expenses 결과의 expndSn만 쓴다. 결과가 없으면
+      list_expenses를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    expnd_sn:
+      java: expndSn
+      description: 지울 지출 기록 번호. 이 턴 list_expenses 결과의 expndSn만, 모르면 비운다
+
+delete_place_bookmark:
+  label: 즐겨찾기 삭제
+  target: 즐겨찾기 장소
+  target_fields: [plcConm, plcAddr]
+  description: |
+    이미 있는 장소 즐겨찾기 하나를 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 즐겨찾기한 장소를 빼 달라는 말.
+      예) "메이 동물병원 즐겨찾기 해제해 줘", "그 카페 즐겨찾기에서 지워 줘"
+    쓰지 않을 때: 즐겨찾기를 묻기만 하는 말은 list_place_bookmarks. 즐겨찾기에 더하는 말은 draft_place_bookmark.
+    인자: plc_bkmk_sn은 이 턴에 받은 list_place_bookmarks 결과의 plcBkmkSn만 쓴다. 결과가 없으면
+      list_place_bookmarks를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    plc_bkmk_sn:
+      java: plcBkmkSn
+      description: 지울 즐겨찾기 장소 번호. 이 턴 list_place_bookmarks 결과의 plcBkmkSn만, 모르면 비운다
+
+draft_place_bookmark:
+  label: 장소 즐겨찾기
+  description: |
+    찾은 장소 하나를 내 장소 즐겨찾기에 더하는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 장소를 즐겨찾기(저장)해 달라는 말.
+      예) "해피동물병원 즐겨찾기 해 줘", "전주 메이 애견카페 즐겨찾기에 넣어 줘"
+    쓰지 않을 때: 즐겨찾기를 빼는 말은 delete_place_bookmark. 즐겨찾기한 장소를 묻는 말은
+      list_place_bookmarks. 장소를 찾기만 하는 말은 list_places.
+    인자: plc_sn은 이 턴에 받은 list_places 결과의 plcSn만 쓴다. 결과가 없으면 list_places를 먼저 부른다.
+      어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다). 반려동물은 고르지 않는다.
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    plc_sn:
+      java: plcSn
+      description: 즐겨찾기할 장소 번호. 이 턴 list_places 결과의 plcSn만, 모르면 비운다
+
+draft_member_nickname_update:
+  label: 닉네임 수정
+  description: |
+    내 닉네임을 바꾸는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 바꾸지 않는다.
+
+    쓸 때: 내 닉네임(앱에서 보이는 이름)을 바꿔 달라는 말.
+      예) "닉네임 콩이맘으로 바꿔 줘", "내 별명을 초코아빠로 해 줘"
+    쓰지 않을 때: 반려동물 이름을 바꾸는 말은 draft_pet_update. 프로필 사진은 draft_member_profile_update.
+      휴대전화번호·비밀번호·이메일 변경은 도구가 없으니 navigate로 마이페이지를 안내한다.
+    인자: mbr_ncnm은 회원이 말한 닉네임 그대로(한글·영문·숫자, 10자까지). 말하지 않았으면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다.
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    mbr_ncnm:
+      java: mbrNcnm
+      description: 새 닉네임(말한 그대로)
+
+draft_member_profile_update:
+  label: 프로필 사진 수정
+  description: |
+    내 프로필 사진을 바꾸거나 기본 이미지로 되돌리는 확인 카드를 대화창에 띄운다.
+    새 사진은 회원이 카드에서 올린다. 회원이 대화로 확인 말을 하기 전에는 아무것도 바꾸지 않는다.
+
+    쓸 때: 내 프로필 사진을 바꾸거나 지워(기본 이미지로) 달라는 말.
+      예) "프로필 사진 바꿔 줘", "프로필 사진 기본 이미지로 돌려 줘", "내 프로필 사진 지워 줘"
+    쓰지 않을 때: 닉네임은 draft_member_nickname_update. 반려동물 사진·캐릭터는 이 도구가 아니다.
+      휴대전화번호 변경은 도구가 없으니 navigate로 마이페이지를 안내한다.
+    인자: profile_photo_reset은 기본 이미지로 되돌리거나 지워 달라고 했을 때만 true, 새 사진으로 바꾸는 말이면 비운다.
+      사진은 다루지 않는다(카드에서 올린다). 반려동물은 고르지 않는다.
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    profile_photo_reset:
+      java: profilePhotoReset
+      description: 기본 이미지로 되돌리기. 되돌리거나 지워 달라고 했을 때만 true
+
+# 2026-11-27 백엔드 새 도구 41개 (READ 25·CARD 16, SCR-AIM-004·011·012 공통)
+# 번호 목록 칸(java가 숫자 배열 칸 itemSns·hldItemSns·petSns) : 번호마다 이 턴 READ 결과 값만(catalog._clean_ids)
+
+get_care_mission_progress:
+  label: 케어 미션 진행
+  screen: SCR-MYP-020
+  hooks: [pet]
+  description: |
+    오늘 케어 항목(약·영양제·양치 등) 미션을 몇 개 했는지 진행률을 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 오늘 케어를 얼마나 했는지, 남은 케어가 몇 개인지 묻는 말.
+      예) "오늘 케어 몇 개 했어?", "초코 오늘 케어 다 했나?"
+    쓰지 않을 때: 케어 항목 목록은 list_care_items, 어떤 케어를 언제 했는지는 list_care_completions.
+      포인트를 주는 케어미션(하루 미션)은 list_daily_missions.
+    인자: 반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 받은 수만 쓴다. 남은 것이 있으면 짧게 알려 준다.
+
+list_checkup_attachments:
+  label: 검진 첨부 파일
+  screen: SCR-HLT-002
+  hooks: [pet]
+  description: |
+    검진기록에 붙인 첨부 파일(검사결과지·접종 증명서·영상 사진) 목록을 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 올려 둔 검사결과지·접종 증명서·사진이 있는지 묻는 말.
+      예) "접종 증명서 올려 둔 거 있어?", "지난 검진 결과지 첨부했었나?"
+    쓰지 않을 때: 검진 날짜·병원은 list_checkups, 혈액 수치는 list_inspection_values.
+    인자: 한 검진만 물으면 ckup_rcd_sn은 이 턴 list_checkups 결과의 ckupRcdSn만, 모르면 비운다.
+      말하지 않은 칸은 비운다. 반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 받은 파일 이름·종류·날짜만 쓴다. 파일 내용은 대화창에서 볼 수 없다고 말한다.
+  params:
+    ckup_rcd_sn:
+      java: ckupRcdSn
+      description: 검진기록 번호. 이 턴 list_checkups 결과의 ckupRcdSn만, 모르면 비운다
+    atch_type_cd:
+      java: atchTypeCd
+      description: 첨부 종류
+    page:
+      java: page
+      description: 페이지 번호
+    size:
+      java: size
+      description: 한 페이지 파일 수
+
+get_health_dashboard_widgets:
+  label: 건강 대시보드 위젯
+  screen: SCR-HLT-011
+  description: |
+    종합 건강기록 화면에 켜 둔 위젯(보이는 카드와 순서) 설정을 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 건강 대시보드에 어떤 위젯이 켜져 있는지 묻는 말.
+      예) "건강 대시보드에 뭐 켜 놨지?", "건강 화면 위젯 뭐 보이게 돼 있어?"
+    쓰지 않을 때: 체중 등 건강 수치 자체는 get_health_indicators. 위젯을 바꾸는 방법은 search_guide.
+    말하는 법: 받은 위젯 이름만 쓴다.
+
+get_service_tutorial:
+  label: 서비스 안내 진행
+  screen: SCR-MAN-001
+  description: |
+    회원이 서비스 처음 안내(튜토리얼)를 봤는지 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 처음 안내를 다 봤는지, 튜토리얼 진행 상태를 묻는 말.
+      예) "나 튜토리얼 다 봤어?", "처음 안내 끝냈나?"
+    쓰지 않을 때: 기능을 쓰는 방법은 search_guide.
+    말하는 법: 받은 상태만 쓴다.
+
+list_terms:
+  label: 약관 목록
+  screen: SCR-COM-008
+  description: |
+    서비스 약관 목록(이용약관·개인정보 처리방침 등 제목·시행일)을 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 어떤 약관이 있는지, 약관 시행일을 묻는 말.
+      예) "이용약관 뭐 있어?", "개인정보 처리방침 언제부터야?"
+    쓰지 않을 때: 한 약관의 본문은 get_terms. 공지사항은 list_notices.
+    말하는 법: 받은 약관 제목·날짜만 쓴다.
+
+get_terms:
+  label: 약관 내용
+  screen: SCR-COM-008
+  description: |
+    약관 하나의 본문을 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 특정 약관의 내용을 묻는 말.
+      예) "이용약관에 탈퇴하면 어떻게 된다고 돼 있어?", "개인정보 몇 년 보관한다고 돼 있어?"
+    쓰지 않을 때: 약관 목록은 list_terms.
+    인자: trms_sn은 이 턴 list_terms 결과의 trmsSn만 쓴다. 결과가 없으면 list_terms를 먼저 부른다.
+    말하는 법: 받은 본문에 있는 내용만 짧게 옮긴다. 법률 해석을 덧붙이지 않는다.
+  params:
+    trms_sn:
+      java: trmsSn
+      description: 약관 번호. 이 턴 list_terms 결과의 trmsSn만, 모르면 비운다
+
+get_unread_notification_count:
+  label: 읽지 않은 알림 수
+  screen: SCR-COM-008
+  description: |
+    읽지 않은 알림 수를 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 새 알림·안 읽은 알림이 몇 개인지 묻는 말.
+      예) "읽지 않은 알림 몇 개야?", "새 알림 있어?"
+    쓰지 않을 때: 알림 내용은 list_notifications. 채팅의 안 읽은 메시지는 get_chat_unread_count.
+      공지사항은 list_notices.
+    말하는 법: 받은 수만 쓴다.
+
+list_notifications:
+  label: 알림
+  screen: SCR-COM-008
+  description: |
+    내 알림 목록(제목·내용·받은 때·읽음 여부)을 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 어떤 알림이 왔는지 묻는 말.
+      예) "최근 알림 뭐 왔어?", "어제 온 알림 알려 줘"
+    쓰지 않을 때: 안 읽은 수만 묻는 말은 get_unread_notification_count. 운영자가 올린 공지사항은
+      list_notices. 알림 받기 설정(켜기·끄기)은 get_notification_settings.
+    인자: 말하지 않은 칸은 비운다.
+    말하는 법: 받은 알림만 최근 것부터 짧게 쓴다.
+  params:
+    page:
+      java: page
+      description: 페이지 번호
+    size:
+      java: size
+      description: 가져올 알림 수
+
+get_notification_settings:
+  label: 알림 설정
+  screen: SCR-COM-008
+  description: |
+    알림 받기 설정(종류별 켜짐·꺼짐)을 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 어떤 알림을 받게 돼 있는지, 알림이 꺼져 있는지 묻는 말.
+      예) "일정 알림 켜져 있어?", "내 알림 설정 어떻게 돼 있어?"
+    쓰지 않을 때: 받은 알림 내용은 list_notifications. 알림을 끄는 방법은 search_guide.
+    말하는 법: 받은 설정만 쓴다.
+
+mark_notification_read:
+  label: 알림 읽음 처리
+  target: 알림
+  target_fields: [notiTtl]
+  description: |
+    알림 하나를 읽음으로 바꾸는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 바꾸지 않는다.
+
+    쓸 때: 특정 알림을 읽음으로 해 달라는 말.
+      예) "방금 온 일정 알림 읽음으로 해 줘", "그 알림 읽은 걸로 해 줘"
+    쓰지 않을 때: 알림 전부를 읽음으로 하는 말은 mark_all_notifications_read. 알림을 묻기만 하는 말은
+      list_notifications.
+    인자: inapp_noti_sn은 이 턴 list_notifications 결과의 inappNotiSn만 쓴다. 결과가 없으면
+      list_notifications를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    inapp_noti_sn:
+      java: inappNotiSn
+      description: 읽음으로 할 알림 번호. 이 턴 list_notifications 결과의 inappNotiSn만, 모르면 비운다
+
+mark_all_notifications_read:
+  label: 알림 모두 읽음 처리
+  description: |
+    읽지 않은 알림을 모두 읽음으로 바꾸는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 바꾸지 않는다.
+
+    쓸 때: 알림을 전부 읽음으로 해 달라는 말.
+      예) "알림 다 읽음 처리해 줘", "안 읽은 알림 전부 읽은 걸로 해 줘"
+    쓰지 않을 때: 알림 하나만 읽음으로 하는 말은 mark_notification_read. 알림을 끄는 말은 search_guide.
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+
+get_chat_unread_count:
+  label: 읽지 않은 채팅 수
+  screen: SCR-COM-009
+  description: |
+    채팅(펫돌봄 1:1 채팅)의 읽지 않은 메시지 수를 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 안 읽은 채팅·메시지가 있는지 묻는 말.
+      예) "안 읽은 채팅 있어?", "돌봄 채팅 새 메시지 왔어?"
+    쓰지 않을 때: 앱 알림은 get_unread_notification_count. 채팅방으로 가자는 말은 navigate.
+    말하는 법: 받은 수만 쓴다. 채팅 내용은 대화창에서 볼 수 없다고 말한다.
+
+get_today_story:
+  label: 오늘의 커뮤니티 이야기
+  screen: SCR-CMU-001-01
+  description: |
+    AI가 하루 단위로 정리한 커뮤니티 이야기(오늘의 해설)를 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 오늘·어제 커뮤니티에서 무슨 이야기가 많았는지 묻는 말.
+      예) "오늘 커뮤니티 무슨 얘기 많아?", "어제 펫이야기 요약해 줘"
+    쓰지 않을 때: 글 목록·검색은 list_posts. 인기 사진은 get_popular_photo. 펫뉴스는 list_news.
+    인자: 날짜를 말했으면 cmtry_crtr_ymd(시스템의 오늘 날짜 기준으로 계산). 말하지 않으면 비운다.
+    말하는 법: 받은 해설만 짧게 옮긴다.
+  params:
+    cmtry_crtr_ymd:
+      java: cmtryCrtrYmd
+      description: 정리 기준 날짜 YYYY-MM-DD. 말하지 않았으면 비운다
+
+get_news:
+  label: 펫뉴스 상세
+  screen: SCR-CMU-003-01
+  description: |
+    펫뉴스 하나의 내용을 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 특정 펫뉴스의 내용을 묻는 말.
+      예) "그 사료 뉴스 내용 알려 줘", "첫 번째 뉴스 자세히 말해 줘"
+    쓰지 않을 때: 뉴스 목록은 list_news.
+    인자: news_sn은 이 턴 list_news 결과의 newsSn만 쓴다. 결과가 없으면 list_news를 먼저 부른다.
+    말하는 법: 받은 기사 내용만 짧게 요약한다. 지어내지 않는다.
+  params:
+    news_sn:
+      java: newsSn
+      description: 뉴스 번호. 이 턴 list_news 결과의 newsSn만, 모르면 비운다
+
+get_lost_report:
+  label: 실종·목격 신고 상세
+  screen: SCR-CMU-002
+  description: |
+    실종·목격 신고 하나의 내용(동물·장소·날짜·특징)을 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 특정 실종·목격 신고를 자세히 묻는 말.
+      예) "그 실종 신고 어디서 잃어버린 거야?", "내가 올린 실종 신고 내용 보여 줘"
+    쓰지 않을 때: 신고 목록은 list_lost_reports. 신고를 올리는 말은 navigate.
+    인자: lost_tpof_sn은 이 턴 list_lost_reports 결과의 lostTpofSn만 쓴다. 결과가 없으면
+      list_lost_reports를 먼저 부른다.
+    말하는 법: 받은 내용만 쓴다. 연락처는 말하지 않는다.
+  params:
+    lost_tpof_sn:
+      java: lostTpofSn
+      description: 신고 번호. 이 턴 list_lost_reports 결과의 lostTpofSn만, 모르면 비운다
+
+get_care_recruitment:
+  label: 펫돌봄 모집 상세
+  screen: SCR-CMU-004
+  description: |
+    펫돌봄 모집 글 하나의 내용(기간·동물·금액·조건·모집 상태)을 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 특정 펫돌봄 모집을 자세히 묻는 말.
+      예) "그 주말 돌봄 모집 금액 얼마야?", "내가 올린 모집 조건 뭐였지?"
+    쓰지 않을 때: 모집 목록은 list_care_recruitments. 매칭된 돌봄의 진행은 get_care_match.
+      최저임금은 get_minimum_wage.
+    인자: pet_prtc_rcrt_sn은 이 턴 list_care_recruitments 결과의 petPrtcRcrtSn만 쓴다. 결과가 없으면
+      list_care_recruitments를 먼저 부른다.
+    말하는 법: 받은 내용만 쓴다. 작성자는 닉네임으로만 쓰고 연락처는 말하지 않는다.
+  params:
+    pet_prtc_rcrt_sn:
+      java: petPrtcRcrtSn
+      description: 모집 번호. 이 턴 list_care_recruitments 결과의 petPrtcRcrtSn만, 모르면 비운다
+
+get_care_match:
+  label: 펫돌봄 매칭
+  screen: SCR-CMU-004
+  description: |
+    펫돌봄 매칭 하나의 진행(조건·완료 요청 회차·돌봄비 수령 상태)을 읽어 와 답한다. 아무것도 저장하지 않는다.
+    매칭 참여자만 볼 수 있다.
+
+    쓸 때: 매칭된 돌봄이 어디까지 진행됐는지, 완료 요청·수령 상태를 묻는 말.
+      예) "돌봄 매칭 지금 어떻게 됐어?", "돌봄비 받았다고 표시됐어?"
+    쓰지 않을 때: 모집 글 자체는 get_care_recruitment·list_care_recruitments.
+    인자: pet_prtc_mtch_sn은 이 턴 READ 결과의 petPrtcMtchSn만 쓴다. 모르면 비운다(지어내지 않는다).
+    말하는 법: 받은 상태만 쓴다.
+  params:
+    pet_prtc_mtch_sn:
+      java: petPrtcMtchSn
+      description: 매칭 번호. 이 턴 READ 결과의 petPrtcMtchSn만, 모르면 비운다
+
+get_minimum_wage:
+  label: 최저임금
+  screen: SCR-CMU-004
+  description: |
+    펫돌봄 모집 금액 기준으로 쓰는 올해 최저임금(시급)을 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 최저임금, 돌봄 시급 기준을 묻는 말.
+      예) "올해 최저시급 얼마야?", "돌봄 모집 금액 최소 얼마부터야?"
+    쓰지 않을 때: 모집 글의 금액은 get_care_recruitment.
+    말하는 법: 받은 금액만 쓴다.
+
+list_breeds:
+  label: 품종 목록
+  screen: SCR-MYP-002
+  description: |
+    강아지·고양이 품종 목록을 읽어 와 답한다. 아무것도 저장하지 않는다.
+    반려동물 등록 카드(draft_pet)의 품종 번호(vrtySn)를 얻을 때도 부른다.
+
+    쓸 때: 앱에서 고를 수 있는 품종을 묻는 말, 반려동물을 등록하는데 품종을 말한 말(먼저 부른다).
+      예) "고양이 품종 뭐 있어?", "말티푸도 목록에 있어?"
+    쓰지 않을 때: 품종의 성격·건강 지식은 도구 없이 바로 답한다.
+    인자: pet_se_cd는 강아지·고양이 중 말한 것.
+    말하는 법: 받은 품종 이름만 쓴다.
+  params:
+    pet_se_cd:
+      java: petSeCd
+      description: 동물 종류
+
+get_pet_limit:
+  label: 반려동물 등록 한도
+  screen: SCR-MYP-002
+  description: |
+    반려동물을 몇 마리까지 등록할 수 있는지, 지금 몇 마리인지 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 반려동물을 더 등록할 수 있는지, 등록 한도를 묻는 말.
+      예) "반려동물 몇 마리까지 등록돼?", "한 마리 더 등록할 수 있어?"
+    쓰지 않을 때: 등록된 반려동물 목록은 list_pets.
+    말하는 법: 받은 수만 쓴다.
+
+list_main_shortcuts:
+  label: 메인 바로가기
+  screen: SCR-MAN-001
+  description: |
+    메인 화면에 둔 바로가기 목록을 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 메인 화면 바로가기에 무엇이 있는지 묻는 말.
+      예) "메인 바로가기에 뭐 넣어 놨지?"
+    쓰지 않을 때: 바로가기를 바꾸는 방법은 search_guide. 어떤 화면으로 가자는 말은 navigate.
+    말하는 법: 받은 바로가기 이름만 쓴다.
+
+list_point_ledger_months:
+  label: 포인트 내역이 있는 달
+  screen: SCR-MYP-020
+  description: |
+    포인트가 들어오거나 나간 기록이 있는 달 목록을 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 포인트 내역이 언제부터 있는지, 어느 달에 포인트를 썼는지 묻는 말.
+      예) "포인트 내역 몇 월부터 있어?", "포인트 쓴 달이 언제언제야?"
+    쓰지 않을 때: 한 달의 자세한 내역은 list_point_ledgers. 잔액은 get_points.
+      돈 지출이 있는 달은 list_expense_months.
+    말하는 법: 받은 달만 쓴다.
+
+get_caregiver_invitation:
+  label: 받은 공동양육 초대
+  screen: SCR-MYP-004
+  description: |
+    받은 공동양육 초대 하나(보낸 사람·반려동물·상태·만료)를 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 받은 초대가 누구에게서 왔는지, 어떤 반려동물인지, 언제까지인지 묻는 말.
+      예) "받은 공동양육 초대 누가 보낸 거야?", "그 초대 어떤 아이야?"
+    쓰지 않을 때: 내가 보낸 초대는 list_sent_caregiver_invitations. 이미 같이 돌보는 사람은 list_caregivers.
+    인자: jnt_brup_invtn_sn은 이 턴 READ 결과의 jntBrupInvtnSn만 쓴다. 모르면 비운다(지어내지 않는다).
+    말하는 법: 받은 내용만 쓴다. 이메일은 가려진 그대로 쓴다.
+  params:
+    jnt_brup_invtn_sn:
+      java: jntBrupInvtnSn
+      description: 초대 번호. 이 턴 READ 결과의 jntBrupInvtnSn만, 모르면 비운다
+
+list_inquiries:
+  label: 1:1 문의
+  screen: SCR-CSC-002-01
+  description: |
+    내가 남긴 1:1 문의 목록(제목·날짜·답변 상태)을 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 문의에 답이 왔는지, 내가 남긴 문의를 묻는 말.
+      예) "내 문의 답변 왔어?", "지난번에 한 문의 뭐였지?"
+    쓰지 않을 때: 문의 하나의 답변 내용은 get_inquiry. 자주 묻는 질문·사용법은 search_guide.
+      공지사항은 list_notices.
+    인자: 답변 온 것만·접수된 것만 물으면 inqry_prcs_stts_cd. 말하지 않은 칸은 비운다.
+    말하는 법: 받은 문의만 쓴다.
+  params:
+    inqry_prcs_stts_cd:
+      java: inqryPrcsSttsCd
+      description: 처리 상태
+    page:
+      java: page
+      description: 페이지 번호
+    size:
+      java: size
+      description: 한 페이지 문의 수
+
+get_inquiry:
+  label: 1:1 문의 상세
+  screen: SCR-CSC-002-01
+  description: |
+    1:1 문의 하나의 내용과 답변을 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 특정 문의의 답변 내용을 묻는 말.
+      예) "그 결제 문의 답변 뭐라고 왔어?"
+    쓰지 않을 때: 문의 목록은 list_inquiries.
+    인자: oto_inqry_sn은 이 턴 list_inquiries 결과의 otoInqrySn만 쓴다. 결과가 없으면 list_inquiries를
+      먼저 부른다.
+    말하는 법: 받은 답변만 짧게 옮긴다.
+  params:
+    oto_inqry_sn:
+      java: otoInqrySn
+      description: 문의 번호. 이 턴 list_inquiries 결과의 otoInqrySn만, 모르면 비운다
+
+list_notices:
+  label: 공지사항
+  screen: SCR-CSC-001
+  description: |
+    운영자가 올린 공지사항 목록(제목·날짜)을 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 공지사항·새 소식·점검 안내를 묻는 말.
+      예) "공지사항 최근 거 알려 줘", "점검 공지 있어?"
+    쓰지 않을 때: 내게 온 알림은 list_notifications. 공지 하나의 본문은 get_notice. 펫뉴스는 list_news.
+    인자: 낱말을 말했으면 keyword, 최신 것만 물으면 latest_yn true. 말하지 않은 칸은 비운다.
+    말하는 법: 받은 공지 제목·날짜만 쓴다.
+  params:
+    keyword:
+      java: keyword
+      description: 찾을 낱말
+    latest_yn:
+      java: latestYn
+      description: 최신 공지만이면 true
+    page:
+      java: page
+      description: 페이지 번호
+    size:
+      java: size
+      description: 가져올 공지 수
+
+get_notice:
+  label: 공지사항 내용
+  screen: SCR-CSC-001
+  description: |
+    공지사항 하나의 본문을 읽어 와 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 특정 공지의 내용을 묻는 말.
+      예) "그 점검 공지 몇 시까지래?", "첫 번째 공지 내용 알려 줘"
+    쓰지 않을 때: 공지 목록은 list_notices. 내게 온 알림은 list_notifications.
+    인자: ntc_mttr_sn은 이 턴 list_notices 결과의 ntcMttrSn만 쓴다. 결과가 없으면 list_notices를 먼저 부른다.
+    말하는 법: 받은 본문만 짧게 옮긴다.
+  params:
+    ntc_mttr_sn:
+      java: ntcMttrSn
+      description: 공지 번호. 이 턴 list_notices 결과의 ntcMttrSn만, 모르면 비운다
+
+cancel_last_dose:
+  label: 마지막 투약 취소
+  target: 오늘 마지막 완료 기록
+  hooks: [pet]
+  target_fields: [careArtclNm]
+  description: |
+    케어 항목(약·영양제 등)의 오늘 마지막 완료 체크 하나를 되돌리는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 오늘 마지막으로 체크한 투약·케어를 잘못 눌렀으니 취소해 달라는 말.
+      예) "오늘 마지막 투약 취소해 줘", "심장약 방금 체크한 거 취소해 줘"
+    쓰지 않을 때: 날짜를 말한 지난 완료 기록 하나를 지우는 말은 cancel_care_completion.
+      케어 항목 자체를 없애는 말은 delete_care_item.
+    인자: care_artcl_sn은 이 턴 list_care_items 결과에서 todayCmptnCnt가 1 이상인 행의 careArtclSn만 쓴다.
+      결과가 없으면 list_care_items를 먼저 부른다(항목 이름을 말했으면 care_artcl_nm). 투약이라고 했으면
+      dayMdcnNmtm이 있는 행을 고른다. 그런 행이 하나가 아니면 비운다. 오늘 완료가 없으면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    care_artcl_sn:
+      java: careArtclSn
+      description: 완료를 되돌릴 케어 항목 번호. 이 턴 list_care_items 결과에서 todayCmptnCnt가 1 이상인 행의 careArtclSn만, 모르면 비운다
+
+draft_checkup:
+  label: 검진기록 등록
+  hooks: [pet]
+  description: |
+    병원 검진기록 하나(날짜·병원·검진유형·진료 내용)의 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 병원에 다녀온 기록·검진·예방접종을 남겨 달라는 말.
+      예) "어제 행복동물병원에서 예방접종했어 기록해 줘", "오늘 정기검진 다녀왔어 검진기록 남겨 줘"
+    쓰지 않을 때: 앞으로 갈 병원 예약은 draft_schedule. 혈액 수치는 draft_inspection_values.
+      처방받은 약은 draft_prescription. 혈액 수치가 아닌 기타 검사 결과는 draft_etc_inspection.
+      이미 있는 검진기록을 고치는 말은 draft_checkup_update.
+    인자: 말하지 않은 칸은 비운다(지어내지 않는다). 날짜는 시스템의 오늘 날짜 기준으로 계산한다.
+      일정에서 온 검진이면 schdl_sn은 이 턴 list_my_care_schedules 결과의 schdlSn만, 모르면 비운다.
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    ckup_ymd:
+      java: ckupYmd
+      description: 검진 날짜 YYYY-MM-DD
+    hsptl_nm:
+      java: hsptlNm
+      description: 병원 이름
+    ckup_type_cd:
+      java: ckupTypeCd
+      description: 검진유형
+    ckup_cn:
+      java: ckupCn
+      description: 진료·검진 내용(말한 것만)
+    ckup_memo_cn:
+      java: ckupMemoCn
+      description: 회원 메모(말한 것만)
+    schdl_sn:
+      java: schdlSn
+      description: 이어진 일정 번호. 이 턴 list_my_care_schedules 결과의 schdlSn만, 모르면 비운다
+
+draft_etc_inspection:
+  label: 기타검사 등록
+  hooks: [pet]
+  description: |
+    검진기록에 기타검사(엑스레이·초음파·소변 검사 등 수치가 아닌 검사) 결과 하나를 더하는 확인 카드를
+    대화창에 띄운다. 회원이 대화로 확인 말을 하기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 검진 때 받은 엑스레이·초음파 등 검사 결과를 글로 남겨 달라는 말.
+      예) "어제 검진에서 엑스레이 정상이래 기록해 줘", "초음파 결과 신장 약간 커짐 적어 줘"
+    쓰지 않을 때: 혈액 수치(숫자)는 draft_inspection_values. 검진 자체(날짜·병원)는 draft_checkup.
+      처방약은 draft_prescription. 이미 있는 기타검사를 고치는 말은 draft_etc_inspection_update.
+    인자: ckup_rcd_sn은 이 턴 list_checkups 결과의 ckupRcdSn만 쓴다. 결과가 없으면 list_checkups를 먼저 부른다.
+      말하지 않은 칸은 비운다. 반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    ckup_rcd_sn:
+      java: ckupRcdSn
+      description: 붙일 검진기록 번호. 이 턴 list_checkups 결과의 ckupRcdSn만, 모르면 비운다
+    insp_nm:
+      java: inspNm
+      description: 검사 이름(엑스레이·초음파 등)
+    insp_rslt_cn:
+      java: inspRsltCn
+      description: 검사 결과(말한 그대로)
+    memo_cn:
+      java: memoCn
+      description: 회원 메모(말한 것만)
+
+draft_prescription:
+  label: 처방약 등록
+  hooks: [pet]
+  description: |
+    검진기록에 처방약 하나(약 이름·복용 기간·하루 횟수·상태)를 더하는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 병원에서 받은 약을 기록해 달라는 말.
+      예) "어제 검진에서 항생제 일주일치 받았어 하루 두 번 기록해 줘", "피부약 처방 등록해 줘"
+    쓰지 않을 때: 약을 먹였다고 체크하는 말은 draft_care_completion. 매일 먹이는 영양제 케어 항목은
+      draft_care_item. 처방약을 묻기만 하는 말은 list_prescriptions. 고치는 말은 draft_prescription_update.
+      심장사상충·구충제처럼 주기적으로 반복하는 예방은 draft_repeat_prevention.
+    인자: ckup_rcd_sn은 이 턴 list_checkups 결과의 ckupRcdSn만 쓴다. 결과가 없으면 list_checkups를 먼저 부른다.
+      날짜는 시스템의 오늘 날짜 기준으로 계산한다("일주일치"면 끝 날짜 = 시작 + 6일). 상태를 말하지 않았으면
+      복용중. 말하지 않은 칸은 비운다. 반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    ckup_rcd_sn:
+      java: ckupRcdSn
+      description: 붙일 검진기록 번호. 이 턴 list_checkups 결과의 ckupRcdSn만, 모르면 비운다
+    mdcn_nm:
+      java: mdcnNm
+      description: 약 이름
+    mdcn_bgng_ymd:
+      java: mdcnBgngYmd
+      description: 복용 시작 날짜 YYYY-MM-DD
+    mdcn_end_ymd:
+      java: mdcnEndYmd
+      description: 복용 끝 날짜 YYYY-MM-DD
+    day_mdcn_nmtm:
+      java: dayMdcnNmtm
+      description: 하루 복용 횟수(숫자)
+    prsc_stts_cd:
+      java: prscSttsCd
+      description: 복용 상태
+    care_rflt_yn:
+      java: careRfltYn
+      description: 케어 캘린더에 복용 일정을 넣어 달라고 했으면 true, 말하지 않았으면 비운다
+
+draft_repeat_prevention:
+  label: 반복 예방 등록
+  hooks: [pet]
+  description: |
+    검진기록에 반복 예방(심장사상충 예방·구충제) 하나와 주기를 더하는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 심장사상충 약·구충제를 맞혔고 주기마다 반복한다고 기록해 달라는 말.
+      예) "오늘 병원에서 심장사상충 예방했어 한 달마다 기록해 줘", "구충제 3개월마다로 등록해 줘"
+    쓰지 않을 때: 그 밖의 처방약은 draft_prescription. 반복 예방을 묻기만 하는 말은 list_repeat_preventions.
+      매일 하는 케어 항목은 draft_care_item.
+    인자: ckup_rcd_sn은 이 턴 list_checkups 결과의 ckupRcdSn만 쓴다. 결과가 없으면 list_checkups를 먼저 부른다.
+      목록에 없는 주기("3개월마다")는 rept_cycle_cd 직접입력과 cycle_drct_inpt_day_cnt 날 수(90).
+      날짜는 시스템의 오늘 날짜 기준으로 계산한다. 반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    ckup_rcd_sn:
+      java: ckupRcdSn
+      description: 붙일 검진기록 번호. 이 턴 list_checkups 결과의 ckupRcdSn만, 모르면 비운다
+    rept_prvnt_artcl_cd:
+      java: reptPrvntArtclCd
+      description: 예방 종류
+    rept_cycle_cd:
+      java: reptCycleCd
+      description: 반복 주기
+    cycle_drct_inpt_day_cnt:
+      java: cycleDrctInptDayCnt
+      description: 주기가 직접입력일 때 날 수(숫자)
+    bgng_ymd:
+      java: bgngYmd
+      description: 시작 날짜 YYYY-MM-DD. 말하지 않았으면 오늘
+
+end_observation_item:
+  label: 관찰 종료
+  verb: 종료
+  target: 관찰 항목
+  hooks: [pet]
+  description: |
+    관찰 중인 항목 하나(피부 혹·눈 충혈 등)를 관찰 종료로 바꾸는 확인 카드를 대화창에 띄운다.
+    기록은 지우지 않는다. 회원이 대화로 확인 말을 하기 전에는 아무것도 바꾸지 않는다.
+
+    쓸 때: 다 나아서 더 관찰하지 않는다, 관찰을 끝내 달라는 말.
+      예) "등에 혹 다 나았어 관찰 종료해 줘", "눈 충혈 관찰 이제 그만할게"
+    쓰지 않을 때: 관찰 기록 한 회차를 지우는 말은 delete_observation_cycle. 새 관찰 기록을 더하는 말은
+      draft_observation_cycle. 관찰 항목을 묻기만 하는 말은 list_observation_items.
+    인자: obsrv_artcl_sn은 이 턴 list_observation_items 결과의 obsrvArtclSn만 쓴다. 결과가 없으면
+      list_observation_items를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    obsrv_artcl_sn:
+      java: obsrvArtclSn
+      description: 끝낼 관찰 항목 번호. 이 턴 list_observation_items 결과의 obsrvArtclSn만, 모르면 비운다
+
+draft_pet:
+  label: 반려동물 등록
+  description: |
+    새 반려동물 하나(이름·종류·품종·생일·성별·중성화·몸무게·털색)를 등록하는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 새로 데려온 아이를 등록해 달라는 말.
+      예) "새로 온 고양이 나비 등록해 줘, 코리안숏헤어 암컷 2024년 3월생 3.5kg", "강아지 한 마리 더 등록할래"
+    쓰지 않을 때: 이미 등록한 아이의 정보를 바꾸는 말은 draft_pet_update. 몇 마리까지 되는지는 get_pet_limit.
+    인자: 말하지 않은 칸은 비운다(지어내지 않는다). 품종은 이 턴 list_breeds 결과의 vrtySn만 쓰고,
+      결과가 없으면 list_breeds를 먼저 부른다. 목록에 없는 품종이면 vrty_drct_inpt_nm에 말한 이름.
+      털색이 목록에 없으면 colr_cd 직접 입력과 colr_drct_inpt_nm. 몸무게는 kg 숫자만.
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    pet_nm:
+      java: petNm
+      description: 이름
+    pet_se_cd:
+      java: petSeCd
+      description: 동물 종류
+    vrty_sn:
+      java: vrtySn
+      description: 품종 번호. 이 턴 list_breeds 결과의 vrtySn만, 모르면 비운다
+    vrty_drct_inpt_nm:
+      java: vrtyDrctInptNm
+      description: 품종 목록에 없을 때만 말한 품종 이름
+    pet_brdt:
+      java: petBrdt
+      description: 생일 YYYY-MM-DD(달까지만 말했으면 그 달 1일)
+    pet_gndr_cd:
+      java: petGndrCd
+      description: 성별
+    nutr_yn:
+      java: nutrYn
+      description: 중성화 여부
+    pet_bdwg:
+      java: petBdwg
+      description: 몸무게(kg 숫자만)
+    goal_bdwg:
+      java: goalBdwg
+      description: 목표 체중(kg 숫자만). 말하지 않았으면 비운다
+    colr_cd:
+      java: colrCd
+      description: 털색
+    colr_drct_inpt_nm:
+      java: colrDrctInptNm
+      description: 털색이 직접 입력일 때 말한 색 이름
+    chip_no:
+      java: chipNo
+      description: 동물등록 인식칩 번호(숫자 12자리 또는 15자리). 말하지 않았으면 비운다
+    chrc_cn:
+      java: chrcCn
+      description: 특징(말한 것만, 쉼표로 구분)
+    algy_cn:
+      java: algyCn
+      description: 알레르기(말한 것만, 쉼표로 구분)
+    dss_cn:
+      java: dssCn
+      description: 질환(말한 것만, 쉼표로 구분)
+
+set_representative_pet:
+  label: 대표 반려동물 지정
+  verb: 지정
+  target: 반려동물
+  hooks: [pet]
+  description: |
+    반려동물 하나를 대표 반려동물(메인 화면에 먼저 보이는 아이)로 정하는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 바꾸지 않는다.
+
+    쓸 때: 대표 반려동물을 바꿔 달라는 말.
+      예) "탄이를 대표 반려동물로 해 줘", "메인에 초코가 먼저 나오게 대표로 바꿔 줘"
+    쓰지 않을 때: 반려동물 정보(이름·몸무게 등)를 바꾸는 말은 draft_pet_update.
+    인자: 반려동물은 고르지 않는다(서버가 문장 속 이름으로 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+
+draft_caregiver_invitation:
+  label: 공동양육 초대 보내기
+  description: |
+    다른 회원을 이메일로 공동양육에 초대하는 확인 카드를 대화창에 띄운다. 초대 메일이 그 사람에게 간다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 보내지 않는다.
+
+    쓸 때: 가족·친구를 이메일로 공동양육에 초대해 달라는 말.
+      예) "동생 abc@example.com 으로 초코 공동양육 초대 보내 줘", "엄마도 같이 돌보게 초대해 줘"
+    쓰지 않을 때: 보낸 초대를 묻는 말은 list_sent_caregiver_invitations. 보낸 초대를 거두는 말은
+      cancel_caregiver_invitation. 초대하는 방법만 묻는 말은 search_guide.
+    인자: invtn_trgt_eml은 회원이 말한 이메일 그대로, 말하지 않았으면 비운다(지어내지 않는다).
+      pet_sns는 이 턴 list_pets 결과의 petSn 중 말한 아이들만, 결과가 없으면 list_pets를 먼저 부른다.
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    invtn_trgt_eml:
+      java: invtnTrgtEml
+      description: 초대할 사람 이메일(말한 그대로)
+    pet_sns:
+      java: petSns
+      description: 함께 돌볼 반려동물 번호 목록. 이 턴 list_pets 결과의 petSn만
+
+cancel_caregiver_invitation:
+  label: 공동양육 초대 취소
+  verb: 진행
+  target: 보낸 초대장
+  target_fields: [invtnTrgtEmlMask]
+  description: |
+    내가 보낸 공동양육 초대 하나를 거두는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 바꾸지 않는다.
+
+    쓸 때: 보낸 초대를 취소해 달라는 말.
+      예) "동생한테 보낸 초대 취소해 줘", "보낸 공동양육 초대 거둬 줘"
+    쓰지 않을 때: 받은 초대를 거절하는 말은 reject_caregiver_invitation. 보낸 초대를 묻기만 하는 말은
+      list_sent_caregiver_invitations.
+    인자: jnt_brup_invtn_sn은 이 턴 list_sent_caregiver_invitations 결과의 jntBrupInvtnSn만 쓴다. 결과가 없으면
+      list_sent_caregiver_invitations를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다.
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    jnt_brup_invtn_sn:
+      java: jntBrupInvtnSn
+      description: 취소할 초대 번호. 이 턴 list_sent_caregiver_invitations 결과의 jntBrupInvtnSn만, 모르면 비운다
+
+accept_caregiver_invitation:
+  label: 공동양육 초대 수락
+  verb: 수락
+  target: 받은 초대장
+  description: |
+    받은 공동양육 초대를 수락하는 확인 카드를 대화창에 띄운다. 고른 반려동물만 함께 돌보고 나머지는 거절된다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 바꾸지 않는다.
+
+    쓸 때: 받은 초대를 수락해 달라는 말.
+      예) "받은 공동양육 초대 수락해 줘", "그 초대 초코만 받을게"
+    쓰지 않을 때: 받은 초대를 거절하는 말은 reject_caregiver_invitation. 초대 내용을 묻는 말은
+      get_caregiver_invitation.
+    인자: jnt_brup_invtn_sn은 이 턴 get_caregiver_invitation 결과의 jntBrupInvtnSn만, 모르면 비운다.
+      pet_sns는 이 턴 get_caregiver_invitation 결과 pets의 petSn 중 말한 아이들(말하지 않았으면 모두).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    jnt_brup_invtn_sn:
+      java: jntBrupInvtnSn
+      description: 수락할 초대 번호. 이 턴 get_caregiver_invitation 결과의 jntBrupInvtnSn만, 모르면 비운다
+    pet_sns:
+      java: petSns
+      description: 함께 돌볼 반려동물 번호 목록. 이 턴 get_caregiver_invitation 결과 pets의 petSn만
+
+reject_caregiver_invitation:
+  label: 공동양육 초대 거절
+  verb: 거절
+  target: 받은 초대장
+  description: |
+    받은 공동양육 초대를 거절하는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 바꾸지 않는다.
+
+    쓸 때: 받은 초대를 거절해 달라는 말.
+      예) "받은 공동양육 초대 거절해 줘", "그 초대 안 받을래"
+    쓰지 않을 때: 내가 보낸 초대를 거두는 말은 cancel_caregiver_invitation. 수락하는 말은
+      accept_caregiver_invitation.
+    인자: jnt_brup_invtn_sn은 이 턴 get_caregiver_invitation 결과의 jntBrupInvtnSn만, 모르면 비운다.
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    jnt_brup_invtn_sn:
+      java: jntBrupInvtnSn
+      description: 거절할 초대 번호. 이 턴 get_caregiver_invitation 결과의 jntBrupInvtnSn만, 모르면 비운다
+
+draft_item_purchase:
+  label: 아이템 구매
+  verb: 구매
+  description: |
+    픽셀 캐릭터 상점 아이템을 포인트로 사는 확인 카드를 대화창에 띄운다. 포인트가 빠진다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 사지 않는다.
+
+    쓸 때: 상점 아이템을 사 달라는 말.
+      예) "초코 캐릭터에 밀짚모자 사 줘", "빨간 리본 구매해 줘"
+    쓰지 않을 때: 살 수 있는 아이템을 묻는 말은 list_shop_items. 이미 가진 아이템을 입히는 말은
+      draft_equipped_items. 포인트 잔액은 get_points.
+    인자: pixel_char_sn은 이 턴 list_pixel_characters 결과의 pixelCharSn만, item_sns는 이 턴 list_shop_items
+      결과의 itemSn 중 말한 것만 쓴다. 결과가 없으면 그 도구를 먼저 부른다.
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    pixel_char_sn:
+      java: pixelCharSn
+      description: 캐릭터 번호. 이 턴 list_pixel_characters 결과의 pixelCharSn만, 모르면 비운다
+    item_sns:
+      java: itemSns
+      description: 살 아이템 번호 목록. 이 턴 list_shop_items 결과의 itemSn만
+
+draft_equipped_items:
+  label: 아이템 장착
+  description: |
+    픽셀 캐릭터가 입을 아이템(가진 아이템 중)을 정하는 확인 카드를 대화창에 띄운다. 목록에 없는 아이템은 벗는다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 바꾸지 않는다.
+
+    쓸 때: 가진 아이템을 캐릭터에 입히거나 벗겨 달라는 말.
+      예) "초코 캐릭터에 밀짚모자 씌워 줘", "캐릭터 아이템 다 벗겨 줘"
+    쓰지 않을 때: 새 아이템을 사는 말은 draft_item_purchase. 지금 입은 아이템을 묻는 말은 get_pixel_character.
+    인자: pixel_char_sn은 이 턴 list_pixel_characters 결과의 pixelCharSn만 쓴다. hld_item_sns는 이 턴
+      get_pixel_character 결과 heldItems의 hldItemSn으로, 입고 있던 것 중 그대로 둘 것과 새로 입힐 것을 모두 넣는다
+      (다 벗기면 빈 목록). 결과가 없으면 그 도구를 먼저 부른다.
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    pixel_char_sn:
+      java: pixelCharSn
+      description: 캐릭터 번호. 이 턴 list_pixel_characters 결과의 pixelCharSn만, 모르면 비운다
+    hld_item_sns:
+      java: hldItemSns
+      description: 입을 아이템 번호 목록(가진 아이템). 이 턴 get_pixel_character 결과의 hldItemSn만

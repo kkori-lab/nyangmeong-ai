@@ -168,7 +168,8 @@ def test_케어_항목_목록은_메인_표시_조건을_보내지_않아야_한
     assert reader.calls == [("/api/pets/1/care-items", {})]
 
 
-def test_도구_결과에서_메모_같은_내용_칸은_중첩까지_지워야_한다(client, java):
+def test_도구_결과의_메모_같은_내용_칸은_중첩까지_그대로_넘겨야_한다(client, java):
+    # 2026-11-25 결정 : 알레르기·메모 같은 …Cn 칸도 AI가 안다
     data = [
         {
             "schdlNm": "정기검진",
@@ -182,9 +183,7 @@ def test_도구_결과에서_메모_같은_내용_칸은_중첩까지_지워야_
 
     events(send(client, room, "다음 병원 언제야?"))
 
-    assert payload(agent.results[0]) == [
-        {"schdlNm": "정기검진", "lastCycle": {"obsrvSz": 1.5, "cyclCnt": 2}}
-    ]
+    assert payload(agent.results[0]) == data
 
 
 def test_Java_READ가_실패하면_불러오지_못함을_도구_결과로_넘겨야_한다(client, java):
@@ -389,7 +388,7 @@ def test_반려동물_목록을_못_받으면_error_이벤트여야_한다(clien
 
     evs = events(send(client, room, "체중 어때?"))
 
-    assert [name for name, _ in evs] == ["intent", "error"]
+    assert [name for name, _ in evs] == ["intent", "step", "error"]
     assert reader.calls == []
 
 
@@ -812,7 +811,7 @@ def test_follow가_있으면_결과_답변에서_고른_읽기_도구_결과를_
     assert asyncio.run(run()) == ["7번 검진은 ", "메이병원이에요."]
     assert [c.name for c in calls] == ["get_checkup"]
     first, second = fake.requests
-    assert first["tool_choice"] == {"type": "auto", "disable_parallel_tool_use": True}
+    assert first["tool_choice"] == {"type": "auto"}  # 2026-11-26 한 응답 도구 여럿
     assert second["tool_choice"] == {"type": "none"}
     assert second["messages"][3]["content"][0]["type"] == "tool_use"
     assert second["messages"][4]["content"][0] == {

@@ -9,7 +9,7 @@ import re
 import pytest
 
 from app.chat import rules, service, tools
-from app.chat.service import ACTION_EXECUTE_MESSAGE
+from app.chat.service import ACTION_ASK_PHOTO, ACTION_EXECUTE_MESSAGE, ACTION_EXECUTE_PHOTO_MESSAGE
 from tests.chat.fakes import FakeToolAgent
 from tests.chat.test_action import send
 from tests.chat.test_action_chat_confirm import done_of
@@ -48,7 +48,8 @@ def test_눈_카드에_확인_말이면_사진_칸만_비어도_실행을_지시
 
     assert agent.decides == []
     assert done["execute"] is True
-    assert done["message"]["cnvrsCn"] == ACTION_EXECUTE_MESSAGE
+    # 사진 칸만 빈 카드의 확인 말 : 버튼을 말하지 않는 사진 안내 (2026-11-24 LJS 결정)
+    assert done["message"]["cnvrsCn"] == ACTION_EXECUTE_PHOTO_MESSAGE
     assert "file" not in done["message"]["cnvrsCn"]
     # 카드 missing에는 사진 칸을 그대로 둔다(React가 붙일 칸)
     assert done["action"]["missing"] == ["file"]
@@ -80,6 +81,40 @@ def test_관찰_기록_카드도_사진_칸만_비면_확인_말에_실행을_�
 
     assert done["execute"] is True
     assert done["action"]["missing"] == ["file"]
+    assert done["message"]["cnvrsCn"] == ACTION_EXECUTE_PHOTO_MESSAGE
+
+
+def test_사진_칸이_없는_카드의_확인_말은_등록할게요_그대로(client, java):
+    room = room_of(client, java, pet_sn=CHOCO)
+    use_agent(client, FakeToolAgent(fail=True))
+    prior = {"tool": "draft_expense_limit", "input": {"mmExpndLimAmt": 300000}}
+
+    done = done_of(send(client, room, "등록해 줘", action=prior))
+
+    assert done["execute"] is True
+    assert done["message"]["cnvrsCn"] == ACTION_EXECUTE_MESSAGE
+
+
+def test_대화로_만든_관찰_항목_카드_턴_글에_사진_안내가_있고_버튼_말은_없다(client, java):
+    room = room_of(client, java, pet_sn=CHOCO)
+    use_agent(client, FakeToolAgent("draft_observation_item", {"obsrv_artcl_nm": "털 빠짐"}))
+
+    done = done_of(send(client, room, "초코 털 빠짐 관찰 항목 등록해 줘"))
+
+    text = done["message"]["cnvrsCn"]
+    assert "file" in done["action"]["missing"]
+    assert ACTION_ASK_PHOTO in text.split("\n")
+    assert "[확인]" not in text
+    assert "버튼" not in text
+
+
+def test_피부_분석_카드_턴_글에는_사진_안내가_없다(client, java):
+    room = room_of(client, java, pet_sn=CHOCO)
+
+    data = post(client, room, analyzed()).json()["data"]
+
+    assert "file" in data["action"]["missing"]
+    assert ACTION_ASK_PHOTO not in data["messages"][-1]["cnvrsCn"]
 
 
 def test_날짜_없는_일정_카드의_되물음에_hrInptYn이_없다(client, java):

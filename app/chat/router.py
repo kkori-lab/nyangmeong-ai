@@ -7,12 +7,14 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from app.chat import rules, service
+from app.chat import agentstate, rules, service
 from app.chat.clients import (
+    ConversationSummarizer,
     ImageIntentJudge,
     RegisterExtractor,
     TitleGenerator,
     ToolAgent,
+    get_conversation_summarizer,
     get_image_intent_judge,
     get_register_extractor,
     get_title_generator,
@@ -21,11 +23,13 @@ from app.chat.clients import (
 from app.chat.repository import (
     AiSettings,
     ConversationRepository,
+    ReceiptSaveChecker,
     RegisterContextRepository,
     RouteRepository,
     ToolReader,
     get_ai_settings,
     get_conversation_repository,
+    get_receipt_save_checker,
     get_register_context_repository,
     get_route_repository,
     get_tool_reader,
@@ -33,10 +37,12 @@ from app.chat.repository import (
 from app.chat.schemas import (
     MAX_MESSAGE_LENGTH,
     ActionResultRequest,
+    AgentContinueRequest,
     CheckupCardRequest,
     ConversationCreateRequest,
     LesionCardRequest,
     MessageSendRequest,
+    ReceiptCardRequest,
     ReceiptResultRequest,
     RegisterResultRequest,
 )
@@ -139,6 +145,7 @@ async def send_message(
     agent: Annotated[ToolAgent, Depends(get_tool_agent)],
     reader: Annotated[ToolReader, Depends(get_tool_reader)],
     routes: Annotated[RouteRepository, Depends(get_route_repository)],
+    summarizer: Annotated[ConversationSummarizer, Depends(get_conversation_summarizer)],
     room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
 ) -> StreamingResponse:
     # 스트림 시작 전 오류(400·401·403·404·502)는 다른 API와 같은 JSON 응답
@@ -149,7 +156,44 @@ async def send_message(
     await service.route_cache.refresh(routes)
     limits = service.AnswerLimits(settings.answer_first_token_sec, settings.answer_total_sec)
     register = service.RegisterDeps(contexts, extractor, rules.today_kst())
-    events = service.answer_turn(turn, repo, agent, ai, limits, register, titles, reader)
+    events = service.answer_turn(
+        turn,
+        repo,
+        agent,
+        ai,
+        limits,
+        register,
+        titles,
+        reader,
+        summarizer,
+        agent_key=agentstate.key_of(settings.agent_state_key.get_secret_value()),
+    )
+    return StreamingResponse(_sse(events), media_type="text/event-stream")
+
+
+# 에이전트 ③ (docs/design/agent.md 2·4·5절, 2026-11-26) : 카드로 멈춘 루프를 실행 결과로 이어 감
+# 응답은 /messages와 같은 SSE. 토큰·방 오류는 스트림 시작 전 JSON(400·404). LLM 전에 인증 확인
+@router.post("/{aiCnvrsRoomSn}/agent-continue", dependencies=[Depends(require_member)])
+async def continue_agent(
+    body: AgentContinueRequest,
+    repo: Repo,
+    ai: Annotated[AiSettings, Depends(get_ai_settings)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    contexts: Annotated[RegisterContextRepository, Depends(get_register_context_repository)],
+    extractor: Annotated[RegisterExtractor, Depends(get_register_extractor)],
+    titles: Annotated[TitleGenerator, Depends(get_title_generator)],
+    agent: Annotated[ToolAgent, Depends(get_tool_agent)],
+    reader: Annotated[ToolReader, Depends(get_tool_reader)],
+    summarizer: Annotated[ConversationSummarizer, Depends(get_conversation_summarizer)],
+    room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
+) -> StreamingResponse:
+    key = agentstate.key_of(settings.agent_state_key.get_secret_value())
+    turn = await service.continue_turn(repo, room_sn, body, key)
+    limits = service.AnswerLimits(settings.answer_first_token_sec, settings.answer_total_sec)
+    register = service.RegisterDeps(contexts, extractor, rules.today_kst())
+    events = service.answer_turn(
+        turn, repo, agent, ai, limits, register, titles, reader, summarizer, agent_key=key
+    )
     return StreamingResponse(_sse(events), media_type="text/event-stream")
 
 
@@ -190,6 +234,19 @@ async def save_receipt_result(
     return response.success([m.model_dump(by_alias=True) for m in saved], http_code=201)
 
 
+# 영수증 분석 뒤 (SCR-AIM-013, 2026-11-27) : 결과 요약 저장 + 영수증 저장 확인 카드
+@router.post("/{aiCnvrsRoomSn}/receipt-card", dependencies=[Depends(require_member)])
+async def save_receipt_card(
+    body: ReceiptCardRequest,
+    repo: Repo,
+    contexts: Annotated[RegisterContextRepository, Depends(get_register_context_repository)],
+    checker: Annotated[ReceiptSaveChecker, Depends(get_receipt_save_checker)],
+    room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
+) -> JSONResponse:
+    result = await service.save_receipt_card(repo, contexts, checker, room_sn, body)
+    return response.success(result.model_dump(by_alias=True, mode="json"), http_code=201)
+
+
 # 검사결과지 PDF 분석 뒤 (SCR-AIM-013, 2026-11-23) : 결과 요약 저장 + 검사 수치 저장 확인 카드
 @router.post("/{aiCnvrsRoomSn}/checkup-card", dependencies=[Depends(require_member)])
 async def save_checkup_card(
@@ -208,10 +265,11 @@ async def save_checkup_card(
 async def save_lesion_card(
     body: LesionCardRequest,
     repo: Repo,
+    reader: Annotated[ToolReader, Depends(get_tool_reader)],
     contexts: Annotated[RegisterContextRepository, Depends(get_register_context_repository)],
     room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
 ) -> JSONResponse:
-    result = await service.save_lesion_card(repo, contexts, room_sn, body)
+    result = await service.save_lesion_card(repo, reader, contexts, room_sn, body)
     return response.success(result.model_dump(by_alias=True, mode="json"), http_code=201)
 
 
