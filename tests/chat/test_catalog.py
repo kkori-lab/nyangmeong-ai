@@ -640,3 +640,11 @@ def test_스냅샷에_빠진_일정_도구가_없어야_한다():
 
     assert "list_care_schedules" not in names
     assert "list_care_schedules" not in catalog.tool_prompts()
+
+
+def test_읽기_카드_도구는_모두_한글_표시_이름이_있어야_한다():
+    # step 진행 문구("○○ 확인 중이에요…")·카드 제목에 영어 도구 이름이 나오지 않게
+    entries = build(fake_catalog_json()).entries.values()
+    missing = [e.name for e in entries if e.kind in ("READ", "CARD") and not e.label]
+    assert missing == []
+    assert any(e.kind == "READ" for e in entries)
