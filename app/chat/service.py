@@ -181,7 +181,8 @@ ACTION_SHOWN = (
 # 동사형 명령(2026-11-26) : READ 뒤 카드도 빈 칸이 없으면 확인 말 없이 이 턴에 실행 지시
 ACTION_RUN_SHOWN = (
     "확인 카드를 만듦. 카드 내용: {summary}. 회원이 바로 하라고 했으므로 이 턴에 실행된다. "
-    "확인을 묻지 말고 카드 내용을 짧게 보여 준 뒤 '등록할게요.'로 끝낸다."
+    "확인을 묻지 말고 카드 내용을 짧게 보여 준 뒤 '등록할게요.'로 끝낸다. "
+    "카드에서 확인하라거나 확인 말을 해 달라고 하지 않는다."
 )
 # 확인 카드를 모달 대신 채팅으로 확인 (2026-11-13) : 카드 턴의 저장 글과 다음 턴의 확인·취소
 ACTION_ASK_TEMPLATE = "이렇게 할까요?\n{summary}"
@@ -218,6 +219,9 @@ ACTION_MAX_CARDS = 3
 # 에이전트 ③ turnlog 태그 : 이미 실행한 쓰기를 다시 고름, done.pending을 줌
 AGENT_REPEAT = "agent_repeat"
 AGENT_PENDING = "agent_pending"
+# 2026-11-27 frontend-dc ②③ turnlog 태그 : 바로 실행된 턴 답에 확인 말 안내, 이력의 같은 쓰기 반복
+RUN_CONFIRM_TEXT = "run_confirm_text"
+WRITE_REPEAT = "write_repeat"
 # 쓰기 카드 뒤 이어 주는 말이 있을 때 남은 쓰기 도구를 이어 고르는 tool_result
 ACTION_CHAINED = (
     "확인 카드를 만듦(아직 저장 안 됨). 이 메시지에 다른 쓰기 요청(기록·등록·수정·삭제)이 남았으면 "
@@ -871,6 +875,8 @@ class _Trace:
         # 바로 실행 판정(_runs·_agent_allows)에 쓰는 이 턴과 이어 가기 키 : _run_turn이 채움
         self.turn: Turn | None = None
         self.key = ""
+        # 이력(최근 턴) AI 메시지의 결과 글 "✔ …" 줄 : 같은 쓰기 반복 막기(frontend-dc ③)
+        self.done_before: list[str] = []
 
     def note(self, tool: str, result: str) -> None:
         self.notes.append(rules.AGENT_READ_NOTE.format(tool=tool, result=result))
@@ -896,6 +902,55 @@ def _already_done(trace: _Trace, tool: str, values: dict) -> bool:
     if not any(card.get("tool") == tool for card in trace.done):
         return False
     return rules.write_count(turn.question.cnvrs_cn) <= len(trace.done)
+
+
+# 결과 글 요약 칸의 시각 : 같은 날 같은 값이면 시각만 달라도 같은 기록으로 봄
+_RESULT_CLOCK = re.compile(r"^(\d{2}-\d{2}\(.\)) \d{2}:\d{2}$")
+
+
+def _result_key(text: str) -> tuple[str, set[str]]:
+    """'✔ <label> — <칸> · <칸>' -> (label, 칸 집합). 날짜 뒤 시각은 뗌"""
+    label, _, rest = text.removeprefix("✔ ").partition(" — ")
+    parts = {_RESULT_CLOCK.sub(r"\1", part) for part in rest.split(" · ") if part}
+    return label, parts
+
+
+def done_before(turn: "Turn", turns: int) -> list[str]:
+    """이력(build_context와 같은 범위, 이번 질문 앞)의 AI 메시지 결과 글 '✔ …' 줄"""
+    context = build_context(turn.messages, turn.question.msg_seq, turns, None, turn.summary_end)
+    return [
+        line
+        for message in context
+        if message["role"] == "assistant"
+        for line in str(message["content"]).splitlines()
+        if line.startswith("✔ ")
+    ]
+
+
+def _repeated(trace: "_Trace | None", cards: Sequence[ActionCard]) -> bool:
+    """같은 쓰기 반복 (frontend-dc ③, 2026-11-27) : 카드의 DONE 결과 글이 이력의 '✔' 글과
+    label이 같고 칸이 모두 들어 있으면(시각만 다름) 참. 삭제 카드·요약 칸 없는 카드는 보지 않음"""
+    if trace is None or not trace.done_before:
+        return False
+    before = [_result_key(line) for line in trace.done_before]
+    for card in cards:
+        entry = tools.card_entry(card.tool)
+        if entry is None or is_delete(card):
+            continue
+        label, parts = _result_key(_result_text(ActionStatus.DONE, entry, card.values, ()))
+        if parts and any(label == seen and parts <= given for seen, given in before):
+            return True
+    return False
+
+
+def repeat_ask_message(cards: list[ActionCard], said: str = "") -> str:
+    """반복 쓰기 확인 카드 턴의 저장 글 : 앞줄 반복 안내 + 카드 요약
+    (확인 말 안내 줄은 앞줄이 대신)"""
+    ask = action_ask_message(cards, said)
+    confirm = _confirm_line(cards)
+    if ask.endswith("\n" + confirm):
+        ask = ask[: -len(confirm) - 1]
+    return _worded(rules.WRITE_REPEAT_NOTICE, cards) + "\n" + ask
 
 
 def _repeats(done: Sequence[dict], tool: str, values: dict) -> bool:
@@ -1279,6 +1334,11 @@ class _Follow:
             shown_text = ACTION_SHOWN
             if self.runs_now():
                 shown_text = rules.AGENT_RUN_SHOWN if self._continues() else ACTION_RUN_SHOWN
+            elif self._would_run() and _repeated(self.read.trace, self.cards):
+                # frontend-dc ③ : 이력에 같은 결과 글 -> 확인 카드, 반복이라고 먼저 알리게
+                logger.info("같은 쓰기 반복, 확인 카드로: %s", call.name)
+                turnlog.tag(WRITE_REPEAT)
+                shown_text = f"{ACTION_SHOWN} {rules.WRITE_REPEAT_SHOWN}"
             return _worded(shown_text, [shown]).format(summary=action_summary(shown))
         if call.name in (tools.NAVIGATE, tools.SEARCH_GUIDE) and call.args is not None:
             return _follow_screen(call, self.text, self.shortcuts)
@@ -1298,6 +1358,10 @@ class _Follow:
 
     def runs_now(self) -> bool:
         # 돌려받은 카드가 없는 턴의 명령형 문장이고 카드에 빈 칸이 없음 (_search_answer와 같은 판정)
+        # frontend-dc ③ : 이력에 같은 결과 글이 있는 쓰기는 바로 실행하지 않음
+        return self._would_run() and not _repeated(self.read.trace, self.cards or [])
+
+    def _would_run(self) -> bool:
         # 에이전트 ③ : 이어 가기 키가 있으면 "기록하고 … 알려 줘" 꼴도, 이어 가기면 말한 쓰기만
         trace = self.read.trace
         cards = self.cards or []
@@ -1666,6 +1730,7 @@ async def _run_turn(
         trace = _trace_of(carry)
         trace.turn = turn
         trace.key = agent_key
+        trace.done_before = done_before(turn, ai.context_turns)
         if register is not None and priors:
             # 돌려받은 확인 카드 + 확인·취소 말 : LLM 없이 실행 지시·취소 (2026-11-13)
             # 여러 명령 ② : 카드가 여럿이면 확인 말 한 번에 모두, 취소 말이면 모두 버림
@@ -1753,7 +1818,17 @@ async def _run_turn(
             cards = await _action_reply(text, turn, judged, register)
             if reader is not None:
                 cards = [await merge_pet_lists(card, text, reader) for card in cards]
-            if not turn.priors() and _runs(turn, cards, agent_key) and _agent_allows(turn, cards):
+            runs = (
+                not turn.priors() and _runs(turn, cards, agent_key) and _agent_allows(turn, cards)
+            )
+            if runs and _repeated(trace, cards):
+                # frontend-dc ③ : 이력에 같은 결과 글이 있으면 바로 실행하지 않고 확인 카드로
+                logger.info("같은 쓰기 반복, 확인 카드로: %s", ", ".join(c.tool for c in cards))
+                turnlog.tag(WRITE_REPEAT)
+                saved = await _save(repo, turn.room_sn, repeat_ask_message(cards, text), True)
+                emit(("done", AnswerDone(message=saved, action=cards[0], actions=cards)))
+                return
+            if runs:
                 # 동사형 명령(2026-11-26) : 빈 칸이 없으면 확인 말 없이 첫 턴에 실행 지시
                 # 돌려받은 카드를 고치는 말("4.5로 바꿔 줘")은 지금처럼 확인 말을 기다림
                 logger.info("명령 바로 실행 지시: %s", ", ".join(card.tool for card in cards))
@@ -1896,7 +1971,12 @@ async def _search_answer(
         and not turn.priors()
         and _runs(turn, [action], agent_key)
         and _agent_allows(turn, [action])
+        and not _repeated(trace, [action])
     )
+    if execute and rules.asks_confirm(body):
+        # frontend-dc ② : 바로 실행된 턴의 답이 확인 말을 안내함(글은 이미 흘림, 빈도만 남김)
+        logger.info("바로 실행 턴 답에 확인 말 안내: %s", action.tool)
+        turnlog.tag(RUN_CONFIRM_TEXT)
     pending = None
     if execute:
         logger.info("READ 뒤 카드 바로 실행 지시: %s", action.tool)
