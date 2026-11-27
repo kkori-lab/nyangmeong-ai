@@ -47,7 +47,7 @@ def test_READ_뒤_바로_실행하는_카드는_확인_말_대신_실행_안내�
     assert done["pending"] is not None
 
 
-def test_키가_없으면_READ_뒤_카드는_지금처럼_확인_말_안내여야_한다(client, java, monkeypatch):
+def test_키가_없어도_READ_뒤_바로_실행하는_카드는_실행_안내여야_한다(client, java, monkeypatch):
     monkeypatch.setenv("AGENT_STATE_KEY", "")
     get_settings.cache_clear()
     agent = ContinueAgent(READ)
@@ -56,8 +56,9 @@ def test_키가_없으면_READ_뒤_카드는_지금처럼_확인_말_안내여�
 
     _, done = first_turn(client, java, agent)
 
-    assert "'등록해 줘'" in agent.results[1]
-    assert done["execute"] is False
+    assert "이 턴에 실행된다" in agent.results[1]
+    assert done["execute"] is True
+    assert done["pending"] is not None
 
 
 def test_이어_가기에서_READ_뒤_같은_도구를_값만_바꿔_고르면_이미_실행한_일이어야_한다(client, java):

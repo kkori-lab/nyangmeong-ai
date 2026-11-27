@@ -1,12 +1,15 @@
 """에이전트 루프 서명 토큰 (docs/design/agent.md 4절, 에이전트 ③ 2026-11-26)
 - Python은 상태가 없으므로 카드로 멈춘 루프를 React가 들고 있다가 agent-continue로 돌려준다
 - 모양 : base64url(JSON 본문) + "." + base64url(HMAC-SHA256(본문)). 암호화는 하지 않음(9절 1번)
-- 키(AGENT_STATE_KEY)가 비면 토큰을 만들지 않는다(done.pending 없음, 지금 흐름)"""
+- 키 : AGENT_STATE_KEY, 비면 프로세스마다 무작위 키(key_of, 2026-11-27 결정)
+  Python 혼자 만들고 검사하므로 다른 서버와 나눌 필요가 없다
+  재시작하면 발급된 토큰만 무효, 서버 여러 대면 env에 같은 값"""
 
 import base64
 import hashlib
 import hmac
 import json
+import secrets
 from dataclasses import asdict, dataclass, field
 
 # 형식 버전 : 담는 칸을 바꾸면 올림(옛 토큰은 400)
@@ -15,6 +18,13 @@ VERSION = 1
 TTL_SEC = 600
 # 토큰 크기 상한 : 넘으면 pending 없이 지금 흐름으로 끝냄
 MAX_BYTES = 48 * 1024
+# AGENT_STATE_KEY가 빌 때 쓰는 키 : 프로세스가 뜰 때 한 번 만든다
+_PROCESS_KEY = secrets.token_urlsafe(32)
+
+
+def key_of(configured: str) -> str:
+    """서명 키 : env 값이 있으면 그 값, 없으면 프로세스 무작위 키"""
+    return configured or _PROCESS_KEY
 
 
 class AgentStateError(Exception):

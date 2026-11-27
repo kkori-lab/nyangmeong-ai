@@ -100,3 +100,14 @@ def test_키가_없으면_검사도_거부해야_한다():
         verify(token, "", 7, NOW)
 
     assert error.value.reason == "no_key"
+
+
+def test_env_키가_없으면_비지_않은_같은_프로세스_키를_써야_한다():
+    first = agentstate.key_of("")
+
+    assert first
+    assert agentstate.key_of("") == first
+
+
+def test_env_키가_있으면_그_값을_써야_한다():
+    assert agentstate.key_of("x") == "x"

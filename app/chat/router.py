@@ -7,7 +7,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from app.chat import rules, service
+from app.chat import agentstate, rules, service
 from app.chat.clients import (
     ConversationSummarizer,
     ImageIntentJudge,
@@ -163,7 +163,7 @@ async def send_message(
         titles,
         reader,
         summarizer,
-        agent_key=settings.agent_state_key.get_secret_value(),
+        agent_key=agentstate.key_of(settings.agent_state_key.get_secret_value()),
     )
     return StreamingResponse(_sse(events), media_type="text/event-stream")
 
@@ -184,7 +184,7 @@ async def continue_agent(
     summarizer: Annotated[ConversationSummarizer, Depends(get_conversation_summarizer)],
     room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
 ) -> StreamingResponse:
-    key = settings.agent_state_key.get_secret_value()
+    key = agentstate.key_of(settings.agent_state_key.get_secret_value())
     turn = await service.continue_turn(repo, room_sn, body, key)
     limits = service.AnswerLimits(settings.answer_first_token_sec, settings.answer_total_sec)
     register = service.RegisterDeps(contexts, extractor, rules.today_kst())

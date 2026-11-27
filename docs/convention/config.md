@@ -13,7 +13,7 @@
   - 키를 추가·변경하면 `.env.local.example`과 `Settings`도 같은 PR에서 고친다.
 - Python은 DB에 붙지 않는다(2026-10-27 전환). 예전 `APP_PROFILE`·`LOCAL_DB_*`·`PROD_DB_*`·`CONVERSATION_ENC_KEY`는 읽지 않으니 `.env.local`에서 지워도 된다.
 - Google Vision은 API 키(`GOOGLE_VISION_API_KEY`)를 쓴다(2026-10-29). 서비스 계정 키 파일이 필요해지면 저장소 밖이나 git 제외 경로에 두고 `.env.local`에는 경로만 적는다.
-- 에이전트 이어 가기 서명 키(`AGENT_STATE_KEY`, 2026-11-26)는 비밀값이라 `.env.local`에만 둔다. 비우면 대화창이 `done.pending`을 주지 않고 `agent-continue`는 400이다(지금 흐름). 바꾸면 발급된 토큰(10분)이 모두 무효가 된다(`docs/design/agent.md` 4절).
+- 에이전트 이어 가기 서명 키(`AGENT_STATE_KEY`, 2026-11-26)는 비밀값이라 `.env.local`에만 둔다. 비워도 된다: 비우면 Python 프로세스마다 무작위 키로 켜진다(2026-11-27). 재시작하면 그때 발급된 토큰만 400이고, 서버를 여러 대 띄우면 모두 같은 값을 넣는다. 바꾸면 발급된 토큰(10분)이 모두 무효가 된다(`docs/design/agent.md` 4절).
 - DMS MCP 서버 주소(`DMS_MCP_URL`)도 `.env.local`에 둔다. setup이 읽어 감지한 AI 도구(Claude Code·Codex)에 등록한다.
 - 로그에 비밀번호와 토큰을 남기지 않는다. Java로 넘기는 사용자 `Cookie` 헤더도 로그·오류 응답·예외 메시지에 남기지 않는다(새면 그 사용자로 Java API를 부를 수 있다).
 - 작업 기록은 `handoff/<이름>.md`에 사람마다 한 파일로 두고 커밋한다. 다른 PC에서도 이어서 작업하기 위해서다. 공개 저장소이므로 비밀값과 개인 PC 경로를 쓰지 않는다.
