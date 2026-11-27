@@ -504,12 +504,15 @@ def _compact_reply(text: str) -> str:
 
 # 동사형 명령 (2026-11-26 팀 합의) : 첫 턴에 확인 말 없이 바로 실행. 문장 끝이 쓰기 명령형
 # 하다형 동사 + 해 줘 등, 어형 동사(바꿔·지워 …)는 꼬리 없이도, 끝이 맨 "기록"이어도 명령
-_RUN_HA = r"(등록|수정|변경|저장|추가|기록|체크|완료|삭제)"
+_RUN_HA = r"(등록|수정|변경|저장|추가|기록|체크|완료|삭제|구매)"
 _RUN_EO = r"(바꿔|바꾸어|고쳐|넣어|적어|남겨|지워|없애|올려|잡아)"
 _RUN_ASK = r"(해줄래|해줄래요|해주실래요|줄래|줄래요|주실래요)"
 _RUN_HA_TAIL = rf"(해줘|해줘요|해주세요|해주라|해둬|해놔|해|해요|하자|ㄱ|{_RUN_ASK})"
 _RUN_EO_TAIL = rf"(줘|줘요|주세요|주라|둬|놔|요|{_RUN_ASK})?"
-_RUN_NOW = re.compile(rf"(?:{_RUN_HA}{_RUN_HA_TAIL}|{_RUN_EO}{_RUN_EO_TAIL}|기록)$")
+# 아이템 구매 "사 줘"(2026-11-27 사람 결정 : 구매도 명령형이면 바로 실행)
+# "사"만은 "감사"에 걸려 꼬리 필수
+_RUN_BUY = rf"사(줘|줘요|주세요|주라|{_RUN_ASK})"
+_RUN_NOW = re.compile(rf"(?:{_RUN_HA}{_RUN_HA_TAIL}|{_RUN_EO}{_RUN_EO_TAIL}|{_RUN_BUY}|기록)$")
 _RUN_ASKING = re.compile(rf"{_RUN_ASK}$")
 
 

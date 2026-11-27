@@ -23,6 +23,7 @@ from app.core.config import Settings
 from app.core.response import AppError
 from tests.chat.conftest import as_member
 from tests.chat.fakes import FakeToolAgent
+from tests.chat.new_tools import NEW_ACTION, NEW_READ
 from tests.chat.test_llm_clients import MODEL, FakeAnthropic, server_error, sse
 from tests.chat.test_messages import MessageJava, deltas, events, names, send
 from tests.chat.test_register import CHOCO, TODAY, Extractor, use_extractor
@@ -59,88 +60,97 @@ def room_of(client, java, pet_sn: int | None = None) -> int:
 
 def test_도구는_builtin_등록_READ이고_설명과_인자_스키마를_모델에서_뽑는다():
     defs = {d["name"]: d for d in tools.tool_definitions()}
-    assert set(defs) == {
-        "navigate",
-        "search_guide",
-        "draft_schedule",
-        "draft_care_item",
-        "decline",
-    } | {
-        "get_health_indicators",
-        "list_care_completions",
-        "list_care_items",
-        "list_my_care_schedules",
-        "list_checkups",
-        "list_daily_health_records",
-        "list_inspection_values",
-        "list_observation_items",
-        "list_prescriptions",
-        "list_repeat_preventions",
-        "get_checkup",
-        "list_etc_inspections",
-        "list_observation_cycles",
-        "get_expense_statistics",
-        "get_expense_total",
-        "get_receipt",
-        "list_expense_months",
-        "list_expense_pets",
-        "list_expenses",
-    } | {
-        # 반려동물·캐릭터·커뮤니티·플레이스 READ(2026-11-11)
-        "get_pet",
-        "get_pixel_character",
-        "get_points",
-        "list_caregivers",
-        "list_daily_missions",
-        "list_pets",
-        "list_pixel_characters",
-        "list_point_ledgers",
-        "list_sent_caregiver_invitations",
-        "list_shop_items",
-        "get_popular_photo",
-        "get_post",
-        "list_care_recruitments",
-        "list_comments",
-        "list_health_tips",
-        "list_lost_reports",
-        "list_news",
-        "list_place_bookmarks",
-        "list_places",
-        "list_posts",
-    } | {
-        "draft_care_completion",
-        "draft_daily_health_record",
-        "draft_expense_limit",
-        "draft_schedule_update",
-        "draft_care_item_update",
-        "draft_expense_update",
-        "draft_pet_update",
-        "draft_expense",
-        "draft_observation_cycle",
-        # 검사 수치 저장(SCR-AIM-013 대화창 PDF, 2026-11-23)
-        "draft_inspection_values",
-        # 관찰 항목 등록(SCR-AIM-013 피부·눈 분석 카드, 2026-11-24)
-        "draft_observation_item",
-    } | {
-        # 수정·삭제 도구(SCR-AIM-012, 2026-11-25)
-        "draft_daily_health_record_update",
-        "draft_checkup_update",
-        "draft_prescription_update",
-        "draft_etc_inspection_update",
-        "draft_inspection_value_update",
-        "draft_observation_cycle_update",
-        "delete_schedule",
-        "delete_care_item",
-        "cancel_care_completion",
-        "delete_daily_health_record",
-        "delete_checkup",
-        "delete_prescription",
-        "delete_etc_inspection",
-        "delete_observation_cycle",
-        "delete_repeat_prevention",
-        "delete_expense",
-        "delete_place_bookmark",
-    }
+    assert (
+        set(defs)
+        == {
+            "navigate",
+            "search_guide",
+            "draft_schedule",
+            "draft_care_item",
+            "decline",
+        }
+        | {
+            "get_health_indicators",
+            "list_care_completions",
+            "list_care_items",
+            "list_my_care_schedules",
+            "list_checkups",
+            "list_daily_health_records",
+            "list_inspection_values",
+            "list_observation_items",
+            "list_prescriptions",
+            "list_repeat_preventions",
+            "get_checkup",
+            "list_etc_inspections",
+            "list_observation_cycles",
+            "get_expense_statistics",
+            "get_expense_total",
+            "get_receipt",
+            "list_expense_months",
+            "list_expense_pets",
+            "list_expenses",
+        }
+        | {
+            # 반려동물·캐릭터·커뮤니티·플레이스 READ(2026-11-11)
+            "get_pet",
+            "get_pixel_character",
+            "get_points",
+            "list_caregivers",
+            "list_daily_missions",
+            "list_pets",
+            "list_pixel_characters",
+            "list_point_ledgers",
+            "list_sent_caregiver_invitations",
+            "list_shop_items",
+            "get_popular_photo",
+            "get_post",
+            "list_care_recruitments",
+            "list_comments",
+            "list_health_tips",
+            "list_lost_reports",
+            "list_news",
+            "list_place_bookmarks",
+            "list_places",
+            "list_posts",
+        }
+        | {
+            "draft_care_completion",
+            "draft_daily_health_record",
+            "draft_expense_limit",
+            "draft_schedule_update",
+            "draft_care_item_update",
+            "draft_expense_update",
+            "draft_pet_update",
+            "draft_expense",
+            "draft_observation_cycle",
+            # 검사 수치 저장(SCR-AIM-013 대화창 PDF, 2026-11-23)
+            "draft_inspection_values",
+            # 관찰 항목 등록(SCR-AIM-013 피부·눈 분석 카드, 2026-11-24)
+            "draft_observation_item",
+        }
+        | {
+            # 수정·삭제 도구(SCR-AIM-012, 2026-11-25)
+            "draft_daily_health_record_update",
+            "draft_checkup_update",
+            "draft_prescription_update",
+            "draft_etc_inspection_update",
+            "draft_inspection_value_update",
+            "draft_observation_cycle_update",
+            "delete_schedule",
+            "delete_care_item",
+            "cancel_care_completion",
+            "delete_daily_health_record",
+            "delete_checkup",
+            "delete_prescription",
+            "delete_etc_inspection",
+            "delete_observation_cycle",
+            "delete_repeat_prevention",
+            "delete_expense",
+            "delete_place_bookmark",
+        }
+        | NEW_READ
+        | NEW_ACTION
+    )
     for d in defs.values():
         assert "쓸 때:" in d["description"] and "말하는 법:" in d["description"]
         assert d["input_schema"]["type"] == "object"

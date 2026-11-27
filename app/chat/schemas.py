@@ -187,6 +187,8 @@ class ActionItemParam(_Camel):
     # 배열 칸(type array) : 항목 칸 규칙·최소 항목 수
     items: dict[str, "ActionItemParam"] | None = None
     min_items: int | None = None
+    # 숫자 배열 칸(itemSns·petSns 등, 2026-11-27) : 항목 타입(long). 값은 번호 목록
+    item_type: str | None = None
     # "uuid" : React가 [확인] 때 카드 하나에 한 번 만든다
     generated: str | None = None
 
