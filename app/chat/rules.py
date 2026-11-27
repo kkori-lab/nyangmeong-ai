@@ -490,7 +490,7 @@ _DEL = (
 _CONFIRM = re.compile(rf"^(?:{_YES}(?:{_DO}|{_DEL})?|{_DO}|{_DEL})$")
 # 도구별 동사(tool_prompts.yaml verb)의 확인 말 (2026-11-27) : 그 동사의 카드가 있을 때만
 # service.py가 확인 말로 본다("진행"은 _DO에 있음)
-CARD_VERBS = ("지정", "구매", "수락", "거절", "종료")
+CARD_VERBS = ("지정", "구매", "수락", "거절", "종료", "저장")
 _CARD_VERB_SAID = re.compile(
     rf"^{_YES}?(?P<verb>{'|'.join(CARD_VERBS)})(해|해줘|해주세요|해줄래|해요|하자|해주라|ㄱ)?$"
 )
@@ -896,7 +896,7 @@ AGENT_ALREADY_DONE = (
 AGENT_STOPPED = "남은 일은 이어서 하지 않았어요."
 
 # 2026-11-27 frontend-dc ② : 바로 실행된 턴의 답에 확인 말 안내("'등록해 줘'라고 말해")가 남음
-_ASKS_CONFIRM = re.compile(r"'(등록|수정|삭제|진행|지정|구매|수락|거절|종료)해\s*줘'\s*라고")
+_ASKS_CONFIRM = re.compile(r"'(등록|수정|삭제|진행|지정|구매|수락|거절|종료|저장)해\s*줘'\s*라고")
 
 
 def asks_confirm(text: str) -> bool:

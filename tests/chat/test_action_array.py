@@ -91,11 +91,12 @@ def test_배열과_파일_칸이_있는_도구를_버리지_않고_실어야_한
     assert cycle.call.content_type == "multipart/form-data"
 
 
-def test_영수증_저장은_skip이라_싣지_않지만_설명을_주면_중첩_배열까지_읽어야_한다(caplog):
+def test_영수증_저장은_설명이_있어_싣고_중첩_배열까지_읽어야_한다(caplog):
+    # 2026-11-27 receipt-card : skip을 지우고 설명을 둠(영수증 분석 카드를 고칠 때만)
     with caplog.at_level(logging.INFO, logger="app.chat.catalog"):
         built = build(fake_catalog_json())
-    assert "draft_receipt_save" not in built.entries
-    assert "draft_receipt_save 싣지 않음(" in caplog.text
+    assert "draft_receipt_save" in built.entries
+    assert "draft_receipt_save 싣지 않음" not in caplog.text
     assert "draft_receipt_save 설명 없음" not in caplog.text
 
     entry = receipt_entry()
@@ -109,8 +110,11 @@ def test_배열_항목의_코드_칸에_코드_값이_없으면_싣지_않아야
     prompts = catalog.tool_prompts() | {
         "draft_receipt_save": catalog.ToolPrompt.model_validate(RECEIPT_PROMPT)
     }
+    raw = fake_catalog_json()
+    # 가짜 목록은 영수증 저장의 배열 항목 코드 값을 싣는다(2026-11-27) : 여기선 지운다
+    del tool_of(raw, "draft_receipt_save")["params"]["pets"]["items"]["ckupTypeCd"]["codes"]
     with caplog.at_level(logging.WARNING, logger="app.chat.catalog"):
-        built = build(fake_catalog_json(), prompts)
+        built = build(raw, prompts)
 
     assert "draft_receipt_save" not in built.entries
     assert "코드 값 없음 HLTG01" in caplog.text

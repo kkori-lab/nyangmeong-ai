@@ -364,6 +364,75 @@ class ReceiptResultRequest(_Camel):
         return value
 
 
+class ReceiptOcrLine(_Camel):
+    # ocr 패키지 ReceiptOcrResponse와 같은 모양(기능 패키지끼리 import하지 않아 따로 둠)
+    item_nm: str | None = None
+    item_amt: int | None = None
+
+
+class ReceiptOcrDrug(_Camel):
+    mdcn_nm: str | None = None
+    mdcn_days: int | None = None
+    mdcn_usage: str | None = None
+    mdcn_amt: int | None = None
+
+
+class ReceiptOcrSection(_Camel):
+    section_nm: str | None = None
+    sbttl_amt: int | None = None
+    dscnt_amt: int | None = None
+    items: list[ReceiptOcrLine] = Field(default_factory=list, max_length=200)
+    drugs: list[ReceiptOcrDrug] = Field(default_factory=list, max_length=100)
+
+
+class ReceiptOcr(_Camel):
+    hsptl_nm: str | None = None
+    expnd_plcus_nm: str | None = None
+    expnd_clsf_cd: str | None = None
+    ckup_ymd: date | None = None
+    recpt_amt: int | None = None
+    btm_dscnt_amt: int | None = None
+    sections: list[ReceiptOcrSection] = Field(default_factory=list, max_length=20)
+
+
+class ReceiptCardRequest(_Camel):
+    """대화창 영수증 분석 뒤 결과 요약 저장 + 영수증 저장 확인 카드 (2026-11-27)
+    - React가 /ai/receipts 응답(recptSn·ocr)을 그대로 보낸다. RECOGNIZED일 때만 쓴다"""
+
+    result: ReceiptResult
+    recpt_sn: int | None = Field(default=None, ge=1)
+    # 업로드 때 정한 반려동물(FN-AIM-013-03) : 구역 없는 영수증의 줄 반려동물
+    pet_sn: int | None = Field(default=None, ge=1)
+    ocr: ReceiptOcr | None = None
+    cnvrs_cn: str | None = Field(default=None, min_length=1, max_length=MAX_MESSAGE_LENGTH)
+
+    @field_validator("cnvrs_cn")
+    @classmethod
+    def _not_blank(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("공백만 입력할 수 없습니다.")
+        return value
+
+    @model_validator(mode="after")
+    def _recognized_needs_result(self) -> "ReceiptCardRequest":
+        if self.result is ReceiptResult.RECOGNIZED and (self.recpt_sn is None or self.ocr is None):
+            raise ValueError("인식 결과에는 recptSn과 ocr이 필요합니다.")
+        return self
+
+
+class ReceiptNoCardReason(StrEnum):
+    # 카드가 없는 이유 : 둘 다 React가 [확인 후 저장](모달)을 보인다
+    NEEDS_FORM = "NEEDS_FORM"  # 줄 배정이 필요함(구역 이름 불일치·반려동물 없음)
+    NO_TOOL = "NO_TOOL"  # 도구 목록에 draft_receipt_save 없음
+
+
+class ReceiptCardResult(_Camel):
+    # 저장한 메시지와 확인 카드(없으면 null). 카드는 done.action과 같은 모양, 저장 안 함
+    messages: list[ConversationMessage]
+    action: ActionCard | None = None
+    no_card_reason: ReceiptNoCardReason | None = None
+
+
 class ImageIntentKind(StrEnum):
     """첨부 사진 용도 (SCR-AIM-013, 메인 검색창 공용)"""
 
