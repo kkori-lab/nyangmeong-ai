@@ -1,7 +1,7 @@
 """tool calling 1단계 평가(docs/design/tool-calling.md 7-1절). 실제 Anthropic 호출(비용이 든다)
 
 돌리기: uv run python -m scripts.tool_eval [--sonnet] [--answer] [--only T01,T05]
-        [--ptc [code|both]] [--agent]
+        [--ptc [code|both]] [--agent] [--off hint,chain]
 - 도구 흐름(service.judge_tools)을 잰다(옛 판정 service.judge는 2026-11-11 삭제)
 - 도구 목록 : 테스트와 같은 가짜 Java 목록(스냅샷 + 코드 값), Java는 부르지 않는다
 - 문항별 결과 : .cache/tool_eval/<시각>.jsonl (git 제외)
@@ -13,14 +13,19 @@
   ③ 쓰기 꼴 : 행의 results(멈춤마다 카드 결과 DONE·FAILED+errors·data)로 카드에서 멈춘 루프를
   service.agent_carry -> judge_tools(carry)로 이어 간다(agent-continue와 같은 길). pending은
   rules.agent_pending(첫 멈춤 카드 수)으로 보고(④), 이어 갈 일이 없으면 끝은 "멈춤"
+- --off (2026-11-27) : 의도를 고르는 정규식 지름길을 이 실행 동안만 끄고 잰다(앱 코드는 그대로).
+  hint는 도구 고르기에 키워드 행 힌트를 안 줌, chain은 이어 고르기 정규식
+  (rules.chains_more·chains_after_move)을 늘 False로. 기본 세트·--agent 둘 다
 pytest 수집 제외(tests/ 밖), 테스트·CI에서 미호출(AGENTS.md 5번)
 """
 
 import argparse
 import asyncio
+import contextlib
 import json
 import statistics
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -51,6 +56,8 @@ SONNET = "claude-sonnet-5-5"
 # 도구 고르기 기준 문항(tool-calling.md 7-1절 4회차 판정) : T01~T44
 CORE = 44
 # 새도구 : 2026-11-27 백엔드 새 도구 41개(T97~T137)
+# --off로 끌 수 있는 지름길(2026-11-27 정규식 지름길 줄이기 ①)
+OFF_NAMES = ("hint", "chain")
 TYPES = ("사용법", "이동", "일정", "케어", "지식", "범위밖", "헷갈림", "수정", "조합", "새도구")
 
 
@@ -86,6 +93,57 @@ class Result:
     code_calls: int = 0
     code_tools: list[str] = field(default_factory=list)
     text_then_code: int = 0
+
+
+def off_names(value: str) -> tuple[str, ...]:
+    # --off 값 : 쉼표 목록, OFF_NAMES 밖 이름은 argparse 오류(종료 2)
+    names = tuple(dict.fromkeys(name.strip() for name in value.split(",") if name.strip()))
+    wrong = [name for name in names if name not in OFF_NAMES]
+    if not names or wrong:
+        raise argparse.ArgumentTypeError(
+            f"끌 수 있는 지름길은 {', '.join(OFF_NAMES)}: {', '.join(wrong) or value!r}"
+        )
+    return names
+
+
+def off_line(names: tuple[str, ...]) -> str:
+    return f"끈 지름길: {', '.join(names) or '없음'}"
+
+
+def off_tag(names: tuple[str, ...]) -> str:
+    # 결과 파일 이름 끝 : -off-hint-chain
+    return f"-off-{'-'.join(names)}" if names else ""
+
+
+def _never(_text: str) -> bool:
+    return False
+
+
+@contextlib.contextmanager
+def shortcuts_off(names: tuple[str, ...]) -> Iterator[None]:
+    """이 블록 동안만 지름길을 끄고, 끝나면 원래 함수로 되돌린다"""
+    saved: list[tuple[object, str, object]] = []
+
+    def put(owner: object, attr: str, value: object) -> None:
+        saved.append((owner, attr, getattr(owner, attr)))
+        setattr(owner, attr, value)
+
+    try:
+        if "hint" in names:
+            original = AnthropicToolAgent.decide
+
+            async def decide(self, messages, max_tokens, today, hint=None, code=None):
+                # 키워드 행 힌트를 버림(시간 초과 때 행 이동 대체는 judge_tools에 그대로)
+                return await original(self, messages, max_tokens, today, hint=None, code=code)
+
+            put(AnthropicToolAgent, "decide", decide)
+        if "chain" in names:
+            put(rules, "chains_more", _never)
+            put(rules, "chains_after_move", _never)
+        yield
+    finally:
+        for owner, attr, value in reversed(saved):
+            setattr(owner, attr, value)
 
 
 def _register_kind(values: dict) -> str:
@@ -617,7 +675,7 @@ async def agent_main(client, options) -> None:
         rows = [row for row in rows if row["id"] in only]
     models = [get_settings().llm_model] + ([SONNET] if options.sonnet else [])
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    out = OUT_DIR / f"agent-{datetime.now():%Y%m%d-%H%M%S-%f}.jsonl"
+    out = OUT_DIR / f"agent-{datetime.now():%Y%m%d-%H%M%S-%f}{off_tag(options.off)}.jsonl"
     sums = []
     with out.open("w", encoding="utf-8") as file:
         for model in models:
@@ -639,11 +697,13 @@ async def agent_main(client, options) -> None:
                     "tags": run.tags,
                     "ms": round(run.ms),
                     "error": run.error,
+                    "off": list(options.off),
                     **mark,
                 }
                 file.write(json.dumps(record, ensure_ascii=False) + "\n")
             sums.append(agent_summary(name, runs, scores))
     print()
+    print(off_line(options.off))
     print_agent_table(sums)
     print(f"\n문항별 결과: {out}")
 
@@ -668,8 +728,18 @@ async def main() -> None:
     parser.add_argument(
         "--agent", action="store_true", help="에이전트 다단계 세트(agent_eval.jsonl)를 잰다"
     )
+    parser.add_argument(
+        "--off",
+        type=off_names,
+        default=(),
+        help=f"이 지름길을 끄고 잰다(쉼표로 구분: {', '.join(OFF_NAMES)})",
+    )
     options = parser.parse_args()
+    with shortcuts_off(options.off):
+        await _measure(options)
 
+
+async def _measure(options) -> None:
     settings = get_settings()
     client = get_anthropic_client(settings)
     tools.use_catalog(fake_catalog())
@@ -749,7 +819,7 @@ async def main() -> None:
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     # 같은 초에 여럿 돌려도 덮어쓰지 않게 마이크로초까지(2026-11-20)
-    out = OUT_DIR / f"{datetime.now():%Y%m%d-%H%M%S-%f}.jsonl"
+    out = OUT_DIR / f"{datetime.now():%Y%m%d-%H%M%S-%f}{off_tag(options.off)}.jsonl"
     sums = []
     with out.open("w", encoding="utf-8") as file:
         for name, run in flows:
@@ -775,6 +845,7 @@ async def main() -> None:
                     "code_calls": result.code_calls,
                     "code_tools": result.code_tools,
                     "text_then_code": result.text_then_code,
+                    "off": list(options.off),
                     **mark,
                 }
                 if result.answer is not None:
@@ -782,6 +853,7 @@ async def main() -> None:
                 file.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
             sums.append(summary(name, rows, results, scores))
     print()
+    print(off_line(options.off))
     print_tables(rows, sums)
     print(f"\n문항별 결과: {out.relative_to(ROOT)}")
 
