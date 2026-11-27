@@ -23,6 +23,11 @@ VERBS = {
     "cancel_caregiver_invitation": "진행",
     # 영수증 저장 카드 (SCR-AIM-013 receipt-card, 2026-11-27)
     "draft_receipt_save": "저장",
+    # 새 도구 싣기 ③ (2026-11-27)
+    "unlink_caregiver": "해제",
+    "delete_expenses_by_condition": "삭제",
+    "draft_notification_settings": "변경",
+    "mark_service_tutorial_viewed": "저장",
 }
 REPRESENT = {"tool": "set_representative_pet", "input": {"petSn": CHOCO}}
 ACCEPT = {"tool": "accept_caregiver_invitation", "input": {"jntBrupInvtnSn": 5, "petSns": [CHOCO]}}

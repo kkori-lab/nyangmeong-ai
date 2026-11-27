@@ -1286,6 +1286,263 @@ list_places:
       java: keyword
       description: 말한 지역·상호명
 
+# 2026-11-27 새 도구 싣기 ③ (백엔드 #326, 사람 결정 "전부 다 추가")
+
+delete_pet:
+  label: 반려동물 삭제
+  target: 반려동물
+  hooks: [pet]
+  description: |
+    반려동물 한 마리를 지우는 확인 카드를 대화창에 띄운다. 그 아이의 건강·일정·가계부·캐릭터 기록이
+    모두 함께 지워지고 되돌릴 수 없다. 회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 반려동물을 목록에서 지워 달라는 말.
+      예) "보리 삭제해 줘", "잘못 등록한 반려동물 지워 줘"
+    쓰지 않을 때: 반려동물 정보를 고치는 말은 draft_pet_update. 같이 돌보던 사람을 빼는 말은 unlink_caregiver.
+      반려동물을 묻기만 하는 말은 list_pets·get_pet.
+    인자: 반려동물은 고르지 않는다(서버가 문장 속 이름, 없으면 대화의 반려동물로 정하고 카드에 보인다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+
+unlink_caregiver:
+  label: 공동양육 해제
+  verb: 해제
+  target: 공동양육자
+  hooks: [pet]
+  target_fields: [mbrNcnm]
+  description: |
+    반려동물 한 마리를 같이 돌보는 사람(공동양육자) 하나를 빼는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 바꾸지 않는다.
+
+    쓸 때: 공동양육자를 해제해 달라는 말, 같이 돌보는 걸 그만두겠다는 말.
+      예) "코코 공동양육자 동생 해제해 줘", "보리 같이 키우는 거 그만할래"
+    쓰지 않을 때: 아직 수락 전인 보낸 초대를 거두는 말은 cancel_caregiver_invitation. 공동양육자를 묻기만 하는 말은
+      list_caregivers. 새로 초대하는 말은 draft_caregiver_invitation.
+    인자: brup_rel_sn은 이 턴 list_caregivers 결과의 brupRelSn만 쓴다. 결과가 없으면 list_caregivers를 먼저
+      부른다. 어느 사람인지 하나로 정할 수 없으면 비운다(지어내지 않는다). 반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    brup_rel_sn:
+      java: brupRelSn
+      description: 뺄 공동양육 관계 번호. 이 턴 list_caregivers 결과의 brupRelSn만, 모르면 비운다
+
+delete_caregiver_invitation:
+  label: 공동양육 초대 삭제
+  target: 취소한 초대장
+  target_fields: [invtnTrgtEmlMask]
+  description: |
+    내가 보낸 공동양육 초대 중 이미 취소한 초대 하나를 목록에서 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 취소한 초대를 목록에서 지워 달라는 말.
+      예) "취소한 초대 지워 줘", "보낸 초대 목록에서 취소된 거 삭제해 줘"
+    쓰지 않을 때: 아직 살아 있는 보낸 초대를 거두는 말은 cancel_caregiver_invitation. 받은 초대를 거절하는 말은
+      reject_caregiver_invitation. 보낸 초대를 묻기만 하는 말은 list_sent_caregiver_invitations.
+    인자: jnt_brup_invtn_sn은 이 턴 list_sent_caregiver_invitations 결과의 jntBrupInvtnSn만 쓴다. 결과가 없으면
+      list_sent_caregiver_invitations를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다.
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    jnt_brup_invtn_sn:
+      java: jntBrupInvtnSn
+      description: 지울 취소한 초대 번호. 이 턴 list_sent_caregiver_invitations 결과의 jntBrupInvtnSn만, 모르면 비운다
+
+delete_expenses:
+  label: 지출 여러 건 삭제
+  target: 지출 기록
+  target_fields: [expndYmd, expndClsfCd, expndAmt:원, expndPlcusNm]
+  description: |
+    이미 있는 가계부 지출 기록 여러 건을 한 번에 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 고를 수 있는 지출 두 건 이상을 지워 달라는 말.
+      예) "어제 지출 두 개 다 지워 줘", "중복으로 들어간 사료 지출 세 건 삭제해 줘"
+    쓰지 않을 때: 한 건만 지우는 말은 delete_expense. 기간·카테고리 같은 조건에 맞는 지출을 모두 지우는 말은
+      delete_expenses_by_condition. 지출을 묻기만 하는 말은 list_expenses.
+    인자: expnd_sns는 이 턴 list_expenses 결과의 expndSn만 쓴다. 결과가 없으면 list_expenses를 먼저 부른다.
+      어느 것인지 정할 수 없으면 비운다(지어내지 않는다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    expnd_sns:
+      java: expndSn
+      description: 지울 지출 번호 목록. 이 턴 list_expenses 결과의 expndSn만, 모르면 비운다
+
+delete_expenses_by_condition:
+  label: 지출 조건 삭제
+  verb: 삭제
+  target: 지출 기록
+  hooks: [pet_optional]
+  description: |
+    기간·반려동물·카테고리 조건에 맞는 가계부 지출을 모두 지우는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 '삭제해 줘'라고 말하기 전에는 아무것도 지우지 않는다.
+
+    쓸 때: 조건에 맞는 지출을 한꺼번에 지워 달라는 말.
+      예) "지난달 간식 지출 전부 지워 줘", "11월 공용 지출 다 삭제해 줘"
+    쓰지 않을 때: 고를 수 있는 몇 건을 지우는 말은 delete_expenses, 한 건은 delete_expense. 지출을 묻기만 하는 말은
+      list_expenses.
+    인자: 먼저 같은 조건으로 list_expenses를 불러 건수를 본다. expected_cnt는 그 결과의 전체 건수
+      (totalElements, 없으면 행 수)만 쓴다. 결과가 없거나 0건이면 카드를 띄우지 않고 지울 것이 없다고 안내한다.
+      기간은 시스템의 오늘 날짜 기준으로 계산한다. 말하지 않은 조건은 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 문장 속 이름으로 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    expected_cnt:
+      java: expectedCnt
+      description: 지울 건수. 이 턴 같은 조건 list_expenses 결과의 전체 건수
+    start_ymd:
+      java: startYmd
+      description: 기간 시작 YYYY-MM-DD
+    end_ymd:
+      java: endYmd
+      description: 기간 끝 YYYY-MM-DD
+    common:
+      java: common
+      description: 공용 지출(반려동물 없는 지출)만이면 true, 말하지 않았으면 비운다
+    expnd_clsf_cd:
+      java: expndClsfCd
+      description: 지출 카테고리
+
+draft_notification_settings:
+  label: 알림 설정 변경
+  verb: 변경
+  description: |
+    알림 받기 설정(이메일·앱 알림함, 케어 일정·사전 알림 시점·펫돌봄 거래·댓글·실종 제보 만료·월 지출 한도)을
+    바꾸는 확인 카드를 대화창에 띄운다. 회원이 대화로 확인 말을 하기 전에는 아무것도 바꾸지 않는다.
+
+    쓸 때: 알림을 켜거나 끄거나, 케어 일정 사전 알림 시점을 바꿔 달라는 말.
+      예) "댓글 알림 꺼 줘", "케어 일정 알림 3일 전이랑 당일로 바꿔 줘", "이메일 알림 다시 켜 줘"
+    쓰지 않을 때: 알림 설정을 묻기만 하는 말은 get_notification_settings. 알림 목록·읽음은 list_notifications·
+      mark_notification_read·mark_all_notifications_read.
+    인자: 회원이 말한 칸만 채우고 나머지는 비운다(서버가 지금 설정값으로 채운다). 켜기는 true, 끄기는 false.
+      lead_times는 사전 알림 시점 전체 목록이다(TODAY 당일, D1 1일 전, D3 3일 전, D7 7일 전). 하나를 더하거나 빼는
+      말이면 get_notification_settings로 지금 목록을 보고 그 목록에 더하거나 뺀 전체를 넣는다.
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    eml_noti_rcptn_yn:
+      java: emlNotiRcptnYn
+      description: 이메일로 받기. 켜기 true, 끄기 false
+    inapp_noti_rcptn_yn:
+      java: inappNotiRcptnYn
+      description: 앱 알림함으로 받기. 켜기 true, 끄기 false
+    care_schdl_noti_rcptn_yn:
+      java: careSchdlNotiRcptnYn
+      description: 케어 일정 알림. 켜기 true, 끄기 false
+    lead_times:
+      java: leadTimes
+      description: 케어 일정 사전 알림 시점 전체 목록
+    mtch_dlng_noti_rcptn_yn:
+      java: mtchDlngNotiRcptnYn
+      description: 펫돌봄 거래 상태 알림. 켜기 true, 끄기 false
+    cmnt_noti_rcptn_yn:
+      java: cmntNotiRcptnYn
+      description: 댓글 알림. 켜기 true, 끄기 false
+    lost_expry_noti_rcptn_yn:
+      java: lostExpryNotiRcptnYn
+      description: 실종 제보 글 만료 예고 알림. 켜기 true, 끄기 false
+    expnd_lim_noti_rcptn_yn:
+      java: expndLimNotiRcptnYn
+      description: 월 지출 한도 초과 알림. 켜기 true, 끄기 false
+
+check_expense_duplicates:
+  label: 지출 중복 확인
+  screen: SCR-MYP-030
+  description: |
+    가계부에 적으려는 지출과 같은 날·같은 카테고리·같은 금액의 지출이 이미 있는지 찾아 답한다.
+    아무것도 저장하지 않는다.
+
+    쓸 때: 이 지출을 이미 적었는지, 중복인지 묻는 말.
+      예) "어제 병원비 5만원 이미 가계부에 적었나?", "오늘 사료 3만원 지출 중복 아니야?"
+    쓰지 않을 때: 지출을 적어 달라는 말은 draft_expense. 지출 목록을 보여 달라는 말은 list_expenses.
+    인자: 회원이 말한 날짜·카테고리·금액을 넣는다. 날짜는 시스템의 오늘 날짜 기준으로 계산하고 말하지 않았으면 오늘.
+      금액은 원 단위 정수로 바꾼다.
+    말하는 법: 같은 지출이 있으면 그 날짜·금액·사용처를 말하고, 없으면 없다고 짧게 답한다.
+  params:
+    expnd_ymd:
+      java: expndYmd
+      description: 지출 날짜 YYYY-MM-DD
+    expnd_clsf_cd:
+      java: expndClsfCd
+      description: 지출 카테고리
+    expnd_amt:
+      java: lines[].expndAmt
+      description: 금액(원)
+    expnd_plcus_nm:
+      java: expndPlcusNm
+      description: 사용처 이름(가게·병원 이름)
+  fixed:
+    expndInptMthCd: MYPC0019
+
+check_receipt_save:
+  label: 영수증 저장 전 확인
+  screen: SCR-MYP-030
+  description: |
+    저장된 영수증 하나를 검진기록·가계부에 저장하기 전에, 가계부에 같은 지출이 있는지와 가까운 예정 일정이 있는지
+    찾아 답한다. 아무것도 저장하지 않는다.
+
+    쓸 때: 그 영수증을 저장하면 중복인지, 연결할 병원 일정이 있는지 묻는 말.
+      예) "그 영수증 가계부에 이미 들어가 있어?", "이 영수증이랑 맞는 병원 일정 있어?"
+    쓰지 않을 때: 영수증 내용을 묻는 말은 get_receipt. 새 영수증은 사진으로 올린다.
+    인자: recpt_sn은 이 턴 list_expenses·get_receipt 결과의 recptSn만 쓴다. 결과가 없으면 list_expenses를 먼저
+      부른다. pet_sn은 같은 결과의 petSn, ckup_ymd는 그 영수증의 진료일. 모르면 비운다(지어내지 않는다).
+    말하는 법: 받은 중복 지출·일정만 말한다.
+  params:
+    recpt_sn:
+      java: recptSn
+      description: 영수증 번호. 이 턴 결과의 recptSn만
+    ckup_ymd:
+      java: ckupYmd
+      description: 진료일 YYYY-MM-DD
+    pet_sn:
+      java: pets[].petSn
+      description: 영수증 반려동물 번호. 이 턴 결과의 petSn만
+
+draft_receipt_checkup:
+  label: 영수증 검진기록 등록
+  target: 영수증
+  hooks: [pet]
+  description: |
+    저장된 영수증 하나로 검진기록을 새로 만드는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 이미 가계부에 있는 영수증(병원비)으로 검진기록을 만들어 달라는 말.
+      예) "그 병원비 영수증으로 검진기록 만들어 줘", "지난주 영수증 정기검진으로 기록해 줘"
+    쓰지 않을 때: 영수증 없이 검진기록을 남기는 말은 draft_checkup. 영수증 분석 카드를 고치는 말은
+      draft_receipt_save.
+    인자: recpt_sn은 이 턴 list_expenses·get_receipt 결과의 recptSn만 쓴다. 결과가 없으면 list_expenses를 먼저
+      부른다. 진료일·병원 이름은 그 결과 값이나 회원이 말한 값, 모르면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다(서버가 정한다).
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    recpt_sn:
+      java: recptSn
+      description: 영수증 번호. 이 턴 결과의 recptSn만, 모르면 비운다
+    ckup_ymd:
+      java: ckupYmd
+      description: 진료일 YYYY-MM-DD
+    hsptl_nm:
+      java: hsptlNm
+      description: 병원 이름
+    ckup_type_cd:
+      java: ckupTypeCd
+      description: 검진 종류
+    ckup_cn:
+      java: ckupCn
+      description: 진료 내용
+    ckup_memo_cn:
+      java: ckupMemoCn
+      description: 메모
+
+mark_service_tutorial_viewed:
+  label: 튜토리얼 그만 보기
+  verb: 저장
+  description: |
+    서비스 튜토리얼(처음 쓰는 법 안내)을 봤다고 저장해 다시 띄우지 않게 하는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 튜토리얼을 그만 보여 달라는 말, 이미 봤다는 말.
+      예) "튜토리얼 그만 보여 줘", "튜토리얼 다 봤어 이제 안 띄워도 돼"
+    쓰지 않을 때: 튜토리얼을 봤는지 묻는 말은 get_service_tutorial. 사용법을 묻는 말은 search_guide.
+    인자: 없다.
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+
 # 일부러 싣지 않는 Java 도구 (skip: 이유)
 
 draft_receipt_save:
@@ -1742,7 +1999,7 @@ delete_expense:
     쓸 때: 가계부 지출 하나를 지워 달라는 말.
       예) "어제 사료 산 지출 지워 줘", "중복으로 들어간 병원비 지출 삭제해 줘"
     쓰지 않을 때: 금액·카테고리를 고치는 말은 draft_expense_update. 지출을 묻기만 하는 말은 list_expenses.
-      여러 지출을 한 번에 지우는 말은 하나씩 고르게 안내한다(한 번에 하나만 지운다).
+      두 건 이상을 지우는 말은 delete_expenses, 조건에 맞는 지출을 모두 지우는 말은 delete_expenses_by_condition.
     인자: expnd_sn은 이 턴에 받은 list_expenses 결과의 expndSn만 쓴다. 결과가 없으면
       list_expenses를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다).
       반려동물은 고르지 않는다(서버가 정한다).

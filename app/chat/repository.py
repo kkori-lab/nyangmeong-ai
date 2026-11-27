@@ -196,7 +196,8 @@ def get_register_context_repository(
 
 class ToolReader(Protocol):
     # 도구 흐름 READ : Java 공개 API GET -> ApiResponse의 data (4xx·5xx는 BackendError·AppError)
-    async def read(self, path: str, params: dict) -> object: ...
+    # body : 저장하지 않는 POST READ(저장 전 중복 확인 등, 2026-11-27)의 JSON 본문. 있으면 POST
+    async def read(self, path: str, params: dict, body: dict | None = None) -> object: ...
 
 
 class JavaToolReader:
@@ -210,7 +211,17 @@ class JavaToolReader:
         if cookie:
             self._headers["Cookie"] = cookie
 
-    async def read(self, path: str, params: dict) -> object:
+    async def read(self, path: str, params: dict, body: dict | None = None) -> object:
+        if body is not None:
+            return await call_backend(
+                self._client,
+                self._settings,
+                "POST",
+                path,
+                params=params,
+                json=body,
+                headers=self._headers,
+            )
         return await call_backend(
             self._client, self._settings, "GET", path, params=params, headers=self._headers
         )

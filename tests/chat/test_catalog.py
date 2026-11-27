@@ -50,12 +50,21 @@ DELETES = {
     "delete_place_bookmark",
     # 오늘 마지막 완료 되돌리기(2026-11-27 새 도구)
     "cancel_last_dose",
+    # 2026-11-27 사람 결정 "전부 다 추가"(새 도구 싣기 ③) : 반려동물 삭제·공동양육 해제·
+    # 취소한 초대 삭제·지출 여러 건 삭제도 확인 카드
+    "delete_pet",
+    "unlink_caregiver",
+    "delete_caregiver_invitation",
+    "delete_expenses",
 }
 CAREGIVER_CARDS = {
     "draft_caregiver_invitation",
     "cancel_caregiver_invitation",
     "accept_caregiver_invitation",
     "reject_caregiver_invitation",
+    # 2026-11-27 새 도구 싣기 ③ : 공동양육 해제·취소한 초대 삭제
+    "unlink_caregiver",
+    "delete_caregiver_invitation",
 }
 # 2단계 쓰기 확인 카드(ACTION)
 ACTION = {
@@ -211,20 +220,17 @@ def test_설명의_hook_이름과_역할은_Python에_있어야_한다():
 
 
 def test_navigate만_쓰는_API는_스냅샷에_없어야_한다():
-    # ③ 설계 2-3절 : 반려동물 삭제·회원정보(PUT)·공동양육 해제·관리자·인증·내부 API
-    # 삭제는 2026-11-25부터 확인 카드(DELETES 11개)만. 반려동물 삭제·지출 전체 삭제는 navigate
-    # 프로필 사진 수정(PATCH /api/members/me, 휴대전화번호 칸 없음)은 2026-11-27부터 확인 카드
-    navigate_only = (
-        ("PUT", "/api/members/me"),
-        ("DELETE", "/api/pets/{petSn}"),
-        ("DELETE", "/api/expenses"),
-    )
+    # ③ 설계 2-3절 : 회원정보(PUT)·관리자·인증·내부 API
+    # 삭제는 2026-11-25부터 확인 카드(DELETES)만. 프로필 사진 수정(PATCH /api/members/me,
+    # 휴대전화번호 칸 없음)은 2026-11-27부터 확인 카드. 반려동물 삭제·공동양육 해제·지출 여러 건·
+    # 조건 삭제는 2026-11-27 사람 결정(새 도구 싣기 ③)으로 확인 카드
+    navigate_only = (("PUT", "/api/members/me"),)
     for tool in catalog.read_snapshot().tools:
         call = tool.call
         assert call.method != "DELETE" or tool.name in DELETES
         assert (call.method, call.path) not in navigate_only
         assert not call.path.startswith(("/api/admin", "/api/auth", "/internal"))
-        # 공동양육 쓰기는 초대 보내기·취소·수락·거절 카드만(2026-11-27 사람 결정), 해제는 navigate
+        # 공동양육 쓰기는 초대 보내기·취소·수락·거절·해제·삭제 카드만(2026-11-27 사람 결정)
         assert call.method == "GET" or "caregiver" not in call.path or tool.name in CAREGIVER_CARDS
         # 채팅은 읽지 않은 수만(2026-11-27)
         assert "chat-rooms" not in call.path or call.path == "/api/chat-rooms/unread-count"
