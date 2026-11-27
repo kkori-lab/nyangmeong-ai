@@ -488,6 +488,12 @@ _DEL = (
     r"|없애(줘|주세요|줄래)?)"
 )
 _CONFIRM = re.compile(rf"^(?:{_YES}(?:{_DO}|{_DEL})?|{_DO}|{_DEL})$")
+# 도구별 동사(tool_prompts.yaml verb)의 확인 말 (2026-11-27) : 그 동사의 카드가 있을 때만
+# service.py가 확인 말로 본다("진행"은 _DO에 있음)
+CARD_VERBS = ("지정", "구매", "수락", "거절", "종료")
+_CARD_VERB_SAID = re.compile(
+    rf"^{_YES}?(?P<verb>{'|'.join(CARD_VERBS)})(해|해줘|해주세요|해줄래|해요|하자|해주라|ㄱ)?$"
+)
 _DELETE_WORD = re.compile(r"삭제|지워|지우|없애")
 _PROCEED_WORD = re.compile(r"진행")
 _NO = r"(아니|아니요|아뇨|아니야)"
@@ -504,7 +510,8 @@ def _compact_reply(text: str) -> str:
 
 # 동사형 명령 (2026-11-26 팀 합의) : 첫 턴에 확인 말 없이 바로 실행. 문장 끝이 쓰기 명령형
 # 하다형 동사 + 해 줘 등, 어형 동사(바꿔·지워 …)는 꼬리 없이도, 끝이 맨 "기록"이어도 명령
-_RUN_HA = r"(등록|수정|변경|저장|추가|기록|체크|완료|삭제|구매)"
+# 도구별 동사(지정·수락·거절·종료, 2026-11-27)도 명령형이면 바로 실행
+_RUN_HA = r"(등록|수정|변경|저장|추가|기록|체크|완료|삭제|구매|지정|수락|거절|종료)"
 _RUN_EO = r"(바꿔|바꾸어|고쳐|넣어|적어|남겨|지워|없애|올려|잡아)"
 _RUN_ASK = r"(해줄래|해줄래요|해주실래요|줄래|줄래요|주실래요)"
 _RUN_HA_TAIL = rf"(해줘|해줘요|해주세요|해주라|해둬|해놔|해|해요|하자|ㄱ|{_RUN_ASK})"
@@ -535,6 +542,12 @@ def says_delete(text: str) -> bool:
 def says_proceed(text: str) -> bool:
     """'진행' 말 : 등록·삭제가 섞인 카드의 확인 말"""
     return bool(_PROCEED_WORD.search(_compact_reply(text)))
+
+
+def says_card_verb(text: str) -> str | None:
+    """도구별 동사 확인 말("수락해 줘"·"응 구매해")이면 그 동사, 아니면 None"""
+    match = _CARD_VERB_SAID.match(_compact_reply(text))
+    return match.group("verb") if match else None
 
 
 def action_reply_kind(text: str) -> str | None:
@@ -883,7 +896,7 @@ AGENT_ALREADY_DONE = (
 AGENT_STOPPED = "남은 일은 이어서 하지 않았어요."
 
 # 2026-11-27 frontend-dc ② : 바로 실행된 턴의 답에 확인 말 안내("'등록해 줘'라고 말해")가 남음
-_ASKS_CONFIRM = re.compile(r"'(등록|수정|삭제|진행)해\s*줘'\s*라고")
+_ASKS_CONFIRM = re.compile(r"'(등록|수정|삭제|진행|지정|구매|수락|거절|종료)해\s*줘'\s*라고")
 
 
 def asks_confirm(text: str) -> bool:

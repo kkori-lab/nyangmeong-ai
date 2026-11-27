@@ -38,10 +38,13 @@ TEXT_TAGS: dict[str, tuple[str, ...]] = {
         "TARGET_MISSING_MESSAGE",
         "ADD_TARGET_MISSING_MESSAGE",
         "DELETE_TARGET_MISSING_MESSAGE",
+        "VERB_TARGET_MISSING_MESSAGE",
+        "PROCEED_TARGET_MISSING_MESSAGE",
         # LLM에 주는 tool_result 글 : 답변 글에는 안 나와 그 자리에서 태그(tag)
         "ACTION_TARGET_MISSING",
         "ACTION_ADD_TARGET_MISSING",
         "ACTION_DELETE_TARGET_MISSING",
+        "ACTION_VERB_TARGET_MISSING",
     ),
     "read_empty": ("READ_EMPTY_MESSAGE", "READ_EMPTY_CARD_MESSAGE"),
     "missing_fields": (

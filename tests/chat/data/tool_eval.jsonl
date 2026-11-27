@@ -135,3 +135,6 @@
 {"id":"T135","type":"새도구","q":"받은 공동양육 초대 거절해 줘","intent":"초대 거절(초대 먼저) (새 도구, 2026-11-27)","tool":["reject_caregiver_invitation","get_caregiver_invitation"]}
 {"id":"T136","type":"새도구","q":"코코 캐릭터에 밀짚모자 사 줘","intent":"아이템 구매(캐릭터·상점 먼저) (새 도구, 2026-11-27)","tool":["draft_item_purchase","list_pixel_characters","list_shop_items"]}
 {"id":"T137","type":"새도구","q":"코코 캐릭터에 가진 밀짚모자 씌워 줘","intent":"아이템 장착(캐릭터 먼저) (새 도구, 2026-11-27)","tool":["draft_equipped_items","list_pixel_characters","get_pixel_character"]}
+{"id":"T138","type":"새도구","q":"닉네임 콩이맘으로 바꿔 줘","intent":"닉네임 수정 (새 도구 ②, 2026-11-27)","tool":"draft_member_nickname_update"}
+{"id":"T139","type":"새도구","q":"프로필 사진 기본 이미지로 돌려 줘","intent":"프로필 사진 되돌리기 (새 도구 ②, 2026-11-27)","tool":"draft_member_profile_update"}
+{"id":"T140","type":"새도구","q":"해피동물병원 즐겨찾기 해 줘","intent":"장소 즐겨찾기(장소 먼저) (새 도구 ②, 2026-11-27)","tool":["draft_place_bookmark","list_places"]}

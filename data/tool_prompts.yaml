@@ -1252,7 +1252,8 @@ list_place_bookmarks:
 
     쓸 때: 즐겨찾기(저장)한 장소를 묻는 말.
       예) "즐겨찾기한 동물병원 어디 있어?", "저장해 둔 애견카페 보여 줘", "즐겨찾기한 장소 다 보여 줘"
-    쓰지 않을 때: 장소를 새로 찾는 말은 list_places 또는 navigate.
+    쓰지 않을 때: 장소를 새로 찾는 말은 list_places 또는 navigate. 즐겨찾기에 더하는 말은 draft_place_bookmark,
+      빼는 말은 delete_place_bookmark.
     인자: plc_clsf_cd는 말한 장소 분류 하나. 분류를 말하지 않으면 비운다(전체 분류).
     말하는 법: 받은 장소의 이름과 주소만 쓴다.
   params:
@@ -1273,7 +1274,7 @@ list_places:
       - "근처·가까운·여기·내 주변"처럼 내 위치 기준으로 찾는 말은 navigate로 플레이스 화면을 안내한다
         (내 위치를 모른다).
       - 지역도 상호명도 없이 분류만 말한 말("동물병원 찾아 줘")은 navigate로 플레이스 화면을 안내한다.
-      - 즐겨찾기한 장소는 list_place_bookmarks.
+      - 즐겨찾기한 장소는 list_place_bookmarks. 즐겨찾기해 달라는 말은 draft_place_bookmark.
     인자: plc_clsf_cd는 말한 장소 분류 하나. keyword에는 말한 지역·상호명만 넣는다(분류 이름은 넣지 않는다).
     말하는 법: 받은 장소의 이름·주소·전화번호만 쓴다. 좌표·거리·링크는 말하지 않는다.
       영업시간·평점·가격처럼 받지 않은 것은 지어내지 않는다. 결과가 없으면 플레이스 화면에서 찾아보라고 한다.
@@ -1736,7 +1737,7 @@ delete_place_bookmark:
 
     쓸 때: 즐겨찾기한 장소를 빼 달라는 말.
       예) "메이 동물병원 즐겨찾기 해제해 줘", "그 카페 즐겨찾기에서 지워 줘"
-    쓰지 않을 때: 즐겨찾기를 묻기만 하는 말은 list_place_bookmarks.
+    쓰지 않을 때: 즐겨찾기를 묻기만 하는 말은 list_place_bookmarks. 즐겨찾기에 더하는 말은 draft_place_bookmark.
     인자: plc_bkmk_sn은 이 턴에 받은 list_place_bookmarks 결과의 plcBkmkSn만 쓴다. 결과가 없으면
       list_place_bookmarks를 먼저 부른다. 어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다).
       반려동물은 고르지 않는다(서버가 정한다).
@@ -1745,6 +1746,60 @@ delete_place_bookmark:
     plc_bkmk_sn:
       java: plcBkmkSn
       description: 지울 즐겨찾기 장소 번호. 이 턴 list_place_bookmarks 결과의 plcBkmkSn만, 모르면 비운다
+
+draft_place_bookmark:
+  label: 장소 즐겨찾기
+  description: |
+    찾은 장소 하나를 내 장소 즐겨찾기에 더하는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 장소를 즐겨찾기(저장)해 달라는 말.
+      예) "해피동물병원 즐겨찾기 해 줘", "전주 메이 애견카페 즐겨찾기에 넣어 줘"
+    쓰지 않을 때: 즐겨찾기를 빼는 말은 delete_place_bookmark. 즐겨찾기한 장소를 묻는 말은
+      list_place_bookmarks. 장소를 찾기만 하는 말은 list_places.
+    인자: plc_sn은 이 턴에 받은 list_places 결과의 plcSn만 쓴다. 결과가 없으면 list_places를 먼저 부른다.
+      어느 것인지 하나로 정할 수 없으면 비운다(지어내지 않는다). 반려동물은 고르지 않는다.
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    plc_sn:
+      java: plcSn
+      description: 즐겨찾기할 장소 번호. 이 턴 list_places 결과의 plcSn만, 모르면 비운다
+
+draft_member_nickname_update:
+  label: 닉네임 수정
+  description: |
+    내 닉네임을 바꾸는 확인 카드를 대화창에 띄운다.
+    회원이 대화로 확인 말을 하기 전에는 아무것도 바꾸지 않는다.
+
+    쓸 때: 내 닉네임(앱에서 보이는 이름)을 바꿔 달라는 말.
+      예) "닉네임 콩이맘으로 바꿔 줘", "내 별명을 초코아빠로 해 줘"
+    쓰지 않을 때: 반려동물 이름을 바꾸는 말은 draft_pet_update. 프로필 사진은 draft_member_profile_update.
+      휴대전화번호·비밀번호·이메일 변경은 도구가 없으니 navigate로 마이페이지를 안내한다.
+    인자: mbr_ncnm은 회원이 말한 닉네임 그대로(한글·영문·숫자, 10자까지). 말하지 않았으면 비운다(지어내지 않는다).
+      반려동물은 고르지 않는다.
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    mbr_ncnm:
+      java: mbrNcnm
+      description: 새 닉네임(말한 그대로)
+
+draft_member_profile_update:
+  label: 프로필 사진 수정
+  description: |
+    내 프로필 사진을 바꾸거나 기본 이미지로 되돌리는 확인 카드를 대화창에 띄운다.
+    새 사진은 회원이 카드에서 올린다. 회원이 대화로 확인 말을 하기 전에는 아무것도 바꾸지 않는다.
+
+    쓸 때: 내 프로필 사진을 바꾸거나 지워(기본 이미지로) 달라는 말.
+      예) "프로필 사진 바꿔 줘", "프로필 사진 기본 이미지로 돌려 줘", "내 프로필 사진 지워 줘"
+    쓰지 않을 때: 닉네임은 draft_member_nickname_update. 반려동물 사진·캐릭터는 이 도구가 아니다.
+      휴대전화번호 변경은 도구가 없으니 navigate로 마이페이지를 안내한다.
+    인자: profile_photo_reset은 기본 이미지로 되돌리거나 지워 달라고 했을 때만 true, 새 사진으로 바꾸는 말이면 비운다.
+      사진은 다루지 않는다(카드에서 올린다). 반려동물은 고르지 않는다.
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    profile_photo_reset:
+      java: profilePhotoReset
+      description: 기본 이미지로 되돌리기. 되돌리거나 지워 달라고 했을 때만 true
 
 # 2026-11-27 백엔드 새 도구 41개 (READ 25·CARD 16, SCR-AIM-004·011·012 공통)
 # 번호 목록 칸(java가 숫자 배열 칸 itemSns·hldItemSns·petSns) : 번호마다 이 턴 READ 결과 값만(catalog._clean_ids)
@@ -2327,6 +2382,7 @@ draft_repeat_prevention:
 
 end_observation_item:
   label: 관찰 종료
+  verb: 종료
   target: 관찰 항목
   hooks: [pet]
   description: |
@@ -2408,6 +2464,7 @@ draft_pet:
 
 set_representative_pet:
   label: 대표 반려동물 지정
+  verb: 지정
   target: 반려동물
   hooks: [pet]
   description: |
@@ -2443,6 +2500,7 @@ draft_caregiver_invitation:
 
 cancel_caregiver_invitation:
   label: 공동양육 초대 취소
+  verb: 진행
   target: 보낸 초대장
   target_fields: [invtnTrgtEmlMask]
   description: |
@@ -2463,6 +2521,7 @@ cancel_caregiver_invitation:
 
 accept_caregiver_invitation:
   label: 공동양육 초대 수락
+  verb: 수락
   target: 받은 초대장
   description: |
     받은 공동양육 초대를 수락하는 확인 카드를 대화창에 띄운다. 고른 반려동물만 함께 돌보고 나머지는 거절된다.
@@ -2485,6 +2544,7 @@ accept_caregiver_invitation:
 
 reject_caregiver_invitation:
   label: 공동양육 초대 거절
+  verb: 거절
   target: 받은 초대장
   description: |
     받은 공동양육 초대를 거절하는 확인 카드를 대화창에 띄운다.
@@ -2503,6 +2563,7 @@ reject_caregiver_invitation:
 
 draft_item_purchase:
   label: 아이템 구매
+  verb: 구매
   description: |
     픽셀 캐릭터 상점 아이템을 포인트로 사는 확인 카드를 대화창에 띄운다. 포인트가 빠진다.
     회원이 대화로 확인 말을 하기 전에는 아무것도 사지 않는다.
