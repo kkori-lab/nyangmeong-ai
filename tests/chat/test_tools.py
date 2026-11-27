@@ -68,6 +68,8 @@ def test_도구는_builtin_등록_READ이고_설명과_인자_스키마를_모�
             "draft_schedule",
             "draft_care_item",
             "decline",
+            # 영수증 저장 카드 (SCR-AIM-013 receipt-card, 2026-11-27)
+            "draft_receipt_save",
         }
         | {
             "get_health_indicators",

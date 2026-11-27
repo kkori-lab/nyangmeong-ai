@@ -59,6 +59,8 @@ CAREGIVER_CARDS = {
 }
 # 2단계 쓰기 확인 카드(ACTION)
 ACTION = {
+    # 영수증 저장 카드 (SCR-AIM-013 receipt-card, 2026-11-27)
+    "draft_receipt_save",
     "draft_care_completion",
     "draft_daily_health_record",
     "draft_expense_limit",
@@ -134,7 +136,7 @@ READ = {
     *NEW_READ,
 }
 # 일부러 싣지 않는 Java 도구(tool_prompts.yaml skip)
-SKIP = {"draft_receipt_save", "list_faqs"}
+SKIP = {"list_faqs"}
 # 스냅샷(코드 값 없음)으로도 싣는 READ : 코드 칸 없음
 READ_WITHOUT_CODES = {
     "get_checkup",

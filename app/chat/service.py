@@ -7,7 +7,7 @@ import time
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -35,6 +35,7 @@ from app.chat.repository import (
     AiSettings,
     ConversationRepository,
     PetInfo,
+    ReceiptSaveChecker,
     RegisterContextRepository,
     RouteRepository,
     ToolReader,
@@ -70,6 +71,11 @@ from app.chat.schemas import (
     LesionKind,
     LesionResult,
     PetChoice,
+    ReceiptCardRequest,
+    ReceiptCardResult,
+    ReceiptNoCardReason,
+    ReceiptOcr,
+    ReceiptOcrDrug,
     ReceiptResult,
     ReceiptResultRequest,
     RegisterCard,
@@ -1856,7 +1862,9 @@ async def _run_turn(
             if reader is not None:
                 cards = [await merge_pet_lists(card, text, reader) for card in cards]
             runs = (
-                not turn.priors() and _runs(turn, cards, agent_key) and _agent_allows(turn, cards)
+                _fills_only_blanks(turn.priors(), cards)
+                and _runs(turn, cards, agent_key)
+                and _agent_allows(turn, cards)
             )
             if runs and _repeated(trace, cards):
                 # frontend-dc ③ : 이력에 같은 결과 글이 있으면 바로 실행하지 않고 확인 카드로
@@ -2005,7 +2013,7 @@ async def _search_answer(
     execute = (
         complete
         and action is not None
-        and not turn.priors()
+        and _fills_only_blanks(turn.priors(), [action])
         and _runs(turn, [action], agent_key)
         and _agent_allows(turn, [action])
         and not _repeated(trace, [action])
@@ -2066,6 +2074,35 @@ def _runs(turn: Turn, cards: Sequence[ActionCard], key: str) -> bool:
     if not key or not cards or not rules.agent_command(text):
         return False
     return not _missing_lines(list(cards)) and _delete_confirmed(cards, text)
+
+
+def _fills_only_blanks(priors: Sequence[ActionDraft], cards: Sequence[ActionCard]) -> bool:
+    """돌려받은 카드가 있을 때 바로 실행해도 되는지 (2026-11-27 사람 결정 A)
+    - 돌려받은 카드가 없으면 참(첫 턴 동사형 명령 그대로)
+    - 같은 도구 카드가 같은 수이고 돌려받은 칸 값을 하나도 바꾸지 않고 빈 칸만 채웠으면 참
+      ("일반진료로 저장해 줘"). 있던 값을 바꾸는 말("4.5로 바꿔 줘")은 지금처럼 확인을 기다림"""
+    if not priors:
+        return True
+    if len(priors) != len(cards) or [p.tool for p in priors] != [c.tool for c in cards]:
+        return False
+    return all(_kept(p.values, c.values) for p, c in zip(priors, cards, strict=True))
+
+
+def _kept(old: object, new: object) -> bool:
+    # old의 빈 값이 아닌 칸이 new에 같은 값으로 남아 있는지(배열은 줄 수가 같고 줄마다)
+    if isinstance(old, dict):
+        return isinstance(new, dict) and all(
+            key in new and _kept(value, new[key])
+            for key, value in old.items()
+            if value not in (None, "")
+        )
+    if isinstance(old, list):
+        return (
+            isinstance(new, list)
+            and len(old) == len(new)
+            and all(_kept(a, b) for a, b in zip(old, new, strict=True))
+        )
+    return old == new
 
 
 def _agent_allows(turn: Turn, cards: Sequence[ActionCard]) -> bool:
@@ -2564,6 +2601,291 @@ async def save_receipt_result(
         saved.append(await repo.add_message(room_sn, ROLE_USER, request.cnvrs_cn))
     saved.append(await repo.add_message(room_sn, ROLE_AI, receipt_result_message(request)))
     return saved
+
+
+# 대화창 영수증 저장 카드 (SCR-AIM-013, 2026-11-27)
+# React가 /ai/receipts 결과(recptSn·ocr)를 보내면 요약 글 저장 + 영수증 저장 확인 카드(ACTION)
+# 카드 값은 본창 영수증 확인 모달(FN-AIM-009, 프론트 receiptUtils.js)과 같은 규칙
+RECEIPT_TOOL = "draft_receipt_save"
+RECEIPT_ROWS = "pets"
+RECEIPT_CONTENT_MAX = 500
+RECEIPT_HOSPITAL_MAX = 50
+RECEIPT_PLACE_MAX = 80
+RECEIPT_DRUG_NAME_MAX = 40
+# 처방 상태(Java HLTG06, 패턴 HLTC001[01]) : 프론트 checkupTypes.js DOSING·DOSE_ENDED와 같음
+DRUG_DOSING = "HLTC0010"
+DRUG_ENDED = "HLTC0011"
+_PER_DAY = re.compile(r"(\d+)\s*회")
+RECEIPT_ASK = "이렇게 저장할까요?"
+RECEIPT_NEEDS_FORM = "반려동물별로 나눌 줄이 있어 영수증 확인 화면에서 저장해 주세요."
+RECEIPT_NO_TOOL = "영수증 확인 화면에서 저장할 수 있어요."
+RECEIPT_DRUGS_SKIPPED = "처방약 {count}건은 건강 일지에서 직접 입력해 주세요."
+RECEIPT_DUPLICATE = (
+    "{pet}: 가계부에 같은 지출이 있어 가계부 기록은 빼 두었어요. 가계부에도 적으려면 말해 주세요."
+)
+RECEIPT_NEARBY = "{pet}: {day} {hospital} 병원 일정에 연결해요. 연결하지 않으려면 말해 주세요."
+RECEIPT_CHECK_FAILED = "가계부 중복·가까운 일정은 확인하지 못했어요."
+
+
+@dataclass
+class _ReceiptRow:
+    pet: PetInfo
+    contents: list[str]
+    amount: int | None
+    drugs: list[dict]
+
+
+def _compact_name(name: str) -> str:
+    return re.sub(r"\s", "", name)
+
+
+def _join_content(names: Sequence[str]) -> str:
+    # 진료 품목명을 ", "로, 500자를 넘으면 잘라 "…" (receiptUtils joinContent)
+    text = ", ".join(name for name in names if name)
+    if len(text) > RECEIPT_CONTENT_MAX:
+        return text[: RECEIPT_CONTENT_MAX - 1] + "…"
+    return text
+
+
+def split_discount(subtotals: Sequence[int | None], discount: int) -> list[int | None]:
+    """하단 할인을 소계 비율로 나눠 뺀다 : 원 단위 버림, 남는 금액은 마지막 줄
+    소계가 None(인식 못 함)인 줄의 금액은 None (receiptUtils splitDiscount)"""
+    values = [subtotal or 0 for subtotal in subtotals]
+    total = sum(values)
+    discounts = [0] * len(values)
+    if discount > 0 and total > 0 and values:
+        discounts = [discount * value // total for value in values]
+        discounts[-1] += discount - sum(discounts)
+    return [
+        None if subtotal is None else subtotal - cut
+        for subtotal, cut in zip(subtotals, discounts, strict=True)
+    ]
+
+
+def _drug_row(drug: ReceiptOcrDrug, ckup_ymd: date | None, today: date) -> dict | None:
+    # 칸을 다 채울 수 있는 약만 : 시작일 = 검진일, 종료일 = 검진일 + 일수 − 1, 용법의 "N회"
+    name = (drug.mdcn_nm or "").strip()
+    per_day = _PER_DAY.search(drug.mdcn_usage or "")
+    days = drug.mdcn_days
+    if not name or len(name) > RECEIPT_DRUG_NAME_MAX or ckup_ymd is None or not days or days < 1:
+        return None
+    if per_day is None or int(per_day.group(1)) < 1:
+        return None
+    end = ckup_ymd + timedelta(days=days - 1)
+    return {
+        "mdcnNm": name,
+        "mdcnBgngYmd": ckup_ymd.isoformat(),
+        "mdcnEndYmd": end.isoformat(),
+        "dayMdcnNmtm": int(per_day.group(1)),
+        "prscSttsCd": DRUG_ENDED if end < today else DRUG_DOSING,
+    }
+
+
+def receipt_rows(
+    ocr: ReceiptOcr, pets: Sequence[PetInfo], pet_sn: int | None, today: date
+) -> tuple[list[_ReceiptRow], int] | None:
+    """인식 결과 -> 반려동물별 줄과 못 실은 약 수. 줄 배정이 필요하면 None(NEEDS_FORM)
+    - 구역 없는 영수증 : pet_sn 한 줄에 전부, 하단 할인 + 구역 할인을 나눔
+    - 구역 있는 영수증 : 구역 이름과 같은 반려동물(공백 무시), 같은 아이 여러 구역은 한 줄로"""
+    sections = ocr.sections
+    skipped = 0
+    if all(section.section_nm is None for section in sections):
+        pet = next((p for p in pets if p.pet_sn == pet_sn), None)
+        if pet is None:
+            return None
+        amounts = [line.item_amt for section in sections for line in section.items] + [
+            drug.mdcn_amt for section in sections for drug in section.drugs
+        ]
+        subtotal = sum(a or 0 for a in amounts) if amounts else None
+        discount = (ocr.btm_dscnt_amt or 0) + sum(s.dscnt_amt or 0 for s in sections)
+        drugs = [_drug_row(d, ocr.ckup_ymd, today) for s in sections for d in s.drugs]
+        skipped = sum(d is None for d in drugs)
+        names = [line.item_nm or "" for s in sections for line in s.items]
+        row = _ReceiptRow(
+            pet,
+            [_join_content(names)],
+            split_discount([subtotal], discount)[0],
+            [d for d in drugs if d is not None],
+        )
+        return [row], skipped
+    matched: list[PetInfo] = []
+    for section in sections:
+        name = _compact_name(section.section_nm or "")
+        pet = next((p for p in pets if name and _compact_name(p.pet_nm) == name), None)
+        if pet is None:
+            return None
+        matched.append(pet)
+    subtotals = [
+        None if s.sbttl_amt is None else s.sbttl_amt - (s.dscnt_amt or 0) for s in sections
+    ]
+    amounts = split_discount(subtotals, ocr.btm_dscnt_amt or 0)
+    rows: dict[int, _ReceiptRow] = {}
+    for pet, section, amount in zip(matched, sections, amounts, strict=True):
+        drugs = [_drug_row(d, ocr.ckup_ymd, today) for d in section.drugs]
+        skipped += sum(d is None for d in drugs)
+        row = rows.setdefault(pet.pet_sn, _ReceiptRow(pet, [], None, []))
+        row.contents.append(_join_content([line.item_nm or "" for line in section.items]))
+        if amount is not None and amount >= 1:
+            row.amount = (row.amount or 0) + amount
+        row.drugs += [d for d in drugs if d is not None]
+    return list(rows.values()), skipped
+
+
+def _receipt_values(request: ReceiptCardRequest, rows: Sequence[_ReceiptRow]) -> dict:
+    ocr = request.ocr
+    assert ocr is not None
+    values: dict = {"recptSn": request.recpt_sn}
+    hospital = (ocr.hsptl_nm or "").strip()
+    if hospital and len(hospital) <= RECEIPT_HOSPITAL_MAX:
+        values["hsptlNm"] = hospital
+        if len(hospital) <= RECEIPT_PLACE_MAX:
+            values["expndPlcusNm"] = hospital
+    if ocr.ckup_ymd is not None:
+        values["ckupYmd"] = ocr.ckup_ymd.isoformat()
+    lines = []
+    for row in rows:
+        line: dict = {catalog.PET_SN: row.pet.pet_sn}
+        content = _join_content([text.strip() for text in row.contents])
+        if content:
+            line["ckupCn"] = content
+        amount = row.amount if row.amount is not None and row.amount >= 1 else None
+        if amount is not None:
+            line["amt"] = amount
+        line["expenseYn"] = amount is not None
+        if row.drugs:
+            line["drugs"] = row.drugs
+        lines.append(line)
+    values[RECEIPT_ROWS] = lines
+    return values
+
+
+async def _receipt_check(
+    checker: ReceiptSaveChecker, recpt_sn: int, values: dict, rows: Sequence[_ReceiptRow]
+) -> list[str]:
+    """저장 전 확인(Java save-check) : 겹치는 지출 줄은 가계부 기록을 끄고, 가까운 일정은 연결
+    - 실패하면 카드 그대로 두고 안내 한 줄"""
+    lines = values[RECEIPT_ROWS]
+    if "ckupYmd" not in values:
+        return []
+    body = {
+        "ckupYmd": values["ckupYmd"],
+        "pets": [
+            {
+                catalog.PET_SN: line[catalog.PET_SN],
+                "amt": line.get("amt"),
+                "expenseYn": line["expenseYn"],
+            }
+            for line in lines
+        ],
+    }
+    try:
+        data = await checker.check(recpt_sn, body)
+    except (AppError, BackendError) as error:
+        logger.info("영수증 저장 전 확인 실패: %s", type(error).__name__)
+        return [RECEIPT_CHECK_FAILED]
+    data = data if isinstance(data, dict) else {}
+    names = {row.pet.pet_sn: row.pet.pet_nm for row in rows}
+    notes: list[str] = []
+    duplicated = {
+        item.get(catalog.PET_SN)
+        for item in data.get("duplicateExpenses") or []
+        if isinstance(item, dict)
+    }
+    nearby = {
+        item.get(catalog.PET_SN): item
+        for item in data.get("nearbySchedules") or []
+        if isinstance(item, dict) and item.get("schdlSn") is not None
+    }
+    for line in lines:
+        pet_sn = line[catalog.PET_SN]
+        pet = names.get(pet_sn, "")
+        if pet_sn in duplicated and line["expenseYn"]:
+            line["expenseYn"] = False
+            notes.append(RECEIPT_DUPLICATE.format(pet=pet))
+        schedule = nearby.get(pet_sn)
+        if schedule is not None:
+            line["schdlSn"] = schedule["schdlSn"]
+            notes.append(
+                RECEIPT_NEARBY.format(
+                    pet=pet,
+                    day=_schedule_day(schedule.get("schdlDt")),
+                    hospital=schedule.get("hsptlNm") or "",
+                ).replace("  ", " ")
+            )
+    return notes
+
+
+def _schedule_day(value: object) -> str:
+    try:
+        day = datetime.fromisoformat(str(value))
+    except ValueError:
+        return ""
+    return f"{day.month}월 {day.day}일"
+
+
+def _receipt_line(line: dict, names: dict[int, str]) -> str:
+    parts = [names.get(line[catalog.PET_SN], "")]
+    if line.get("amt") is not None:
+        parts.append(f"{line['amt']:,}원")
+    if line.get("drugs"):
+        parts.append(f"약 {len(line['drugs'])}건")
+    return "- " + " · ".join(part for part in parts if part)
+
+
+async def save_receipt_card(
+    repo: ConversationRepository,
+    contexts: RegisterContextRepository,
+    checker: ReceiptSaveChecker,
+    room_sn: int,
+    request: ReceiptCardRequest,
+) -> ReceiptCardResult:
+    """영수증 분석 결과 요약 AI 메시지 + 영수증 저장 확인 카드(카드는 미저장)
+    - 줄 배정이 필요하면(구역 이름 불일치·반려동물 없음) 카드 없이 NEEDS_FORM
+    - 도구 목록에 없으면 NO_TOOL"""
+    ocr = request.ocr
+    summary = receipt_result_message(
+        ReceiptResultRequest(
+            result=request.result,
+            hsptl_nm=ocr.hsptl_nm if ocr else None,
+            ckup_ymd=ocr.ckup_ymd if ocr else None,
+            recpt_amt=ocr.recpt_amt if ocr else None,
+        )
+    )
+    lines = [summary]
+    card: ActionCard | None = None
+    reason: ReceiptNoCardReason | None = None
+    entry = tools.card_entry(RECEIPT_TOOL)
+    if request.result is ReceiptResult.RECOGNIZED and ocr is not None:
+        if entry is None:
+            logger.info("영수증 저장 도구 없음: 카드 없이 안내")
+            lines.append(RECEIPT_NO_TOOL)
+            reason = ReceiptNoCardReason.NO_TOOL
+        else:
+            pets = await contexts.get_pets()
+            built = receipt_rows(ocr, pets, request.pet_sn, rules.today_kst())
+            if built is None:
+                logger.info("영수증 저장 카드 없음: 줄 배정 필요")
+                lines.append(RECEIPT_NEEDS_FORM)
+                reason = ReceiptNoCardReason.NEEDS_FORM
+            else:
+                rows, skipped = built
+                values = _receipt_values(request, rows)
+                assert request.recpt_sn is not None
+                notes = await _receipt_check(checker, request.recpt_sn, values, rows)
+                card = action_card(entry, values, list(pets), [], None, None)
+                names = {pet.pet_sn: pet.pet_nm for pet in pets}
+                lines.append(RECEIPT_ASK)
+                lines += [_receipt_line(line, names) for line in values[RECEIPT_ROWS]]
+                if skipped:
+                    lines.append(RECEIPT_DRUGS_SKIPPED.format(count=skipped))
+                lines += notes
+                lines += _missing_lines([card]) or [ACTION_ASK_CONFIRM]
+                logger.info("영수증 저장 카드: %d줄 약 못 실음 %d", len(rows), skipped)
+    saved: list[ConversationMessage] = []
+    if request.cnvrs_cn is not None:
+        saved.append(await repo.add_message(room_sn, ROLE_USER, request.cnvrs_cn))
+    saved.append(await repo.add_message(room_sn, ROLE_AI, "\n".join(lines)))
+    return ReceiptCardResult(messages=saved, action=card, no_card_reason=reason)
 
 
 def _rejected(entry: "catalog.CatalogEntry", values: dict, card: dict) -> list[str]:

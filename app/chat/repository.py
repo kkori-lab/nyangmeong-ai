@@ -224,6 +224,40 @@ def get_tool_reader(
     return JavaToolReader(client, settings, request.headers.get("cookie"))
 
 
+class ReceiptSaveChecker(Protocol):
+    # 영수증 저장 전 확인(가계부 중복·가까운 예정 일정) : Java 공개 API POST, data 그대로
+    async def check(self, recpt_sn: int, body: dict) -> object: ...
+
+
+RECEIPT_SAVE_CHECK_PATH = "/api/receipts/{recptSn}/save-check"
+
+
+class JavaReceiptSaveChecker:
+    """[영수증 저장 전 확인] 저장은 하지 않는 POST
+    - 회원 판정·소유 검사는 Java : 브라우저 Cookie 전달"""
+
+    def __init__(self, client: httpx2.AsyncClient, settings: Settings, cookie: str | None) -> None:
+        self._client = client
+        self._settings = settings
+        self._headers = {REQUESTED_WITH_HEADER: REQUESTED_WITH}
+        if cookie:
+            self._headers["Cookie"] = cookie
+
+    async def check(self, recpt_sn: int, body: dict) -> object:
+        path = RECEIPT_SAVE_CHECK_PATH.format(recptSn=recpt_sn)
+        return await call_backend(
+            self._client, self._settings, "POST", path, json=body, headers=self._headers
+        )
+
+
+def get_receipt_save_checker(
+    request: Request,
+    client: Annotated[httpx2.AsyncClient, Depends(get_backend_client)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ReceiptSaveChecker:
+    return JavaReceiptSaveChecker(client, settings, request.headers.get("cookie"))
+
+
 class RouteRepository(Protocol):
     # FN-AIM-004-09 : 관리자가 고치는 라우팅 매핑표(SCR-ADM-080)
     async def get_routes(self) -> list[RouteItem]: ...

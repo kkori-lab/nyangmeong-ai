@@ -931,6 +931,14 @@
 - 결과 (2026-11-27): 코드 결함 아님. 사람이 다른 서버를 띄운 프론트를 보고 있었음(사람 확인). 코드 바꿈 없음
 - 연결 남음: 없음
 
+## SCR-AIM-013 대화창 · 영수증 저장 카드 receipt-card (추가 요청) — 끝
+- 기능: 대화창 영수증 분석(`image-intent` `MEDICAL_RECEIPT` → `POST /ai/receipts`)이 끝나면 인식 결과로 영수증 저장 확인 카드(ACTION, `draft_receipt_save` = Java `POST /api/receipts/{recptSn}/save`)를 준다. checkup-card·lesion-card와 같은 꼴. 본창 모달로 가는 [확인 후 저장]은 카드를 줄 수 없을 때만
+- 요청: 2026-11-27 사람(`draft_receipt_save` 싣기 ① 사진 올린 그 턴에 카드)
+- 기다리는 것: 없음 (`save-check`·`save`는 develop에 있음). 프론트 카드는 LJS 프론트, 기능명세서 FN-AIM-013-05·06 수정은 모아서
+- 완료 조건: `/start` 기획의 완료 조건을 따른다.
+- 결과 (2026-11-27): 검증 통과(루프 clear 뒤 1회차, 앞 루프 1회차 실패: 빈 칸 채우기 + "저장해 줘" 한 번에 실행 안 됨·`verb` 빠짐), 사람 확인. 기획에 더한 것: 테스트 보조(`fakes.py` 배열 코드 값, `test_action_array.py`·`test_tools.py`·`test_card_verb.py` 기대값), `turnlog.py` `QUIET`, 돌려받은 카드의 빈 칸만 채운 실행 명령은 바로 실행(모든 카드, 있던 값을 바꾸면 확인 대기, 사람 결정 A), `rules.py` `CARD_VERBS`에 저장
+- 연결 남음: FN-AIM-013-05·06 (receipt-card 프론트 카드·`NEEDS_FORM` 모달, LJS 프론트)
+
 ## SCR-AIM-004 대화창 · 정규식 지름길 줄이기 ① 끄기 스위치·측정 (SCR-AIM-012 공통, 추가 요청) — 대기
 - 기능: 의도를 고르는 지름길(키워드 힌트·이어 고르기 정규식·키워드 바로가기·안내서 바로가기)을 평가 스크립트에서 하나씩 끄고 정답률·턴 시간을 잼. 앱 코드 바꿈 없음. 기능 ID 추가 없음
 - 요청: 2026-11-26 character 세션 의견, 사람 결정(하나 끌 때마다 tool_eval로 비교해 사람이 정함)

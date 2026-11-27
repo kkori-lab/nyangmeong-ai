@@ -23,11 +23,13 @@ from app.chat.clients import (
 from app.chat.repository import (
     AiSettings,
     ConversationRepository,
+    ReceiptSaveChecker,
     RegisterContextRepository,
     RouteRepository,
     ToolReader,
     get_ai_settings,
     get_conversation_repository,
+    get_receipt_save_checker,
     get_register_context_repository,
     get_route_repository,
     get_tool_reader,
@@ -40,6 +42,7 @@ from app.chat.schemas import (
     ConversationCreateRequest,
     LesionCardRequest,
     MessageSendRequest,
+    ReceiptCardRequest,
     ReceiptResultRequest,
     RegisterResultRequest,
 )
@@ -229,6 +232,19 @@ async def save_receipt_result(
     # FN-AIM-013-02·09 : 영수증 분석 후 함께 보낸 텍스트·결과 요약 저장
     saved = await service.save_receipt_result(repo, room_sn, body)
     return response.success([m.model_dump(by_alias=True) for m in saved], http_code=201)
+
+
+# 영수증 분석 뒤 (SCR-AIM-013, 2026-11-27) : 결과 요약 저장 + 영수증 저장 확인 카드
+@router.post("/{aiCnvrsRoomSn}/receipt-card", dependencies=[Depends(require_member)])
+async def save_receipt_card(
+    body: ReceiptCardRequest,
+    repo: Repo,
+    contexts: Annotated[RegisterContextRepository, Depends(get_register_context_repository)],
+    checker: Annotated[ReceiptSaveChecker, Depends(get_receipt_save_checker)],
+    room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
+) -> JSONResponse:
+    result = await service.save_receipt_card(repo, contexts, checker, room_sn, body)
+    return response.success(result.model_dump(by_alias=True, mode="json"), http_code=201)
 
 
 # 검사결과지 PDF 분석 뒤 (SCR-AIM-013, 2026-11-23) : 결과 요약 저장 + 검사 수치 저장 확인 카드

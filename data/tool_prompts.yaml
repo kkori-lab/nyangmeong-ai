@@ -177,7 +177,7 @@ draft_expense_limit:
 # 배열·파일 칸 확인 카드 (SCR-AIM-012 2단계 ③)
 # - java "lines[].expndAmt" : 배열 lines의 첫 줄 항목 칸. fixed : Java 칸에 늘 넣는 값(불러올 때 검사)
 # - 파일 칸(사진)은 Python이 채우지 않는다. 회원이 카드에서 첨부한다
-# - draft_receipt_save(영수증 저장)는 아직 싣지 않는다 : 저장 전 영수증 번호를 주는 READ가 없음
+# - draft_receipt_save(영수증 저장)는 receipt-card가 만든 카드를 고칠 때만 쓴다(2026-11-27)
 
 draft_expense:
   label: 지출 등록
@@ -1289,7 +1289,32 @@ list_places:
 # 일부러 싣지 않는 Java 도구 (skip: 이유)
 
 draft_receipt_save:
-  skip: 저장 전 영수증 번호를 주는 READ 없음(SCR-AIM-013 ⑤ 팀 결정 대기)
+  label: 영수증 저장
+  verb: 저장
+  description: |
+    대화창 영수증 분석 카드(대화 직전 "영수증 분석 — …" 글)를 고쳐 검진기록·가계부에 저장하는 확인 카드를
+    대화창에 띄운다. 회원이 대화로 확인 말을 하기 전에는 아무것도 저장하지 않는다.
+
+    쓸 때: 영수증 분석 카드를 돌려받았을 때 검진 종류·병원 이름·검진일을 고르거나 고치는 말.
+      예) (영수증 분석 카드 뒤) "일반진료로 저장해 줘", "정기검진이야", "병원 이름은 메이 동물병원이야"
+    쓰지 않을 때: 영수증 분석 카드가 없으면 쓰지 않는다(새 영수증은 사진으로 올린다).
+      영수증 없이 병원비를 적는 말은 draft_expense, 검진기록만 남기는 말은 draft_checkup.
+    인자: recpt_sn은 쓰지 않는다(카드 값을 서버가 그대로 둔다). 말하지 않은 칸은 비운다.
+      반려동물별 금액·약은 카드 값을 서버가 그대로 둔다.
+    말하는 법: 글을 쓰지 않는다. 카드는 서버가 만든다.
+  params:
+    recpt_sn:
+      java: recptSn
+      description: 영수증 번호. 쓰지 않는다(카드 값)
+    hsptl_nm:
+      java: hsptlNm
+      description: 병원 이름
+    ckup_ymd:
+      java: ckupYmd
+      description: 검진일 YYYY-MM-DD
+    ckup_type_cd:
+      java: pets[].ckupTypeCd
+      description: 검진 종류
 
 list_faqs:
   skip: 사용법 문항이 search_guide와 겹침(운영 FAQ 문항이 정해지면 다시)
