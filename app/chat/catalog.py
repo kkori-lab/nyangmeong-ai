@@ -95,6 +95,8 @@ class CatalogItemParam(BaseModel):
     # 배열 칸 : 항목 칸 규칙(중첩 배열 포함)·최소 항목 수
     items: dict[str, "CatalogItemParam"] | None = None
     min_items: int | None = Field(None, alias="minItems")
+    # 숫자 배열 칸(List<Long>, 2026-11-27) : 항목 타입. items 대신 이것만 온다
+    item_type: str | None = Field(None, alias="itemType")
     # "uuid" : React가 [확인] 때 카드 하나에 한 번 만든다(Python은 채우지 않고 필수로 세지 않음)
     generated: str | None = None
 
@@ -363,7 +365,7 @@ def _problem(tool: CatalogTool, prompt: ToolPrompt, source: str) -> str | None:
     for name, param in prompt.params.items():
         if param.java is not None:
             java = _java_param(tool.params, param.java)
-            if java is None or java.type in (ARRAY, FILE):
+            if java is None or java.type == FILE or (java.type == ARRAY and not is_id_list(java)):
                 return f"Java에 없는 칸 {name}->{param.java}"
             made.add(param.java.partition(ITEM_MARK)[0])
         if param.hook is not None:
@@ -393,7 +395,7 @@ def _entry(tool: CatalogTool, prompt: ToolPrompt) -> CatalogEntry:
     bounds: dict[str, tuple[int | None, int | None]] = {}
     for name, param in prompt.params.items():
         java = _java_param(tool.params, param.java) if param.java else None
-        py_type = _PY_TYPES[java.type] if java else str
+        py_type = _py_type(java) if java else str
         # 4-2절 4번 : 필수 판단은 Python이 Java 규칙으로, LLM에는 required를 주지 않는다
         fields[name] = (py_type | None, Field(None, description=param.description))
         if param.java:
@@ -441,7 +443,13 @@ def _entry(tool: CatalogTool, prompt: ToolPrompt) -> CatalogEntry:
 
 def drop_result_fields(entry: CatalogEntry, data: object) -> object:
     # READ 결과에서 답에 안 쓰는 큰 칸을 빼고 LLM에 넘김. 없는 칸은 무시
-    if not entry.result_drop or not isinstance(data, dict):
+    # 목록(data가 행 배열)이면 행마다 뺌(2026-11-27 케어 항목 14개가 6000자에서 잘림)
+    # 번호 검사(seen)·대상 행(rows)은 빼기 전 결과로 만든다
+    if not entry.result_drop:
+        return data
+    if isinstance(data, list):
+        return [drop_result_fields(entry, row) if isinstance(row, dict) else row for row in data]
+    if not isinstance(data, dict):
         return data
     return {key: value for key, value in data.items() if key not in entry.result_drop}
 
@@ -597,6 +605,20 @@ def _compose_datetime(entry: CatalogEntry, ymd, tm, now: datetime | None) -> dic
     return {target: datetime.combine(day, clock).isoformat()}
 
 
+def is_id_list(param: CatalogItemParam) -> bool:
+    # 숫자 배열 칸(itemSns·petSns 등) : 번호 목록. LLM 칸 하나로 잇고 번호마다 이 턴 READ 값만
+    return param.type == ARRAY and param.item_type in ("long", "int") and not param.items
+
+
+def _py_type(param: CatalogItemParam) -> type:
+    return list[int] if is_id_list(param) else _PY_TYPES[param.type]
+
+
+def id_list_key(name: str) -> str:
+    # 번호 목록 칸 이름 -> READ 결과의 번호 칸 이름(itemSns -> itemSn, hldItemSns -> hldItemSn)
+    return name[:-1] if name.endswith("s") else name
+
+
 def is_id(name: str) -> bool:
     # 번호 칸(…Sn). petSn은 서버 규칙(pet hook·문장 속 이름)으로 정한다
     return name.endswith("Sn") and name != PET_SN
@@ -607,7 +629,9 @@ def seen_ids(data: object, seen: dict[str, set[int]] | None = None) -> dict[str,
     seen = {} if seen is None else seen
     if isinstance(data, dict):
         for key, value in data.items():
-            if is_id(key) and isinstance(value, int) and not isinstance(value, bool):
+            # petSn도 모음 : 번호 목록 칸 petSns(초대 수락의 초대 반려동물)가 READ 값만 쓰려고
+            numbered = is_id(key) or key == PET_SN
+            if numbered and isinstance(value, int) and not isinstance(value, bool):
                 seen.setdefault(key, set()).add(value)
             else:
                 seen_ids(value, seen)
@@ -700,7 +724,13 @@ def _missing_in(params: dict, values: dict, prefix: str, files: bool) -> list[st
         value = values.get(name)
         if param.generated or (param.type == FILE and not files):
             continue
-        if param.type == ARRAY:
+        if is_id_list(param):
+            # 번호 목록 : 필수면 목록이 있어야 하고(빈 목록 = 다 벗기기 등), 최소 개수는 minItems만
+            ids = value if isinstance(value, list) else None
+            empty = ids is None and param.required
+            if empty or (ids is not None and len(ids) < (param.min_items or 0)):
+                found.append(prefix + name)
+        elif param.type == ARRAY:
             rows = value if isinstance(value, list) else []
             least = max(param.min_items or 0, 1 if param.required else 0)
             if len(rows) < least:
@@ -739,6 +769,8 @@ def _valid(param: CatalogItemParam, value: object) -> bool:
     if value is None or kind == FILE:
         return False
     if kind == ARRAY:
+        if is_id_list(param):
+            return _clean_ids(param, value, "") == value
         return _clean_array(param, value) == value
     if kind in ("date", "datetime", "time"):
         parse = {"date": date, "datetime": datetime, "time": time}[kind].fromisoformat
@@ -795,10 +827,31 @@ def _clean_array(
     return cleaned
 
 
+def _clean_ids(
+    param: CatalogItemParam, value: object, name: str, seen: dict[str, set[int]] | None = None
+) -> list[int] | None:
+    """번호 목록 칸 : 숫자 목록이고 seen을 주면 번호마다 같은 턴 READ 결과 값. 하나라도 틀리면 None
+    - 틀린 번호만 빼면 회원이 말한 것보다 적게 실행되므로 칸 전체를 비움(되물음)"""
+    if not isinstance(value, list) or not value and (param.min_items or 0) > 0:
+        return None
+    if any(isinstance(item, bool) or not isinstance(item, int) for item in value):
+        return None
+    if seen is not None:
+        known = seen.get(id_list_key(name), set())
+        if any(item not in known for item in value):
+            return None
+    return list(dict.fromkeys(value))
+
+
 def _usable(
-    param: CatalogParam, value: object, seen: dict[str, set[int]] | None = None
+    param: CatalogParam,
+    value: object,
+    seen: dict[str, set[int]] | None = None,
+    name: str = "",
 ) -> object | None:
     # 카드 input에 쓸 값(배열은 틀린 항목 칸만 뺌). 쓸 수 없으면 None
+    if is_id_list(param):
+        return _clean_ids(param, value, name, seen)
     if param.type == ARRAY:
         return _clean_array(param, value, seen)
     return _rounded(param, value) if _valid(param, value) else None
@@ -848,11 +901,11 @@ def card_input(
     }
     seen = seen or {}
     new = {
-        name: _usable(params[name], value, seen)
+        name: _usable(params[name], value, seen, name)
         for name, value in to_java(entry, usable, now).items()
         if name in params
         and name != PET_SN
-        and _usable(params[name], value, seen) is not None
+        and _usable(params[name], value, seen, name) is not None
         and (not is_id(name) or value in seen.get(name, set()))
     }
     merged = base | new

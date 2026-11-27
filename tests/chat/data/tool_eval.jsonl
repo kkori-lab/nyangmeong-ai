@@ -94,3 +94,44 @@
 {"id":"T94","type":"조합","q":"이번 달 지출이 지난달보다 늘었어?","intent":"기간 비교 (PTC 시험, 2026-11-26)","tool":["get_expense_total","list_expenses","get_expense_statistics","list_expense_months"]}
 {"id":"T95","type":"조합","q":"뭉치랑 코코 중에 최근 3달 체중이 더 많이 는 애는 누구야?","intent":"두 마리 기간 비교 계산 (PTC 시험, 2026-11-26)","tool":["get_health_indicators","list_daily_health_records"]}
 {"id":"T96","type":"조합","history":["이번 달 지출 얼마야?"],"q":"코코 몸무게 최신으로 알려줘","intent":"답 없는 질문이 이력에 둘 : 지금 질문만 (disable_parallel_tool_use 없음, 2026-11-26)","tool":["get_health_indicators","list_daily_health_records"]}
+{"id":"T97","type":"새도구","q":"코코 오늘 케어 몇 개 했어?","intent":"오늘 케어 미션 진행률 (새 도구, 2026-11-27)","tool":"get_care_mission_progress"}
+{"id":"T98","type":"새도구","q":"코코 접종 증명서 올려 둔 거 있어?","intent":"검진 첨부 파일 목록 (새 도구, 2026-11-27)","tool":"list_checkup_attachments"}
+{"id":"T99","type":"새도구","q":"건강 대시보드에 무슨 위젯 켜 놨지?","intent":"건강 대시보드 위젯 설정 (새 도구, 2026-11-27)","tool":"get_health_dashboard_widgets"}
+{"id":"T100","type":"새도구","q":"나 처음 안내 튜토리얼 다 봤어?","intent":"튜토리얼 진행 상태 (새 도구, 2026-11-27)","tool":"get_service_tutorial"}
+{"id":"T101","type":"새도구","q":"이용약관 뭐뭐 있어?","intent":"약관 목록 (새 도구, 2026-11-27)","tool":"list_terms"}
+{"id":"T102","type":"새도구","q":"개인정보 처리방침에 몇 년 보관한다고 돼 있어?","intent":"약관 본문(목록 먼저 가능) (새 도구, 2026-11-27)","tool":["get_terms","list_terms"]}
+{"id":"T103","type":"새도구","q":"읽지 않은 알림 몇 개야?","intent":"안 읽은 알림 수 (새 도구, 2026-11-27)","tool":"get_unread_notification_count"}
+{"id":"T104","type":"새도구","q":"최근에 온 알림 뭐 있어?","intent":"알림 목록 (새 도구, 2026-11-27)","tool":"list_notifications"}
+{"id":"T105","type":"새도구","q":"일정 알림 켜져 있어?","intent":"알림 받기 설정 (새 도구, 2026-11-27)","tool":"get_notification_settings"}
+{"id":"T106","type":"새도구","q":"방금 온 일정 알림 읽음으로 해 줘","intent":"알림 하나 읽음 카드(목록 먼저) (새 도구, 2026-11-27)","tool":["mark_notification_read","list_notifications"]}
+{"id":"T107","type":"새도구","q":"알림 전부 읽음 처리해 줘","intent":"알림 모두 읽음 카드 (새 도구, 2026-11-27)","tool":"mark_all_notifications_read"}
+{"id":"T108","type":"새도구","q":"안 읽은 채팅 있어?","intent":"채팅 안 읽은 수 (새 도구, 2026-11-27)","tool":"get_chat_unread_count"}
+{"id":"T109","type":"새도구","q":"오늘 커뮤니티에서 무슨 얘기가 많았어?","intent":"오늘의 커뮤니티 해설 (새 도구, 2026-11-27)","tool":"get_today_story"}
+{"id":"T110","type":"새도구","q":"요즘 펫뉴스 중에 사료 리콜 뉴스 내용 자세히 알려 줘","intent":"뉴스 상세(목록 먼저) (새 도구, 2026-11-27)","tool":["get_news","list_news"]}
+{"id":"T111","type":"새도구","q":"내가 올린 실종 신고 어디서 잃어버린 걸로 돼 있지?","intent":"실종 신고 상세(목록 먼저) (새 도구, 2026-11-27)","tool":["get_lost_report","list_lost_reports"]}
+{"id":"T112","type":"새도구","q":"내가 올린 펫돌봄 모집 금액 얼마로 했더라?","intent":"모집 상세(목록 먼저) (새 도구, 2026-11-27)","tool":["get_care_recruitment","list_care_recruitments"]}
+{"id":"T113","type":"새도구","q":"펫돌봄 매칭된 거 돌봄비 받았다고 표시됐어?","intent":"매칭 진행(번호를 얻으려 모집 먼저 가능) (새 도구, 2026-11-27)","tool":["get_care_match","list_care_recruitments","get_care_recruitment"]}
+{"id":"T114","type":"새도구","q":"올해 최저시급 얼마야? 돌봄 모집 금액 정하려고","intent":"최저임금 (새 도구, 2026-11-27)","tool":"get_minimum_wage"}
+{"id":"T115","type":"새도구","q":"고양이 품종 목록에 랙돌 있어?","intent":"품종 목록 (새 도구, 2026-11-27)","tool":"list_breeds"}
+{"id":"T116","type":"새도구","q":"반려동물 몇 마리까지 등록할 수 있어?","intent":"등록 한도 (새 도구, 2026-11-27)","tool":"get_pet_limit"}
+{"id":"T117","type":"새도구","q":"메인 화면 바로가기에 뭐 넣어 놨지?","intent":"메인 바로가기 목록 (새 도구, 2026-11-27)","tool":"list_main_shortcuts"}
+{"id":"T118","type":"새도구","q":"포인트 내역 몇 월부터 있어?","intent":"포인트 내역이 있는 달 (새 도구, 2026-11-27)","tool":"list_point_ledger_months"}
+{"id":"T119","type":"새도구","q":"받은 공동양육 초대 누가 보낸 거야?","intent":"받은 초대 상세 (새 도구, 2026-11-27)","tool":"get_caregiver_invitation"}
+{"id":"T120","type":"새도구","q":"내가 남긴 1:1 문의 답변 왔어?","intent":"문의 목록 (새 도구, 2026-11-27)","tool":"list_inquiries"}
+{"id":"T121","type":"새도구","q":"지난번 결제 문의 답변 뭐라고 왔어?","intent":"문의 상세(목록 먼저) (새 도구, 2026-11-27)","tool":["get_inquiry","list_inquiries"]}
+{"id":"T122","type":"새도구","q":"공지사항 최근 거 알려 줘","intent":"공지 목록 (새 도구, 2026-11-27)","tool":"list_notices"}
+{"id":"T123","type":"새도구","q":"점검 공지 몇 시까지래?","intent":"공지 본문(목록 먼저) (새 도구, 2026-11-27)","tool":["get_notice","list_notices"]}
+{"id":"T124","type":"새도구","q":"코코 심장약 오늘 마지막으로 체크한 거 취소해 줘","intent":"오늘 마지막 완료 되돌리기(케어 항목 먼저) (새 도구, 2026-11-27)","tool":["cancel_last_dose","list_care_items"]}
+{"id":"T125","type":"새도구","q":"코코 어제 행복동물병원에서 예방접종했어 기록해 줘","intent":"검진기록 등록 카드 (새 도구, 2026-11-27)","tool":"draft_checkup"}
+{"id":"T126","type":"새도구","q":"코코 어제 검진에서 엑스레이 정상이래 기록해 줘","intent":"기타검사 등록(검진 먼저) (새 도구, 2026-11-27)","tool":["draft_etc_inspection","list_checkups"]}
+{"id":"T127","type":"새도구","q":"코코 어제 검진에서 항생제 일주일치 받았어 하루 두 번 기록해 줘","intent":"처방약 등록(검진 먼저) (새 도구, 2026-11-27)","tool":["draft_prescription","list_checkups"]}
+{"id":"T128","type":"새도구","q":"코코 오늘 병원에서 심장사상충 예방했어 한 달마다로 기록해 줘","intent":"반복 예방 등록(검진 먼저) (새 도구, 2026-11-27)","tool":["draft_repeat_prevention","list_checkups"]}
+{"id":"T129","type":"새도구","q":"코코 등에 혹 다 나았어 관찰 종료해 줘","intent":"관찰 종료(관찰 항목 먼저) (새 도구, 2026-11-27)","tool":["end_observation_item","list_observation_items"]}
+{"id":"T130","type":"새도구","q":"새로 온 고양이 나비 등록해 줘, 코리안숏헤어 암컷 2024년 3월생 3.5kg","intent":"반려동물 등록(품종 먼저 가능) (새 도구, 2026-11-27)","tool":["draft_pet","list_breeds"]}
+{"id":"T131","type":"새도구","q":"뭉치를 대표 반려동물로 해 줘","intent":"대표 반려동물 지정 (새 도구, 2026-11-27)","tool":"set_representative_pet"}
+{"id":"T132","type":"새도구","q":"동생 abc@example.com 으로 코코 공동양육 초대 보내 줘","intent":"초대 보내기(반려동물 목록 먼저) (새 도구, 2026-11-27)","tool":["draft_caregiver_invitation","list_pets"]}
+{"id":"T133","type":"새도구","q":"동생한테 보낸 공동양육 초대 취소해 줘","intent":"보낸 초대 취소(보낸 초대 먼저) (새 도구, 2026-11-27)","tool":["cancel_caregiver_invitation","list_sent_caregiver_invitations"]}
+{"id":"T134","type":"새도구","q":"받은 공동양육 초대 수락해 줘","intent":"초대 수락(초대 먼저) (새 도구, 2026-11-27)","tool":["accept_caregiver_invitation","get_caregiver_invitation"]}
+{"id":"T135","type":"새도구","q":"받은 공동양육 초대 거절해 줘","intent":"초대 거절(초대 먼저) (새 도구, 2026-11-27)","tool":["reject_caregiver_invitation","get_caregiver_invitation"]}
+{"id":"T136","type":"새도구","q":"코코 캐릭터에 밀짚모자 사 줘","intent":"아이템 구매(캐릭터·상점 먼저) (새 도구, 2026-11-27)","tool":["draft_item_purchase","list_pixel_characters","list_shop_items"]}
+{"id":"T137","type":"새도구","q":"코코 캐릭터에 가진 밀짚모자 씌워 줘","intent":"아이템 장착(캐릭터 먼저) (새 도구, 2026-11-27)","tool":["draft_equipped_items","list_pixel_characters","get_pixel_character"]}

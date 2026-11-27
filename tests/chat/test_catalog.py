@@ -15,6 +15,12 @@ from tests.chat.fakes import (
     FakeToolCatalogClient,
     fake_catalog_json,
 )
+from tests.chat.new_tools import (
+    NEW_ACTION,
+    NEW_ACTION_WITHOUT_CODES,
+    NEW_READ,
+    NEW_READ_WITHOUT_CODES,
+)
 from tests.chat.test_messages import MessageJava, events, send
 from tests.chat.test_register import CHOCO, Extractor, use_extractor
 from tests.chat.test_tools import room_of, use_agent
@@ -42,6 +48,14 @@ DELETES = {
     "delete_repeat_prevention",
     "delete_expense",
     "delete_place_bookmark",
+    # 오늘 마지막 완료 되돌리기(2026-11-27 새 도구)
+    "cancel_last_dose",
+}
+CAREGIVER_CARDS = {
+    "draft_caregiver_invitation",
+    "cancel_caregiver_invitation",
+    "accept_caregiver_invitation",
+    "reject_caregiver_invitation",
 }
 # 2단계 쓰기 확인 카드(ACTION)
 ACTION = {
@@ -63,6 +77,7 @@ ACTION = {
     # 수정·삭제 도구(SCR-AIM-012, 2026-11-25) : 수정 6개, 삭제 11개
     *SECOND_UPDATES,
     *DELETES,
+    *NEW_ACTION,
 }
 # 스냅샷(코드 값 없음)으로도 싣는 ACTION : 코드 칸 없음
 ACTION_WITHOUT_CODES = {
@@ -71,6 +86,7 @@ ACTION_WITHOUT_CODES = {
     "draft_etc_inspection_update",
     "draft_inspection_value_update",
     *DELETES,
+    *NEW_ACTION_WITHOUT_CODES,
 }
 READ = {
     "get_checkup",
@@ -115,6 +131,7 @@ READ = {
     "list_place_bookmarks",
     "list_places",
     "list_posts",
+    *NEW_READ,
 }
 # 일부러 싣지 않는 Java 도구(tool_prompts.yaml skip)
 SKIP = {"draft_receipt_save", "list_faqs"}
@@ -144,6 +161,7 @@ READ_WITHOUT_CODES = {
     "get_post",
     "list_comments",
     "list_health_tips",
+    *NEW_READ_WITHOUT_CODES,
 }
 
 
@@ -194,7 +212,6 @@ def test_navigate만_쓰는_API는_스냅샷에_없어야_한다():
     # ③ 설계 2-3절 : 반려동물 등록·삭제·회원정보·공동양육·관리자·인증·내부 API
     # 삭제는 2026-11-25부터 확인 카드(DELETES 11개)만. 반려동물 삭제·지출 전체 삭제는 navigate
     navigate_only = (
-        ("POST", "/api/pets"),
         ("PUT", "/api/members/me"),
         ("PATCH", "/api/members/me"),
         ("DELETE", "/api/pets/{petSn}"),
@@ -205,9 +222,10 @@ def test_navigate만_쓰는_API는_스냅샷에_없어야_한다():
         assert call.method != "DELETE" or tool.name in DELETES
         assert (call.method, call.path) not in navigate_only
         assert not call.path.startswith(("/api/admin", "/api/auth", "/internal"))
-        # 공동양육자·보낸 초대 목록 읽기는 2-1절 READ 후보, 초대·수락·해제(쓰기)만 navigate
-        assert call.method == "GET" or "caregiver" not in call.path
-        assert "chat-rooms" not in call.path
+        # 공동양육 쓰기는 초대 보내기·취소·수락·거절 카드만(2026-11-27 사람 결정), 해제는 navigate
+        assert call.method == "GET" or "caregiver" not in call.path or tool.name in CAREGIVER_CARDS
+        # 채팅은 읽지 않은 수만(2026-11-27)
+        assert "chat-rooms" not in call.path or call.path == "/api/chat-rooms/unread-count"
 
 
 @pytest.mark.parametrize(
