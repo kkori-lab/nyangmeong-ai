@@ -475,6 +475,8 @@ class Judged:
     pet_names: tuple[str, ...] = ()
     # 떠 있는 카드에 LLM이 run_card·drop_card를 고름 : ACTION_CONFIRM·ACTION_CANCEL
     reply: str | None = None
+    # FALLBACK(decline)·ROUTE(navigate) : LLM이 도구 인자로 쓴 안내 글 (2026-11-28)
+    message: str | None = None
 
 
 def _guide_shortcut(chunk_id: str) -> Intent | None:
@@ -739,9 +741,13 @@ def _tool_judged(
         row = tools.route_row(call)
         if row is not None and read is not None and rules.chains_after_move(text):
             return _route_mixed(text, context, agent, decision, row, max_tokens, today, read)
-        return Judged(row.to_intent())
+        return Judged(row.to_intent(), message=call.args.message)
     if call.name == tools.DECLINE:
-        return Judged(Intent(kind=IntentKind.FALLBACK), out_of_scope=not call.args.unclear)
+        return Judged(
+            Intent(kind=IntentKind.FALLBACK),
+            out_of_scope=not call.args.unclear,
+            message=call.args.message,
+        )
     if call.name in tools.CARD_REPLY_TOOLS:
         if not priors:
             # 떠 있는 카드 없이 실행·버리기 : 무엇을 원하는지 모름
@@ -1571,13 +1577,27 @@ def route_message(scr_nm: str) -> str:
     return f"{scr_nm}{particle} 이동할게요"
 
 
+def route_reply(message: str | None, scr_nm: str) -> str:
+    # LLM 이동 안내 글 (2026-11-28) : 화면명이 든 글만(다른 화면을 말하는 글 막기), 아니면 고정 글
+    text = (message or "").strip()
+    return text if text and scr_nm and scr_nm in text else route_message(scr_nm)
+
+
 async def reply_fallback(
-    repo: ConversationRepository, room_sn: int, out_of_scope: bool = False
+    repo: ConversationRepository,
+    room_sn: int,
+    out_of_scope: bool = False,
+    message: str | None = None,
 ) -> ConversationMessage:
     # FN-AIM-005-02·07 : 실패 사유는 묻지 않고, 부적절 입력도 같은 문구. AI 역할 메시지로 저장
     # 서비스 범위 밖 질문만 범위 안내 문구 (2026-10-30)
-    message = OUT_OF_SCOPE_MESSAGE if out_of_scope else FALLBACK_MESSAGE
-    return await repo.add_message(room_sn, ROLE_AI, message)
+    # decline의 LLM 안내 글이 있으면 그 글 (2026-11-28). 고정 글 대조가 안 되니 태그는 여기서
+    text = (message or "").strip()
+    if text:
+        turnlog.tag("out_of_scope" if out_of_scope else "fallback")
+    else:
+        text = OUT_OF_SCOPE_MESSAGE if out_of_scope else FALLBACK_MESSAGE
+    return await repo.add_message(room_sn, ROLE_AI, text)
 
 
 @dataclass(frozen=True)
@@ -1834,7 +1854,9 @@ async def _run_turn(
             # 이어 갈 일 없음(취소만·고칠 수 없는 실패만) : LLM 없이 짧은 글
             logger.info("에이전트 이어 가기 없음: 실행 완료·고칠 칸 없음")
             emit(("intent", Intent(kind=IntentKind.SEARCH)))
-            saved = await _save(repo, turn.room_sn, rules.AGENT_STOPPED, True)
+            today = register.today if register is not None else rules.today_kst()
+            stopped = await _stopped_text(turn, agent, ai, limits, carry, today)
+            saved = await _save(repo, turn.room_sn, stopped, True)
             emit(("done", AnswerDone(message=saved)))
             return
         trace = _trace_of(carry)
@@ -1915,11 +1937,11 @@ async def _run_turn(
             if answer is not None and titles is not None and _is_first_answer(turn):
                 await _retitle(repo, titles, turn, answer)
         elif kind is IntentKind.FALLBACK:
-            fallback = await reply_fallback(repo, turn.room_sn, judged.out_of_scope)
+            fallback = await reply_fallback(repo, turn.room_sn, judged.out_of_scope, judged.message)
             emit(("done", AnswerDone(message=fallback)))
         elif kind is IntentKind.ROUTE:
             # 이동은 React 담당 : 다시 열어도 답이 남게 이동 안내 저장 (2026-10-29 결정)
-            move = route_message(judged.intent.scr_nm or "")
+            move = route_reply(judged.message, judged.intent.scr_nm or "")
             emit(("done", AnswerDone(message=await _save(repo, turn.room_sn, move, True))))
         elif kind is IntentKind.REGISTER and register is not None:
             card = card or await build_card(
@@ -2127,6 +2149,33 @@ class AgentCarry:
     done: list[dict]
     seen: dict[str, set[int]]
     stop: bool
+
+
+async def _stopped_text(
+    turn: Turn,
+    agent: ToolAgent,
+    ai: AiSettings,
+    limits: AnswerLimits,
+    carry: AgentCarry,
+    today: date,
+) -> str:
+    # 이어 갈 일 없음 (2026-11-28) : 진행 기록을 받은 LLM이 짧게 알림
+    # 도구를 고르거나 글이 비거나 실패하면 고정 글. 응답은 지금처럼 delta 없이 done.message
+    context = build_context(
+        turn.messages, turn.question.msg_seq, ai.context_turns, turn.summary, turn.summary_end
+    )
+    notes = f"{carry.notes}\n{rules.AGENT_STOPPED_NOTE}"
+    try:
+        async with asyncio.timeout(limits.total_sec):
+            decision = await agent.resume(context, notes, ai.max_tokens, today)
+            if decision.text is None:
+                logger.info("이어 가기 없음 글: LLM 글 없음, 고정 글")
+                return rules.AGENT_STOPPED
+            text = "".join([chunk async for chunk in decision.text]).strip()
+    except (ClassifyError, AnswerError, TimeoutError) as error:
+        logger.info("이어 가기 없음 글: %s, 고정 글", type(error).__name__)
+        return rules.AGENT_STOPPED
+    return text or rules.AGENT_STOPPED
 
 
 def _trace_of(carry: AgentCarry | None) -> _Trace:
