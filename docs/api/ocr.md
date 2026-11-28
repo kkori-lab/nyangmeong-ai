@@ -20,7 +20,7 @@ React가 부르는 `/ai/**` API다. 공통 규칙은 `docs/api/README.md`에 있
 | --- | --- | --- | --- | --- |
 | file | 파일 | Y | jpg·jpeg·png·webp, 10MB 이하. 확장자와 실제 형식(파일 시그니처)이 같아야 한다. PDF 불가 | AIM-008-05 |
 | petSn | Long | N | 기록이 귀속될 반려동물. 소유 검사는 Java가 원본 저장 때 한다. 건강 일지·AI 대화창 출처는 필수(없으면 400 `INVALID_REQUEST`), 가계부 출처는 생략 가능(반려동물은 확인 모달에서 고른다, 없으면 Java에 보내지 않는다) | AIM-008-03, MYP-031-03·05 |
-| ocrRqstSrcCd | String | Y | 요청 출처(AIMG07). 건강 일지 `AIMC0026`, AI 대화창 `AIMC0031`(2026-10-29 신설, 백엔드 공통코드 변경과 같은 때 병합), 가계부 `AIMC0027`(SCR-MYP-031, 2026-11-03 추가. Java `/internal/ai/receipts`의 허용은 백엔드 PR과 함께, 그 전에는 Java 400이 그대로 전달된다) | AIM-013-04, MYP-031-05 |
+| ocrRqstSrcCd | String | Y | 요청 출처(AIMG07). 건강 일지 `AIMC0026`, AI 대화창 `AIMC0031`(2026-10-29 신설, 백엔드 공통코드 변경과 같은 때 병합), 가계부 `AIMC0027`(SCR-MYP-031, 2026-11-03 추가. AI 대화창의 가계부 영수증(`image-intent` `EXPENSE_RECEIPT`)도 이 출처로 부르고 결과는 `chat.md` `expense-card`로 보낸다(2026-11-27). Java `/internal/ai/receipts`의 허용은 백엔드 PR과 함께, 그 전에는 Java 400이 그대로 전달된다) | AIM-013-04, MYP-031-05 |
 
 ### ReceiptAnalyzeResponse
 쓰는 API: POST /ai/receipts

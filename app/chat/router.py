@@ -40,6 +40,7 @@ from app.chat.schemas import (
     AgentContinueRequest,
     CheckupCardRequest,
     ConversationCreateRequest,
+    ExpenseCardRequest,
     LesionCardRequest,
     MessageSendRequest,
     ReceiptCardRequest,
@@ -90,6 +91,7 @@ async def judge_image_intent(
         cnvrs_cn,
         judgement.kind,
         character_photo_unfit=judgement.character_photo_unfit,
+        reply=judgement.reply,
     )
     return response.success(result.model_dump(by_alias=True, mode="json"))
 
@@ -244,6 +246,18 @@ async def save_receipt_card(
     room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
 ) -> JSONResponse:
     result = await service.save_receipt_card(repo, contexts, checker, room_sn, body)
+    return response.success(result.model_dump(by_alias=True, mode="json"), http_code=201)
+
+
+# 가계부 영수증 분석 뒤 (SCR-AIM-013, 2026-11-27) : 결과 요약 저장 + 지출 등록 확인 카드
+@router.post("/{aiCnvrsRoomSn}/expense-card", dependencies=[Depends(require_member)])
+async def save_expense_card(
+    body: ExpenseCardRequest,
+    repo: Repo,
+    contexts: Annotated[RegisterContextRepository, Depends(get_register_context_repository)],
+    room_sn: Annotated[int, Path(alias="aiCnvrsRoomSn")],
+) -> JSONResponse:
+    result = await service.save_expense_card(repo, contexts, room_sn, body)
     return response.success(result.model_dump(by_alias=True, mode="json"), http_code=201)
 
 

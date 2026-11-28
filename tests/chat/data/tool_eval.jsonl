@@ -148,3 +148,7 @@
 {"id":"T148","type":"새도구","q":"어제 병원비 5만원 이미 가계부에 적었나?","intent":"지출 중복 확인 (새 도구 ③, 2026-11-27)","tool":["check_expense_duplicates","list_expenses"]}
 {"id":"T149","type":"새도구","q":"지난주 병원비 영수증으로 검진기록 만들어 줘","intent":"영수증 검진기록 등록(지출 먼저) (새 도구 ③, 2026-11-27)","tool":["draft_receipt_checkup","list_expenses"]}
 {"id":"T150","type":"새도구","q":"튜토리얼 그만 보여 줘","intent":"튜토리얼 그만 보기 (새 도구 ③, 2026-11-27)","tool":"mark_service_tutorial_viewed"}
+{"id":"T151","type":"새도구","q":"[사진] 프로필 사진 이걸로 바꿔줘","intent":"사진 턴 AGENT: 내 프로필 사진 바꾸기 (2026-11-27)","tool":"draft_member_profile_update"}
+{"id":"T152","type":"새도구","q":"[사진] 11월 26일 흰자 충혈 건 사진 이걸로 바꿔 줘","intent":"사진 턴 AGENT: 관찰 기록 사진 바꾸기(관찰 읽기 먼저) (2026-11-27)","tool":["list_observation_items","list_observation_cycles","draft_observation_cycle_update"]}
+{"id":"T153","type":"새도구","q":"[사진] 초코 등에 난 혹 오늘 사진이야 관찰 기록에 추가해 줘","intent":"사진 턴 AGENT: 관찰 항목에 사진 기록 더하기(관찰 항목 먼저) (2026-11-27)","tool":["list_observation_items","draft_observation_cycle"]}
+{"id":"T154","type":"새도구","q":"[사진] 초코 프로필 사진 이걸로 바꿔 줘","intent":"사진 턴 AGENT: 반려동물 사진은 도구 없음 → 본창 안내 (2026-11-27)","tool":["answer","navigate"]}
