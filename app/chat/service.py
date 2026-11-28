@@ -267,8 +267,15 @@ ACTION_VERB_DELETE = "삭제"
 DELETE = "DELETE"
 # 삭제 카드는 고칠 칸이 없어 확인 말 안내만
 ACTION_ASK_DELETE = "맞으면 '삭제해 줘'라고 말해 주세요."
+# 삭제류 카드가 자기 동사(해제 등)를 가질 때 (2026-11-28)
+ACTION_ASK_DELETE_VERB = "맞으면 '{verb}해 줘'라고 말해 주세요."
 # 삭제 카드에 "응"·"네"만 : 실행하지 않고 다시 안내 (삭제 동사가 든 말만 실행)
 ACTION_DELETE_CONFIRM = "지우려면 '삭제해 줘'라고 말해 주세요."
+# 카드 턴 도구 고르기 : 마지막 회원 메시지 뒤에 떠 있는 카드를 알림 (2026-11-28 추가-1)
+# 대화 기록만으로는 실행 글("해제할게요.") 뒤 같은 카드가 다시 떠 있는지 LLM이 모름
+CARDS_NOTE = "\n\n(대화창에 아직 실행하지 않은 확인 카드가 떠 있음: {cards})"
+# 카드 턴에 도구 고르기 장애 : 실행하지 않고 카드를 다시 줌 (2026-11-28)
+ACTION_RETRY_MESSAGE = "잠시 답을 정하지 못했어요. 카드를 확인하고 다시 말해 주세요."
 ACTION_DELETE_TARGET_MISSING = (
     "지울 대상을 이 턴 읽기 결과에서 찾지 못해 카드를 띄우지 않음. "
     "어떤 것을 지울지 이름이나 날짜를 넣어 다시 말해 달라고 한두 문장으로 안내한다."
@@ -328,6 +335,20 @@ def is_delete(card: "ActionCard | catalog.CatalogEntry") -> bool:
     return entry is not None and entry.verb == ACTION_VERB_DELETE
 
 
+def _own_verb(entry: "catalog.CatalogEntry") -> str | None:
+    # 삭제류 도구의 자기 동사(해제 등) : "삭제"·"진행"·없음이면 None
+    verb = entry.verb
+    return verb if verb and verb not in (ACTION_VERB_DELETE, ACTION_VERB_MIXED) else None
+
+
+def _delete_verb(cards: Sequence[ActionCard]) -> str | None:
+    # 모두 삭제류 카드이고 자기 동사가 하나로 같으면 그 동사(해제 등), 아니면 None
+    if not cards or not all(is_delete(card) for card in cards):
+        return None
+    verbs = {_own_verb(e) if (e := tools.card_entry(card.tool)) else None for card in cards}
+    return verbs.pop() if len(verbs) == 1 else None
+
+
 def _worded(message: str, cards: Sequence[ActionCard]) -> str:
     # 등록 기준 문구를 카드 종류의 동사로
     verb = _joined_verb([_card_verb(card) for card in cards])
@@ -339,8 +360,13 @@ async def _fixed(text: str) -> AsyncIterator[str]:
 
 
 def _target_missing(entry: "catalog.CatalogEntry") -> str:
+    # 대상 못 찾음 글 : 문구 틀은 "{target}을"로 쓰고 조사는 여기서 받침으로 (2026-11-28 추가-2)
     target = entry.target or entry.label or "대상"
-    if is_delete(entry):
+    return _object_josa(_target_missing_text(entry, target), target)
+
+
+def _target_missing_text(entry: "catalog.CatalogEntry", target: str) -> str:
+    if is_delete(entry) and _own_verb(entry) is None:
         return DELETE_TARGET_MISSING_MESSAGE.format(target=target)
     if entry.verb == ACTION_VERB_MIXED:
         return PROCEED_TARGET_MISSING_MESSAGE.format(target=target)
@@ -351,9 +377,14 @@ def _target_missing(entry: "catalog.CatalogEntry") -> str:
     return ADD_TARGET_MISSING_MESSAGE.format(target=target)
 
 
+def _object_josa(text: str, word: str) -> str:
+    # "{word}을" -> 받침이 없으면 "{word}를" ("공동양육자를"·"관찰 항목을")
+    return text.replace(word + "을", _names_object([word]), 1)
+
+
 def _target_missing_note(entry: "catalog.CatalogEntry") -> str:
     # 읽기 결과를 본 LLM에 주는 tool_result 글
-    if is_delete(entry):
+    if is_delete(entry) and _own_verb(entry) is None:
         return ACTION_DELETE_TARGET_MISSING
     if entry.verb and entry.verb != ACTION_VERB_MIXED:
         return ACTION_VERB_TARGET_MISSING.format(verb=entry.verb)
@@ -442,6 +473,8 @@ class Judged:
     per_prior: tuple[tuple[int, dict, tuple[str, ...]], ...] = ()
     # ACTION : 도구 인자 pet_name(문장에 쓴 반려동물 이름, 추가-2). 목록에 없으면 안내 글로
     pet_names: tuple[str, ...] = ()
+    # 떠 있는 카드에 LLM이 run_card·drop_card를 고름 : ACTION_CONFIRM·ACTION_CANCEL
+    reply: str | None = None
 
 
 def _guide_shortcut(chunk_id: str) -> Intent | None:
@@ -472,9 +505,11 @@ async def judge_tools(
         return Judged(Intent(kind=IntentKind.FALLBACK))
     row = None
     # FN-AIM-004-13 : 등록 요청은 라우팅 키워드보다 먼저, 칸은 도구 인자로
-    if carry is None and not rules.is_register_request(text):
+    # 카드가 떠 있으면 행 이동 없음 : 장애 때 카드를 그대로 다시 준다(2026-11-28)
+    if carry is None and not priors and not rules.is_register_request(text):
         # FN-AIM-002-10 : 도구 고르기 장애·시간 초과면 그 행으로 이동(LLM 장애와 무관)
         row = rules.match_route(text)
+    context = with_cards(context, priors)
     # 프로그래밍식 도구 호출 시험 : 코드 안 READ와 그 뒤 READ 답변이 같은 반려동물·번호 칸을 씀
     follow = _ptc_follow(agent, text, read)
     try:
@@ -504,11 +539,31 @@ async def judge_tools(
         text, context, agent, decision, max_tokens, today, read, prior, now, priors, follow
     )
     several = len(decision.all_calls()) > 1
-    if judged.intent.kind is IntentKind.ACTION and (several or rules.chains_more(text)):
+    chain = several or rules.chains_more(text)
+    if judged.intent.kind is IntentKind.ACTION and judged.reply is None and chain:
         judged = await _chain_cards(
             text, context, agent, decision, judged, max_tokens, today, first_token_sec, now, priors
         )
     return judged
+
+
+def with_cards(context: list[dict], priors: Sequence[ActionDraft]) -> list[dict]:
+    """돌려받은 카드가 있으면 마지막 회원 메시지 뒤에 카드 목록(표시 이름(도구) — 대상 글)"""
+    if not priors or not context or context[-1].get("role") != "user":
+        return context
+    last = context[-1]
+    if not isinstance(last.get("content"), str):
+        return context
+    cards = ", ".join(_card_note(draft) for draft in priors)
+    note = CARDS_NOTE.format(cards=cards)
+    return [*context[:-1], {**last, "content": last["content"] + note}]
+
+
+def _card_note(draft: ActionDraft) -> str:
+    entry = tools.card_entry(draft.tool)
+    label = entry.label if entry is not None and entry.label else draft.tool
+    head = f"{label}({draft.tool})"
+    return f"{head} — {draft.target_text}" if draft.target_text else head
 
 
 async def _chain_cards(
@@ -687,6 +742,13 @@ def _tool_judged(
         return Judged(row.to_intent())
     if call.name == tools.DECLINE:
         return Judged(Intent(kind=IntentKind.FALLBACK), out_of_scope=not call.args.unclear)
+    if call.name in tools.CARD_REPLY_TOOLS:
+        if not priors:
+            # 떠 있는 카드 없이 실행·버리기 : 무엇을 원하는지 모름
+            logger.info("카드 없이 카드 도구: %s", call.name)
+            return Judged(Intent(kind=IntentKind.FALLBACK))
+        reply = rules.ACTION_CONFIRM if call.name == tools.RUN_CARD else rules.ACTION_CANCEL
+        return Judged(Intent(kind=IntentKind.ACTION), reply=reply)
     card = tools.card_entry(call.name)
     if card is not None:
         trace = read.trace if read is not None else None
@@ -1779,25 +1841,6 @@ async def _run_turn(
         trace.turn = turn
         trace.key = agent_key
         trace.done_before = done_before(turn, ai.context_turns)
-        if register is not None and priors:
-            # 돌려받은 확인 카드 + 확인·취소 말 : LLM 없이 실행 지시·취소 (2026-11-13)
-            # 여러 명령 ② : 카드가 여럿이면 확인 말 한 번에 모두, 취소 말이면 모두 버림
-            reply = rules.action_reply_kind(text)
-            if reply == rules.ACTION_CONFIRM and rules.says_delete(text):
-                # "삭제해 줘"는 삭제 카드가 있을 때만 확인 말 : 등록·수정 카드는 실행 안 함
-                methods = [e.call.method for d in priors if (e := tools.card_entry(d.tool))]
-                if DELETE not in {method.upper() for method in methods}:
-                    reply = None
-            said = rules.says_card_verb(text) if reply is None else None
-            if said is not None:
-                # "수락해 줘"·"구매해 줘" 등 도구별 동사는 그 동사 카드가 있을 때만 확인 말
-                verbs = {entry_verb(e) for d in priors if (e := tools.card_entry(d.tool))}
-                if said in verbs:
-                    reply = rules.ACTION_CONFIRM
-            if reply is not None:
-                record.reply = reply
-                await _action_answer(reply, turn, priors, repo, register, emit)
-                return
         if register is not None and turn.draft is not None:
             # FN-AIM-012-05·10 : 초안이 있으면 이 메시지로 칸 채움·수정
             # 뽑힌 칸이 없으면 일반 판정
@@ -1820,19 +1863,34 @@ async def _run_turn(
                 if reader is not None and register is not None
                 else None
             )
-            judged = await judge_tools(
-                text,
-                context,
-                agent,
-                ai.max_tokens,
-                today,
-                limits.first_token_sec,
-                read,
-                turn.action,
-                now,
-                priors,
-                carry,
-            )
+            try:
+                judged = await judge_tools(
+                    text,
+                    context,
+                    agent,
+                    ai.max_tokens,
+                    today,
+                    limits.first_token_sec,
+                    read,
+                    turn.action,
+                    now,
+                    priors,
+                    carry,
+                )
+            except ClassifyError:
+                if register is None or not priors:
+                    raise
+                # 카드 턴에 도구 고르기 장애 : 실행하지 않고 카드를 그대로 다시 줌 (2026-11-28)
+                await _keep_cards(turn, priors, repo, register, emit)
+                return
+            if judged.reply is not None:
+                if register is None:
+                    judged = Judged(Intent(kind=IntentKind.FALLBACK))
+                else:
+                    # 떠 있는 카드 실행·버리기를 LLM이 고름(run_card·drop_card, 2026-11-28)
+                    record.reply = judged.reply
+                    await _action_answer(judged.reply, turn, priors, repo, register, emit)
+                    return
             if judged.intent.kind is IntentKind.ACTION and judged.pet_names:
                 judged = await _unknown_pet_judged(judged, text, register.contexts)
         emit(("intent", judged.intent))
@@ -3499,7 +3557,8 @@ def action_ask_message(card: ActionCard | list[ActionCard], said: str = "") -> s
 def _confirm_line(cards: Sequence[ActionCard]) -> str:
     # 확인 말 안내 : 모두 삭제 카드면 고칠 칸이 없어 "삭제해 줘"만
     if cards and all(is_delete(card) for card in cards):
-        return ACTION_ASK_DELETE
+        verb = _delete_verb(cards)
+        return ACTION_ASK_DELETE_VERB.format(verb=verb) if verb else ACTION_ASK_DELETE
     return _worded(ACTION_ASK_CONFIRM, cards)
 
 
@@ -3641,7 +3700,9 @@ async def _action_answer(
         saved = await _save(repo, turn.room_sn, "\n".join(missing), True)
         emit(("done", AnswerDone(message=saved, action=cards[0], actions=cards)))
         return
-    if not _delete_confirmed(cards, turn.question.cnvrs_cn):
+    # 자기 동사가 있는 삭제류 카드(해제 등)는 LLM이 확인으로 고르면 "응"도 실행 (2026-11-28 추가-4)
+    confirmed = _delete_verb(cards) is not None or _delete_confirmed(cards, turn.question.cnvrs_cn)
+    if not confirmed:
         # 삭제 카드는 "응"·"네"만으로 지우지 않음 : 삭제 동사(섞이면 "진행"도)가 든 말만
         saved = await _save(repo, turn.room_sn, ACTION_DELETE_CONFIRM, True)
         emit(("done", AnswerDone(message=saved, action=cards[0], actions=cards)))
@@ -3650,6 +3711,26 @@ async def _action_answer(
     saved = await _save(repo, turn.room_sn, _execute_line(cards), True)
     done = AnswerDone(message=saved, action=cards[0], actions=cards, execute=True)
     emit(("done", done))
+
+
+async def _keep_cards(
+    turn: Turn,
+    priors: list[ActionDraft],
+    repo: ConversationRepository,
+    register: RegisterDeps,
+    emit: Callable[[Event | None], None],
+) -> None:
+    # 카드 턴에 도구 고르기 장애·시간 초과 : 실행하지 않고 돌려받은 카드를 그대로 다시 줌
+    logger.warning("카드 턴 도구 고르기 실패: 카드 %d장 다시 줌", len(priors))
+    entries = [e for draft in priors if (e := tools.card_entry(draft.tool)) is not None]
+    pets = await register.contexts.get_pets() if any(_uses_pets(e) for e in entries) else []
+    cards = [card for draft in priors if (card := _prior_card(draft, pets, turn.pet_sn))]
+    emit(("intent", Intent(kind=IntentKind.ACTION)))
+    saved = await _save(repo, turn.room_sn, ACTION_RETRY_MESSAGE, True)
+    if not cards:
+        emit(("done", AnswerDone(message=saved)))
+        return
+    emit(("done", AnswerDone(message=saved, action=cards[0], actions=cards)))
 
 
 def _execute_line(cards: Sequence[ActionCard]) -> str:
@@ -3686,6 +3767,10 @@ def _delete_confirmed(cards: Sequence[ActionCard], text: str) -> bool:
     if not any(is_delete(card) for card in cards):
         return True
     if rules.says_delete(text):
+        return True
+    verb = _delete_verb(cards)
+    if verb is not None and rules.says_card_verb(text) == verb:
+        # 카드 자기 동사("해제해 줘")도 확인 말 (2026-11-28)
         return True
     return not all(is_delete(card) for card in cards) and rules.says_proceed(text)
 

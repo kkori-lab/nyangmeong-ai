@@ -29,7 +29,7 @@ EMPTY = "-"
 TEXT_TAGS: dict[str, tuple[str, ...]] = {
     "fallback": ("FALLBACK_MESSAGE",),
     "out_of_scope": ("OUT_OF_SCOPE_MESSAGE",),
-    "error": ("ANSWER_ERROR_MESSAGE",),
+    "error": ("ANSWER_ERROR_MESSAGE", "ACTION_RETRY_MESSAGE"),
     "pet_ask": ("READ_PET_ASK",),
     "no_pet": ("READ_NO_PET",),
     # 문장에 쓴 이름이 목록에 없음(2026-11-26 추가-2). LLM에 주는 글 둘은 그 자리에서 태그(tag)
@@ -98,6 +98,8 @@ QUIET = frozenset(
         "ACTION_VERB_DELETE",
         "ACTION_ASK_DELETE",
         "ACTION_DELETE_CONFIRM",
+        "ACTION_ASK_DELETE_VERB",
+        "CARDS_NOTE",
         "SUMMARY_PREFIX",
         "SUMMARY_SUFFIX",
         "DUPLICATE_NOTICE",

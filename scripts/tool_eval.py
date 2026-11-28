@@ -16,6 +16,8 @@
 - --off (2026-11-27) : 의도를 고르는 정규식 지름길을 이 실행 동안만 끄고 잰다(앱 코드는 그대로).
   chain은 이어 고르기 정규식(rules.chains_more·chains_after_move)을 늘 False로.
   기본 세트·--agent 둘 다. hint(키워드 행 힌트)는 ②(2026-11-28)에서 앱에서 지움
+- 카드 유형(2026-11-28) : 행의 card(앞 턴 질문·카드 요약 글·돌려받은 카드)로 떠 있는 카드에
+  확인·취소·고치기 말을 잰다. 정답은 run_card·drop_card 또는 고칠 쓰기 도구
 pytest 수집 제외(tests/ 밖), 테스트·CI에서 미호출(AGENTS.md 5번)
 """
 
@@ -34,7 +36,7 @@ from typing import Any
 from app.chat import agentstate, rules, service, tools, turnlog
 from app.chat.clients import TOOL_LIMIT, AnthropicToolAgent, ToolDecision, _code_calls
 from app.chat.repository import get_ai_settings
-from app.chat.schemas import AgentResult, IntentKind
+from app.chat.schemas import ActionDraft, AgentResult, IntentKind
 from app.core.config import get_settings
 from app.core.llm import get_anthropic_client
 from tests.chat.fakes import FakeEvalPets, FakeEvalReader, fake_catalog
@@ -58,7 +60,19 @@ CORE = 44
 # 새도구 : 2026-11-27 백엔드 새 도구 41개(T97~T137), ②(T138~T140), ③ #326 10개(T141~T150)
 # --off로 끌 수 있는 지름길(2026-11-27 정규식 지름길 줄이기 ①)
 OFF_NAMES = ("chain",)
-TYPES = ("사용법", "이동", "일정", "케어", "지식", "범위밖", "헷갈림", "수정", "조합", "새도구")
+TYPES = (
+    "사용법",
+    "이동",
+    "일정",
+    "케어",
+    "지식",
+    "범위밖",
+    "헷갈림",
+    "수정",
+    "조합",
+    "새도구",
+    "카드",
+)
 
 
 @dataclass
@@ -207,18 +221,27 @@ async def run_tools(
     ptc: str | None = None,
     read: bool = False,
     history: tuple[str, ...] = (),
+    card: dict | None = None,
 ) -> Result:
     # 도구 흐름 판정 그대로. 글 답변 스트림은 끝까지 읽어 지연·토큰에 넣는다(1회차와 같은 셈)
     # read 없음 : READ는 Java 없이 실행 안 하므로 고른 READ 이름으로,
     # ACTION은 카드 도구 이름·LLM 인자로
     # read 있음(--ptc) : 가짜 Java 읽기로 READ·코드 안 READ까지 실행(답변 지연·토큰 포함)
     # history : 문항 앞의 답 없는 회원 질문들(이력에 질문이 둘인 경우, 2026-11-26)
+    # card : 떠 있는 확인 카드(2026-11-28) {"q": 카드를 만든 말, "ai": 카드 요약 글, "actions": […]}
+    #   앞 턴 두 메시지를 이력에 넣고 actions를 돌려받은 카드(priors)로
     usage = Usage()
     agent = _DecisionRecorder(client, model, on_usage=lambda _task, u: usage.add(u), ptc=ptc)
     ai = get_ai_settings()
     limits = get_settings()
     deps = service.ReadDeps(reader=FakeEvalReader(), contexts=FakeEvalPets()) if read else None
-    context = [{"role": "user", "content": text} for text in (*history, q)]
+    priors = tuple(ActionDraft.model_validate(a) for a in card["actions"]) if card else ()
+    before = (
+        [{"role": "user", "content": card["q"]}, {"role": "assistant", "content": card["ai"]}]
+        if card
+        else []
+    )
+    context = [*before, *({"role": "user", "content": text} for text in (*history, q))]
     record = turnlog.start(0, q, None)
     started = time.monotonic()
     try:
@@ -230,6 +253,7 @@ async def run_tools(
             today,
             limits.answer_first_token_sec,
             read=deps,
+            priors=priors,
         )
         text = None
         if judged.stream is not None:
@@ -753,7 +777,14 @@ async def _measure(options) -> None:
         (
             f"도구 {model}",
             lambda row: run_tools(
-                client, model, row["q"], today, options.answer, read=read, history=_history(row)
+                client,
+                model,
+                row["q"],
+                today,
+                options.answer,
+                read=read,
+                history=_history(row),
+                card=row.get("card"),
             ),
         ),
     ]
@@ -771,6 +802,7 @@ async def _measure(options) -> None:
                     ptc=mode,
                     read=True,
                     history=_history(row),
+                    card=row.get("card"),
                 ),
             )
         )
@@ -786,6 +818,7 @@ async def _measure(options) -> None:
                     options.answer,
                     read=read,
                     history=_history(row),
+                    card=row.get("card"),
                 ),
             )
         )
@@ -805,6 +838,7 @@ async def _measure(options) -> None:
                     ptc=sonnet_mode,
                     read=True,
                     history=_history(row),
+                    card=row.get("card"),
                 ),
             )
         )
