@@ -32,6 +32,8 @@ PTC_BOTH = "both"
 
 class Navigate(BaseModel):
     screen_num: int
+    # 이동 안내 글 (2026-11-28) : 없거나 화면명이 없으면 서버 고정 글
+    message: str | None = None
 
 
 class SearchGuide(BaseModel):
@@ -40,6 +42,8 @@ class SearchGuide(BaseModel):
 
 class Decline(BaseModel):
     unclear: bool = False
+    # 안내 글 (2026-11-28, 길이 상한 없음) : LLM 스키마에서만 필수. 빠지면 unclear대로 고정 글
+    message: str | None = None
 
 
 class RunCard(BaseModel):
@@ -90,6 +94,11 @@ def _builtin_definition(name: str, table: tuple[rules.RouteRow, ...]) -> dict:
     props = schema.get("properties", {})
     if name == NAVIGATE:
         props["screen_num"]["enum"] = [row.no for row in table if row.routable]
+    if name == DECLINE:
+        # 글은 LLM에 필수로 보이고 서버 검사는 선택 : 빠져도 범위 밖·판단 못 함 구분은 남김
+        description = props["message"]["description"]
+        props["message"] = {"type": "string", "minLength": 1, "description": description}
+        schema["required"] = [*schema.get("required", []), "message"]
     if name == SEARCH_GUIDE:
         props["chunk_id"]["anyOf"] = [
             {"type": "string", "enum": [chunk.id for chunk in rules.guide_chunks()]},

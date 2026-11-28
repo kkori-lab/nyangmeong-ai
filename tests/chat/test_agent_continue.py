@@ -172,7 +172,7 @@ def test_실행_결과로_읽기를_이어_가고_답을_저장해야_한다(cli
     assert user_count(java, room) == users
 
 
-def test_취소만이면_LLM_없이_짧은_글로_끝내야_한다(client, java):
+def test_취소만이고_LLM_글이_없으면_고정_글로_끝내야_한다(client, java):
     agent = ContinueAgent((HEALTH, WEIGHT_RAW), [READ])
     room, done = first_turn(client, java, agent)
 
@@ -182,7 +182,9 @@ def test_취소만이면_LLM_없이_짧은_글로_끝내야_한다(client, java)
     done2 = done_of(res)
 
     assert done2["message"]["cnvrsCn"] == rules.AGENT_STOPPED
-    assert agent.resumes == []
+    # 2026-11-28 : 이어 갈 일 없음 글도 LLM에 한 번 묻고, 글이 없으면 고정 글
+    assert len(agent.resumes) == 1
+    assert agent.resumes[0].endswith(rules.AGENT_STOPPED_NOTE)
 
 
 @pytest.mark.parametrize(
@@ -316,7 +318,9 @@ def test_두_번째_칸_오류는_고치지_않고_끝내야_한다(client, java
     done3 = done_of(cont(client, room, done2["pending"]["agentToken"], results))
 
     assert done3["message"]["cnvrsCn"] == rules.AGENT_STOPPED
-    assert len(agent.resumes) == 1
+    # 고치기 1번 + 이어 갈 일 없음 글 1번 (2026-11-28)
+    assert len(agent.resumes) == 2
+    assert agent.resumes[1].endswith(rules.AGENT_STOPPED_NOTE)
 
 
 def test_errors가_빈_실패는_고치지_않고_끝내야_한다(client, java):
@@ -327,7 +331,9 @@ def test_errors가_빈_실패는_고치지_않고_끝내야_한다(client, java)
     done2 = done_of(cont(client, room, done["pending"]["agentToken"], results))
 
     assert done2["message"]["cnvrsCn"] == rules.AGENT_STOPPED
-    assert agent.resumes == []
+    # 고치지 않음 : 이어 갈 일 없음 글 1번만 (2026-11-28)
+    assert len(agent.resumes) == 1
+    assert agent.resumes[0].endswith(rules.AGENT_STOPPED_NOTE)
 
 
 # A8 같은 쓰기 반복 막기
