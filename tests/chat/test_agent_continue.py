@@ -53,8 +53,8 @@ class ContinueAgent(FakeToolAgent):
         use = {"type": "tool_use", "id": f"toolu_{no}", "name": name, "input": raw}
         return ToolDecision(call=tools.parse(name, raw, f"toolu_{no}"), content=(use,))
 
-    async def decide(self, messages, max_tokens, today, hint=None) -> ToolDecision:
-        self.decides.append((messages, today, hint))
+    async def decide(self, messages, max_tokens, today) -> ToolDecision:
+        self.decides.append((messages, today))
         return self._decision(self.first if len(self.decides) == 1 else None, len(self.decides))
 
     async def answer(self, messages, decision, result, max_tokens, today, follow=None):
@@ -65,7 +65,7 @@ class ContinueAgent(FakeToolAgent):
 
     async def resume(self, messages, notes, max_tokens, today) -> ToolDecision:
         self.resumes.append(notes)
-        self.decides.append((messages, today, None))
+        self.decides.append((messages, today))
         no = len(self.resumes)
         pick = self.resumed[no - 1] if no <= len(self.resumed) else None
         return self._decision(pick, 100 + no)

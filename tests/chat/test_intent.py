@@ -17,13 +17,8 @@ def judged(text: str, agent: FakeToolAgent | None = None):
     return asyncio.run(judge_tools(text, context, agent, 4500, date(2026, 11, 11), 5.0))
 
 
-def hints(agent: FakeToolAgent) -> list[str | None]:
-    # 도구 고르기에 넘긴 키워드 힌트 행의 화면 ID
-    return [hint.scr_id if hint else None for _, _, hint in agent.decides]
-
-
 def route_of(text: str):
-    # FN-AIM-004-01 룰 매칭 : 도구 고르기 힌트이자 장애 때 이동할 행
+    # FN-AIM-004-01 룰 매칭 : 도구 고르기 장애 때 이동할 행
     row = rules.match_route(text)
     assert row is not None, text
     return row.to_intent()
@@ -44,13 +39,10 @@ def row_no(scr_id: str) -> int:
         "오후 2시 반 목욕 등록해줘",  # 시각
     ],
 )
-def test_등록_동사와_날짜_시간_주기가_함께_있으면_힌트_없이_도구_고르기(text):
+def test_등록_동사와_날짜_시간_주기가_함께_있으면_등록_요청으로_봐야_한다(text):
     # FN-AIM-012-01, FN-AIM-004-13 : 라우팅 키워드(병원·구충·미용)가 있어도 등록이 먼저
     # 칸은 쓰기 도구 인자로(SCR-AIM-012)
     assert is_register_request(text)
-    agent = FakeToolAgent()
-    judged(text, agent)
-    assert hints(agent) == [None]
 
 
 @pytest.mark.parametrize(
@@ -129,14 +121,6 @@ def test_데이터_컨텍스트는_해석하지_않고_화면_단위로_간다()
     assert (intent.scr_id, intent.param) == ("SCR-HLT-002", None)
 
 
-def test_룰이_맞으면_그_행을_힌트로_도구_고르기에_넘긴다():
-    # 추가 요청(2026-11-06) : 키워드에 걸린 문장은 힌트와 함께 도구 고르기
-    agent = FakeToolAgent()
-    judged("병원 찾아줘", agent)
-
-    assert hints(agent) == ["SCR-HOS-001"]
-
-
 def test_어디에도_해당하지_않으면_FALLBACK():
     # FN-AIM-004-12, FN-AIM-005-01 : 도구도 글도 고르지 않음
     assert judged("ㅁㄴㅇㄹ").intent.kind is IntentKind.FALLBACK
@@ -168,18 +152,16 @@ def test_키워드에_걸린_범위_밖_질문은_FALLBACK():
     intent = judged("가계부 작성 방법 알려줘", agent).intent
 
     assert intent.kind is IntentKind.FALLBACK
-    assert hints(agent) == ["SCR-MYP-030"]
 
 
 @pytest.mark.parametrize("text", ["가계부 보여줘", "가계부"])
-def test_이동_지시나_키워드만_있어도_힌트와_함께_도구_고르기(text):
+def test_이동_지시나_키워드만_있어도_도구_고르기로_ROUTE여야_한다(text):
     # 추가 요청(2026-11-06) : 질문꼴이 아니어도 도구 고르기, 이동은 navigate로
     agent = FakeToolAgent("navigate", {"screen_num": row_no("SCR-MYP-030")})
     intent = judged(text, agent).intent
 
     assert intent.kind is IntentKind.ROUTE
     assert intent.scr_id == "SCR-MYP-030"
-    assert hints(agent) == ["SCR-MYP-030"]
 
 
 def test_키워드에_걸린_범위_안_질문은_AI가_navigate면_ROUTE():
@@ -211,7 +193,6 @@ def test_룰에_안_걸리는_범위_밖_질문은_FALLBACK():
     intent = judged("파이썬 코딩 알려줘", agent).intent
 
     assert intent.kind is IntentKind.FALLBACK
-    assert hints(agent) == [None]
 
 
 @pytest.mark.parametrize("text", ["가계부 작성 방법 알려줘", "파이썬 코딩 알려줘"])

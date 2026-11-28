@@ -404,7 +404,7 @@ def test_등록_요청은_라우팅_키워드가_있어도_도구_고르기로(c
     evs = events(send(client, room, "내일 3시 병원 예약 잡아줘"))
 
     assert evs[0][1]["kind"] == "ACTION"
-    assert agent.decides[0][2] is None
+    assert len(agent.decides) == 1
 
 
 @pytest.mark.parametrize(
@@ -439,14 +439,6 @@ def test_룰_라우팅_문장은_도구_고르기가_실패하면_그_행으로_
 
     assert (evs[0][1]["kind"], evs[0][1]["scrId"]) == ("ROUTE", "SCR-HLT-003")
     assert len(agent.decides) == 1
-
-
-def test_키워드에_걸린_질문꼴은_힌트와_함께_도구_고르기(client, java):
-    agent = use_agent(client, FakeToolAgent("decline", {}))
-    room = room_of(client, java)
-    events(send(client, room, "가계부 작성 방법 알려줘"))
-
-    assert agent.decides[0][2] == rules.match_route("가계부 작성 방법 알려줘")
 
 
 def test_도구_고르기_장애면_error_이벤트(client, java):
@@ -523,9 +515,9 @@ def sse_response(body: bytes) -> httpx2.Response:
 CONTEXT = [{"role": "user", "content": "가계부 보여 줘"}]
 
 
-def decide(fake: FakeAnthropic, hint=None) -> ToolDecision:
+def decide(fake: FakeAnthropic) -> ToolDecision:
     agent = AnthropicToolAgent(fake.client(), MODEL)
-    return asyncio.run(agent.decide(CONTEXT, 4500, TODAY, hint=hint))
+    return asyncio.run(agent.decide(CONTEXT, 4500, TODAY))
 
 
 def test_도구_요청은_도구_정의와_캐시한_system과_오늘_날짜를_보낸다():
@@ -542,12 +534,6 @@ def test_도구_요청은_도구_정의와_캐시한_system과_오늘_날짜를_
     assert decision.call.name == "navigate"
     assert tools.route_row(decision.call) == row
     assert decision.content[0]["type"] == "tool_use"
-
-
-def test_키워드_힌트는_캐시_뒤_블록():
-    fake = FakeAnthropic(lambda _: sse_response(tool_sse("decline", {})))
-    decide(fake, hint=row_of("SCR-MYP-030"))
-    assert "가계부" in fake.requests[0]["system"][2]["text"]
 
 
 def test_첫_블록이_글이면_같은_호출의_글을_그대로_흘린다():

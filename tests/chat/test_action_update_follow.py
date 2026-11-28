@@ -39,7 +39,7 @@ class ChainAgent:
         self.answer_chunks = answer_chunks
         self.results: list[str | None] = []
 
-    async def decide(self, messages, max_tokens, today, hint=None) -> ToolDecision:
+    async def decide(self, messages, max_tokens, today) -> ToolDecision:
         use = {"type": "tool_use", "id": "toolu_1", "name": self.tool, "input": {}}
         return ToolDecision(call=tools.parse(self.tool, {}, "toolu_1"), content=(use,))
 

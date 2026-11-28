@@ -473,7 +473,6 @@ async def judge_tools(
     row = None
     # FN-AIM-004-13 : 등록 요청은 라우팅 키워드보다 먼저, 칸은 도구 인자로
     if carry is None and not rules.is_register_request(text):
-        # 추가 요청(2026-11-06) : 키워드에 걸린 문장은 질문꼴이 아니어도 힌트와 함께 도구 고르기
         # FN-AIM-002-10 : 도구 고르기 장애·시간 초과면 그 행으로 이동(LLM 장애와 무관)
         row = rules.match_route(text)
     # 프로그래밍식 도구 호출 시험 : 코드 안 READ와 그 뒤 READ 답변이 같은 반려동물·번호 칸을 씀
@@ -483,9 +482,7 @@ async def judge_tools(
             if carry is not None:
                 decision = await agent.resume(context, carry.notes, max_tokens, today)
             else:
-                decision = await agent.decide(
-                    context, max_tokens, today, hint=row, **_code_kw(agent, follow)
-                )
+                decision = await agent.decide(context, max_tokens, today, **_code_kw(agent, follow))
     except (ClassifyError, TimeoutError) as error:
         if isinstance(error, TimeoutError):
             # LLM 오류(ClassifyError)는 클라이언트가 로그, 시간 초과는 취소라 여기서 한 줄

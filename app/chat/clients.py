@@ -355,7 +355,6 @@ class ToolAgent(Protocol):
         messages: list[dict],
         max_tokens: int,
         today: date,
-        hint: rules.RouteRow | None = None,
         code: CodeRun | None = None,
     ) -> ToolDecision: ...
 
@@ -489,31 +488,12 @@ def _tool_system(table: tuple[rules.RouteRow, ...], ptc: bool = False) -> str:
     )
 
 
-def _tool_hint(hint: rules.RouteRow | None) -> str:
-    if hint is None:
-        return ""
-    return (
-        f"이 입력은 키워드로 '{hint.name}' 화면({hint.scr_id})에 걸렸다. "
-        "키워드가 걸린 것만으로 범위 안이 아니다. 범위 밖이면 decline, "
-        "그 화면으로 가려는 요청이나 그 화면에 있는 내 기록을 묻는 질문이면 navigate"
-        "(건강 기록·일정·검진·약·지출의 내용을 묻는 질문에 맞는 읽기 도구가 있으면 그 도구. "
-        "'열어서 지출 얼마인지 알려 줘'처럼 이동과 내 기록 내용 질문이 섞여도 읽기 도구. "
-        "'열어서 어떻게 하는지 알려 줘'처럼 이동과 사용법이 섞이면 search_guide), "
-        "그 화면 기능의 위치·사용법을 묻는 질문이면 search_guide."
-    )
-
-
-def tool_system_blocks(
-    today: date, hint: rules.RouteRow | None = None, ptc: bool = False
-) -> list[dict]:
-    # 오늘 날짜·키워드 힌트는 요청마다 달라 캐시 뒤 블록
+def tool_system_blocks(today: date, ptc: bool = False) -> list[dict]:
+    # 오늘 날짜는 요청마다 달라 캐시 뒤 블록
     blocks: list[dict] = [
         {"type": "text", "text": tool_system(ptc), "cache_control": {"type": "ephemeral"}},
         {"type": "text", "text": f"오늘: {today.isoformat()} ({rules.WEEKDAYS[today.weekday()]})"},
     ]
-    note = _tool_hint(hint)
-    if note:
-        blocks.append({"type": "text", "text": note})
     now = rules.now_kst()
     if now.date() == today:
         # '방금·지금' 기록의 시각 (2026-11-13). 평가처럼 다른 날을 오늘로 줄 때는 빼고 보냄
@@ -608,8 +588,8 @@ class AnthropicToolAgent:
             request["container"] = container
         return request
 
-    def _system(self, today: date, hint: rules.RouteRow | None = None) -> list[dict]:
-        return tool_system_blocks(today, hint, ptc=self.ptc is not None)
+    def _system(self, today: date) -> list[dict]:
+        return tool_system_blocks(today, ptc=self.ptc is not None)
 
     def _auto(self) -> dict:
         return TOOL_CHOICE_AUTO
@@ -650,14 +630,13 @@ class AnthropicToolAgent:
         messages: list[dict],
         max_tokens: int,
         today: date,
-        hint: rules.RouteRow | None = None,
         code: CodeRun | None = None,
     ) -> ToolDecision:
         current = messages
         container: str | None = None
         for _ in range(PTC_ROUNDS if code is not None else 1):
             started = time.monotonic()
-            request = self._request(current, max_tokens, self._system(today, hint), container)
+            request = self._request(current, max_tokens, self._system(today), container)
             request["tool_choice"] = self._auto()
             events = self._events(request)
             final = None

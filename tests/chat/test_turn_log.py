@@ -117,9 +117,9 @@ def test_폴백_턴은_fallback_태그여야_한다(client, java, caplog):
 
 
 class _SlowAgent(FakeToolAgent):
-    async def decide(self, messages, max_tokens, today, hint=None) -> ToolDecision:
+    async def decide(self, messages, max_tokens, today) -> ToolDecision:
         await asyncio.sleep(1)
-        return await super().decide(messages, max_tokens, today, hint)
+        return await super().decide(messages, max_tokens, today)
 
 
 def test_도구_고르기_시간_초과_턴은_timeout_error여야_한다(client, java, caplog, monkeypatch):
@@ -134,7 +134,7 @@ def test_도구_고르기_시간_초과_턴은_timeout_error여야_한다(client
 
 
 class _BrokenAgent(FakeToolAgent):
-    async def decide(self, messages, max_tokens, today, hint=None) -> ToolDecision:
+    async def decide(self, messages, max_tokens, today) -> ToolDecision:
         raise RuntimeError("고장")
 
 

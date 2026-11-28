@@ -1,7 +1,7 @@
 """tool calling 1단계 평가(docs/design/tool-calling.md 7-1절). 실제 Anthropic 호출(비용이 든다)
 
 돌리기: uv run python -m scripts.tool_eval [--sonnet] [--answer] [--only T01,T05]
-        [--ptc [code|both]] [--agent] [--off hint,chain]
+        [--ptc [code|both]] [--agent] [--off chain]
 - 도구 흐름(service.judge_tools)을 잰다(옛 판정 service.judge는 2026-11-11 삭제)
 - 도구 목록 : 테스트와 같은 가짜 Java 목록(스냅샷 + 코드 값), Java는 부르지 않는다
 - 문항별 결과 : .cache/tool_eval/<시각>.jsonl (git 제외)
@@ -14,8 +14,8 @@
   service.agent_carry -> judge_tools(carry)로 이어 간다(agent-continue와 같은 길). pending은
   rules.agent_pending(첫 멈춤 카드 수)으로 보고(④), 이어 갈 일이 없으면 끝은 "멈춤"
 - --off (2026-11-27) : 의도를 고르는 정규식 지름길을 이 실행 동안만 끄고 잰다(앱 코드는 그대로).
-  hint는 도구 고르기에 키워드 행 힌트를 안 줌, chain은 이어 고르기 정규식
-  (rules.chains_more·chains_after_move)을 늘 False로. 기본 세트·--agent 둘 다
+  chain은 이어 고르기 정규식(rules.chains_more·chains_after_move)을 늘 False로.
+  기본 세트·--agent 둘 다. hint(키워드 행 힌트)는 ②(2026-11-28)에서 앱에서 지움
 pytest 수집 제외(tests/ 밖), 테스트·CI에서 미호출(AGENTS.md 5번)
 """
 
@@ -57,7 +57,7 @@ SONNET = "claude-sonnet-5-5"
 CORE = 44
 # 새도구 : 2026-11-27 백엔드 새 도구 41개(T97~T137), ②(T138~T140), ③ #326 10개(T141~T150)
 # --off로 끌 수 있는 지름길(2026-11-27 정규식 지름길 줄이기 ①)
-OFF_NAMES = ("hint", "chain")
+OFF_NAMES = ("chain",)
 TYPES = ("사용법", "이동", "일정", "케어", "지식", "범위밖", "헷갈림", "수정", "조합", "새도구")
 
 
@@ -111,7 +111,7 @@ def off_line(names: tuple[str, ...]) -> str:
 
 
 def off_tag(names: tuple[str, ...]) -> str:
-    # 결과 파일 이름 끝 : -off-hint-chain
+    # 결과 파일 이름 끝 : -off-chain
     return f"-off-{'-'.join(names)}" if names else ""
 
 
@@ -129,14 +129,6 @@ def shortcuts_off(names: tuple[str, ...]) -> Iterator[None]:
         setattr(owner, attr, value)
 
     try:
-        if "hint" in names:
-            original = AnthropicToolAgent.decide
-
-            async def decide(self, messages, max_tokens, today, hint=None, code=None):
-                # 키워드 행 힌트를 버림(시간 초과 때 행 이동 대체는 judge_tools에 그대로)
-                return await original(self, messages, max_tokens, today, hint=None, code=code)
-
-            put(AnthropicToolAgent, "decide", decide)
         if "chain" in names:
             put(rules, "chains_more", _never)
             put(rules, "chains_after_move", _never)

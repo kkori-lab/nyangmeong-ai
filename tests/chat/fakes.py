@@ -4,9 +4,8 @@ import re
 from collections.abc import AsyncIterator
 from datetime import date
 
-from app.chat import catalog, tools
+from app.chat import catalog, rules, tools
 from app.chat.clients import FOLLOW_ROUNDS, ClassifyError, ReadMore, ToolDecision, with_notes
-from app.chat.rules import RouteRow
 from app.core.backend import external_error
 
 TITLE_LENGTH = 30
@@ -70,15 +69,13 @@ class FakeToolAgent:
         self.follow_tool = follow_tool
         self.follow_raw = follow_raw or {}
         self.follows = ((follow_tool, self.follow_raw),) if follow_tool is not None else follows
-        self.decides: list[tuple[list[dict], date, RouteRow | None]] = []
+        self.decides: list[tuple[list[dict], date]] = []
         self.results: list[str | None] = []
         # 이어 가기(agent-continue)로 받은 진행 기록
         self.resumes: list[str] = []
 
-    async def decide(
-        self, messages: list[dict], max_tokens: int, today: date, hint: RouteRow | None = None
-    ) -> ToolDecision:
-        self.decides.append((messages, today, hint))
+    async def decide(self, messages: list[dict], max_tokens: int, today: date) -> ToolDecision:
+        self.decides.append((messages, today))
         if self.fail:
             raise ClassifyError("api_error")
         if self.texts is not None:
@@ -118,19 +115,18 @@ class FakeToolAgent:
 
 class FakeBasicToolAgent(FakeToolAgent):
     """[기본 가짜 도구 고르기] 테스트가 따로 끼우지 않을 때
-    - 키워드에 걸린(hint) 질문꼴이 아닌 글 : 그 화면으로 navigate
+    - 키워드에 걸린(rules.match_route) 질문꼴이 아닌 글 : 그 화면으로 navigate
     - 질문꼴 글 : 받은 컨텍스트 크기를 알리는 고정 글로 바로 답(몇 조각)
     - 그 밖 : 도구도 글도 없음(폴백)"""
 
-    async def decide(
-        self, messages: list[dict], max_tokens: int, today: date, hint: RouteRow | None = None
-    ) -> ToolDecision:
-        self.decides.append((messages, today, hint))
+    async def decide(self, messages: list[dict], max_tokens: int, today: date) -> ToolDecision:
+        self.decides.append((messages, today))
         if self.fail:
             raise ClassifyError("api_error")
         text = messages[-1]["content"]
-        if hint is not None and not QUESTION.search(text):
-            raw = {"screen_num": hint.no}
+        row = rules.match_route(text)
+        if row is not None and not QUESTION.search(text):
+            raw = {"screen_num": row.no}
             use = {"type": "tool_use", "id": "toolu_1", "name": tools.NAVIGATE, "input": raw}
             return ToolDecision(call=tools.parse(tools.NAVIGATE, raw, "toolu_1"), content=(use,))
         if QUESTION.search(text):

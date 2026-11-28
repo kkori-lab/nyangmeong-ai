@@ -54,8 +54,8 @@ class SequenceAgent(FakeToolAgent):
         super().__init__()
         self.picks = picks
 
-    async def decide(self, messages, max_tokens, today, hint=None) -> ToolDecision:
-        self.decides.append((messages, today, hint))
+    async def decide(self, messages, max_tokens, today) -> ToolDecision:
+        self.decides.append((messages, today))
         no = len(self.decides)
         pick = self.picks[no - 1] if no <= len(self.picks) else None
         if pick is None:

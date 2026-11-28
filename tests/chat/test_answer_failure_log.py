@@ -214,7 +214,7 @@ def test_반려동물_목록_실패는_대화창에서_error와_두_줄이어야
 
 
 class _SlowAgent:
-    async def decide(self, messages, max_tokens, today, hint=None) -> ToolDecision:
+    async def decide(self, messages, max_tokens, today) -> ToolDecision:
         await asyncio.sleep(1)
         return ToolDecision()
 
