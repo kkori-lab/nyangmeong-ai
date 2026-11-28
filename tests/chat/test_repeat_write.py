@@ -9,7 +9,7 @@ import pytest
 from app.chat import rules
 from app.chat.schemas import ROLE_AI, ROLE_USER
 from app.core.config import get_settings
-from tests.chat.fakes import FakeToolAgent
+from tests.chat.fakes import FakeCardReplyAgent, FakeToolAgent
 from tests.chat.test_action import action_result, send
 from tests.chat.test_action_multi import HEALTH, WEIGHT_RAW, done_of, returned, send_actions
 from tests.chat.test_agent_continue import KEY, READ, SIMPLE, ContinueAgent
@@ -107,6 +107,7 @@ def test_같은_결과_글이_이력_밖이면_바로_실행해야_한다(client
 def test_반복_확인_카드에_확인_말이면_실행해야_한다(client, java):
     room = _saved_once(client, java)
     done = _again(client, room)
+    use_agent(client, FakeCardReplyAgent())
 
     confirmed = done_of(send_actions(client, room, "등록해 줘", returned(done)))
 

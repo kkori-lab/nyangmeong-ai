@@ -16,7 +16,12 @@ from app.chat.service import (
     _md,
 )
 from tests.chat.conftest import AJAX
-from tests.chat.fakes import INSPECTION_TOOL, FakeToolAgent, fake_catalog, fake_catalog_json
+from tests.chat.fakes import (
+    INSPECTION_TOOL,
+    FakeCardReplyAgent,
+    fake_catalog,
+    fake_catalog_json,
+)
 from tests.chat.test_action import action_result, send
 from tests.chat.test_action_update_follow import ChainAgent
 from tests.chat.test_messages import MessageJava, events
@@ -324,14 +329,14 @@ def test_검진기록이_채워진_카드에_확인_말이면_실행_지시한�
     use_reader(client, FakeToolReader(by_path={CHECKUPS: {"content": [RECORD]}}))
     room = room_of(client, java, pet_sn=CHOCO)
     card = post(client, room, recognized()).json()["data"]["action"]
-    agent = use_agent(client, FakeToolAgent(fail=True))
+    agent = use_agent(client, FakeCardReplyAgent())
 
     evs = events(send(client, room, "등록해 줘", card))
 
     done = evs[-1][1]
     assert done["execute"] is True
     assert done["action"]["input"]["ckupRcdSn"] == 7
-    assert agent.decides == []
+    assert len(agent.decides) == 1
 
 
 # 검사 수치 저장 결과(action-result, 2026-11-24) : 배열은 펼치지 않고 반려동물·검진기록·항목 수

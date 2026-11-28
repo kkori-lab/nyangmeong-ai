@@ -17,7 +17,13 @@ from app.chat.service import (
 )
 from app.core.response import AppError
 from tests.chat.conftest import AJAX
-from tests.chat.fakes import RECEIPT_TOOL, FakeToolAgent, fake_catalog, fake_catalog_json
+from tests.chat.fakes import (
+    RECEIPT_TOOL,
+    FakeCardReplyAgent,
+    FakeToolAgent,
+    fake_catalog,
+    fake_catalog_json,
+)
 from tests.chat.test_action import send
 from tests.chat.test_messages import MessageJava, events
 from tests.chat.test_register import CHOCO, MUNG, TODAY
@@ -421,7 +427,7 @@ def test_검진_종류를_고른_카드에_확인_말이면_실행_지시한다(
     card = post(client, room, recognized()).json()["data"]["action"]
     card["input"]["pets"][0]["ckupTypeCd"] = "HLTC0001"
     card["missing"] = []
-    agent = use_agent(client, FakeToolAgent(fail=True))
+    agent = use_agent(client, FakeCardReplyAgent())
 
     evs = events(send(client, room, "등록해 줘", card))
 
@@ -429,7 +435,7 @@ def test_검진_종류를_고른_카드에_확인_말이면_실행_지시한다(
     assert done["execute"] is True
     assert done["action"]["input"]["recptSn"] == RECPT
     assert done["message"]["cnvrsCn"] == "저장할게요."
-    assert agent.decides == []
+    assert len(agent.decides) == 1
 
 
 # 돌려받은 카드의 빈 칸만 채운 실행 명령은 바로 실행 (2026-11-27 사람 결정 A)

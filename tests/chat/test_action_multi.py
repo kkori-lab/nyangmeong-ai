@@ -15,7 +15,7 @@ from app.chat.service import (
     ACTION_EXECUTE_MESSAGE,
     ACTION_MAX_CARDS,
 )
-from tests.chat.fakes import FakeToolAgent
+from tests.chat.fakes import FakeCardReplyAgent, FakeToolAgent
 from tests.chat.test_action import AJAX, send
 from tests.chat.test_messages import MessageJava, events
 from tests.chat.test_register import CHOCO, TODAY
@@ -194,12 +194,12 @@ def test_이어_고르기에서_쓰기_아닌_도구면_멈춘다(client, java):
 
 def test_카드_여럿에_확인_말이면_모두_실행을_지시한다(client, java):
     room, first = two_cards(client, java)
-    agent = SequenceAgent()
+    agent = FakeCardReplyAgent()
     use_agent(client, agent)
 
     done = done_of(send_actions(client, room, "등록해 줘", returned(first)))
 
-    assert agent.decides == []
+    assert len(agent.decides) == 1
     assert done["execute"] is True
     assert done["message"]["cnvrsCn"] == ACTION_EXECUTE_MESSAGE
     assert returned(done) == returned(first)
@@ -210,7 +210,7 @@ def test_빈_칸이_남은_카드가_있으면_실행하지_않고_그_카드_�
     room, first = two_cards(client, java)
     cards = returned(first)
     cards[1]["input"] = {k: v for k, v in cards[1]["input"].items() if k != "schdlKndCd"}
-    use_agent(client, SequenceAgent())
+    use_agent(client, FakeCardReplyAgent())
 
     done = done_of(send_actions(client, room, "응", cards))
 
@@ -225,12 +225,12 @@ def test_빈_칸이_남은_카드가_있으면_실행하지_않고_그_카드_�
 
 def test_카드_여럿에_취소_말이면_모두_버린다(client, java):
     room, first = two_cards(client, java)
-    agent = SequenceAgent()
+    agent = FakeCardReplyAgent()
     use_agent(client, agent)
 
     done = done_of(send_actions(client, room, "아니 취소해", returned(first)))
 
-    assert agent.decides == []
+    assert len(agent.decides) == 1
     assert done["actions"] is None
     assert done["action"] is None
     assert done["message"]["cnvrsCn"] == ACTION_DROP_MESSAGE

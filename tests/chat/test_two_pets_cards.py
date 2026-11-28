@@ -8,7 +8,7 @@ import pytest
 from app.chat import rules, tools
 from app.chat.repository import PetInfo
 from app.chat.service import ACTION_EXECUTE_MESSAGE, _pet_groups, named_pets
-from tests.chat.fakes import FakeToolAgent
+from tests.chat.fakes import FakeCardReplyAgent, FakeToolAgent
 from tests.chat.test_action import WEIGHT, send
 from tests.chat.test_action_multi import done_of, returned, send_actions
 from tests.chat.test_messages import MessageJava
@@ -91,7 +91,7 @@ def test_한쪽_이름이_같은_이름_둘이면_그_카드만_칩이어야_한
 
 def test_확인_말이면_나눈_카드_모두_실행을_지시해야_한다(client, java):
     room, done = two_cards(client, java)
-    use_agent(client, FakeToolAgent(fail=True))
+    use_agent(client, FakeCardReplyAgent())
 
     confirm = done_of(send_actions(client, room, "등록해 줘", returned(done)))
 

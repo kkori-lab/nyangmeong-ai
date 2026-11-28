@@ -9,7 +9,7 @@ from app.chat.service import (
     ACTION_DROP_MESSAGE,
     ACTION_EXECUTE_MESSAGE,
 )
-from tests.chat.fakes import FakeToolAgent
+from tests.chat.fakes import FakeCardReplyAgent, FakeToolAgent
 from tests.chat.test_action import send
 from tests.chat.test_messages import MessageJava, events
 from tests.chat.test_register import CHOCO, TODAY
@@ -97,13 +97,13 @@ def test_빈_칸이_있는_카드_턴은_빈_칸을_말로_묻는다(client, jav
 
 
 def test_확인_말은_LLM_없이_실행을_지시한다(client, java):
-    agent = FakeToolAgent(fail=True)
+    agent = FakeCardReplyAgent()
     use_agent(client, agent)
     room = room_of(client, java, pet_sn=CHOCO)
 
     done = done_of(send(client, room, "등록해 줘", action={"tool": HEALTH, "input": FULL}))
 
-    assert agent.decides == []
+    assert len(agent.decides) == 1
     assert done["execute"] is True
     assert done["message"]["cnvrsCn"] == ACTION_EXECUTE_MESSAGE
     assert done["action"]["input"] == FULL
@@ -112,7 +112,7 @@ def test_확인_말은_LLM_없이_실행을_지시한다(client, java):
 
 
 def test_빈_칸이_남은_카드에_확인_말이면_실행하지_않고_빈_칸을_묻는다(client, java):
-    use_agent(client, FakeToolAgent(fail=True))
+    use_agent(client, FakeCardReplyAgent())
     room = room_of(client, java, pet_sn=CHOCO)
     prior = {"tool": HEALTH, "input": {k: v for k, v in FULL.items() if k != "rcdDt"}}
 
@@ -124,13 +124,13 @@ def test_빈_칸이_남은_카드에_확인_말이면_실행하지_않고_빈_�
 
 
 def test_취소_말은_카드_없이_끝낸다(client, java):
-    agent = FakeToolAgent(fail=True)
+    agent = FakeCardReplyAgent()
     use_agent(client, agent)
     room = room_of(client, java, pet_sn=CHOCO)
 
     done = done_of(send(client, room, "아니 취소해", action={"tool": HEALTH, "input": FULL}))
 
-    assert agent.decides == []
+    assert len(agent.decides) == 1
     assert done["action"] is None
     assert done["execute"] is False
     assert done["message"]["cnvrsCn"] == ACTION_DROP_MESSAGE
@@ -167,19 +167,19 @@ PET_FULL = {"petSn": CHOCO, "goalBdwg": 4}
 
 
 def test_수정_카드에_수정해_줘면_실행을_지시하고_수정할게요를_저장한다(client, java):
-    agent = FakeToolAgent(fail=True)
+    agent = FakeCardReplyAgent()
     use_agent(client, agent)
     room = room_of(client, java, pet_sn=CHOCO)
 
     done = done_of(send(client, room, "수정해 줘", action={"tool": PET_UPDATE, "input": PET_FULL}))
 
-    assert agent.decides == []
+    assert len(agent.decides) == 1
     assert done["execute"] is True
     assert done["message"]["cnvrsCn"] == "수정할게요."
 
 
 def test_수정_카드에_취소_말이면_수정하지_않았어요를_저장한다(client, java):
-    use_agent(client, FakeToolAgent(fail=True))
+    use_agent(client, FakeCardReplyAgent())
     room = room_of(client, java, pet_sn=CHOCO)
 
     done = done_of(send(client, room, "아니", action={"tool": PET_UPDATE, "input": PET_FULL}))
