@@ -58,8 +58,8 @@ class ManyAgent(FakeToolAgent):
         self.picks = picks
         self.decisions: list[ToolDecision] = []
 
-    async def decide(self, messages, max_tokens, today, hint=None) -> ToolDecision:
-        self.decides.append((messages, today, hint))
+    async def decide(self, messages, max_tokens, today) -> ToolDecision:
+        self.decides.append((messages, today))
         if len(self.decides) > 1:
             return ToolDecision()
         return decision_of(*self.picks)

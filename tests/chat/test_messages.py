@@ -288,7 +288,7 @@ def test_등록_요청은_라우팅_키워드_힌트_없이_도구_고르기로(
     room = java.add_room(1, "제목")
     events(send(client, room, "매일 산책 추가해 주세요"))
 
-    assert [hint for _, _, hint in answers.decides] == [None]
+    assert len(answers.decides) == 1
     assert answers.calls == []
 
 

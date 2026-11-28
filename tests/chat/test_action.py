@@ -47,7 +47,7 @@ def weight_agent(**raw) -> FakeToolAgent:
 
 
 def test_건강_일지_요청은_ACTION_카드에_Java_칸과_검증한_값을_실어야_한다(client, java):
-    agent = use_agent(client, weight_agent(rcd_tm="08:30"))
+    use_agent(client, weight_agent(rcd_tm="08:30"))
     room = room_of(client, java)
 
     evs = events(send(client, room, "초코 오늘 아침 8시 반 체중 4.2kg 기록할까?"))
@@ -82,7 +82,6 @@ def test_건강_일지_요청은_ACTION_카드에_Java_칸과_검증한_값을_�
     assert evs[1][1]["card"] is None
     assert evs[1][1]["message"]["cnvrsCn"].startswith("이렇게 할까요?")  # 2026-11-13 채팅으로 확인
     assert len(java.ai_messages(room)) == 1
-    assert agent.decides[0][2] == rules.match_route("초코 오늘 아침 8시 반 체중 4.2kg 기록할까?")
 
 
 def test_월_지출_한도_요청은_반려동물_없이_ACTION_카드여야_한다(client, java):
@@ -268,14 +267,14 @@ def test_기존_등록_도구도_ACTION_카드여야_한다(client, java, tool):
 # 추가-1 : 키워드에 걸린 문장도 도구 고르기
 
 
-def test_키워드에_걸린_질문꼴_아닌_문장도_힌트와_함께_도구_고르기를_불러야_한다(client, java):
+def test_키워드에_걸린_질문꼴_아닌_문장도_도구_고르기를_불러야_한다(client, java):
     agent = use_agent(client, FakeToolAgent("draft_expense_limit", {"mm_expnd_lim_amt": 300000}))
     room = room_of(client, java)
 
     evs = events(send(client, room, "이번 달 지출 한도 30만원으로 해줘"))
 
     assert evs[0][1]["kind"] == "ACTION"
-    assert agent.decides[0][2] == rules.match_route("이번 달 지출 한도 30만원으로 해줘")
+    assert agent.decides
 
 
 def test_키워드에_걸린_문장은_도구_고르기가_실패하면_그_행으로_이동해야_한다(client, java):
