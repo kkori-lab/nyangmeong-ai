@@ -9,6 +9,8 @@ from app.chat.clients import FOLLOW_ROUNDS, ClassifyError, ReadMore, ToolDecisio
 from app.core.backend import external_error
 
 TITLE_LENGTH = 30
+# service.CARDS_NOTE 앞부분 (service를 import하면 순환)
+CARDS_NOTE_HEAD = "\n\n(대화창에 아직 실행하지 않은 확인 카드가 떠 있음: "
 # 검사 수치 저장 확인 카드 (SCR-AIM-013 대화창 PDF, 2026-11-23)
 INSPECTION_TOOL = "draft_inspection_values"
 RECEIPT_TOOL = "draft_receipt_save"
@@ -113,6 +115,35 @@ class FakeToolAgent:
         return await self.decide(with_notes(messages, notes), max_tokens, today)
 
 
+class FakeCardReplyAgent(FakeToolAgent):
+    """[가짜 카드 확인·취소 고르기] 카드가 떠 있는 턴 (2026-11-28 run_card·drop_card)
+    - 마지막 회원 말이 확인 말(동사 확인 말 포함)이면 run_card, 취소 말이면 drop_card
+    - 그 밖 : 도구도 글도 없음(폴백)"""
+
+    async def decide(self, messages: list[dict], max_tokens: int, today: date) -> ToolDecision:
+        self.decides.append((messages, today))
+        return card_reply(said_text(messages[-1]["content"]))
+
+
+def said_text(content: str) -> str:
+    # 도구 고르기 마지막 메시지에서 서버가 붙인 떠 있는 카드 알림을 뗀 회원 말
+    return content.split(CARDS_NOTE_HEAD, 1)[0]
+
+
+def card_reply(text: str) -> ToolDecision:
+    # 확인 말(동사 확인 말 포함)이면 run_card, 취소 말이면 drop_card, 그 밖은 도구 없음
+    reply = rules.action_reply_kind(text)
+    said = rules.says_card_verb(text) or rules.says_delete(text) or rules.says_proceed(text)
+    if reply == rules.ACTION_CANCEL:
+        name = tools.DROP_CARD
+    elif reply == rules.ACTION_CONFIRM or said:
+        name = tools.RUN_CARD
+    else:
+        return ToolDecision()
+    use = {"type": "tool_use", "id": "toolu_1", "name": name, "input": {}}
+    return ToolDecision(call=tools.parse(name, {}, "toolu_1"), content=(use,))
+
+
 class FakeBasicToolAgent(FakeToolAgent):
     """[기본 가짜 도구 고르기] 테스트가 따로 끼우지 않을 때
     - 키워드에 걸린(rules.match_route) 질문꼴이 아닌 글 : 그 화면으로 navigate
@@ -123,7 +154,7 @@ class FakeBasicToolAgent(FakeToolAgent):
         self.decides.append((messages, today))
         if self.fail:
             raise ClassifyError("api_error")
-        text = messages[-1]["content"]
+        text = said_text(messages[-1]["content"])
         row = rules.match_route(text)
         if row is not None and not QUESTION.search(text):
             raw = {"screen_num": row.no}
@@ -131,7 +162,8 @@ class FakeBasicToolAgent(FakeToolAgent):
             return ToolDecision(call=tools.parse(tools.NAVIGATE, raw, "toolu_1"), content=(use,))
         if QUESTION.search(text):
             return ToolDecision(text=self.reply(messages, max_tokens))
-        return ToolDecision()
+        # 확인·취소 말 : 카드가 떠 있으면 실행·버리기(2026-11-28), 없으면 서버가 폴백
+        return card_reply(text)
 
     def reply(self, messages: list[dict], max_tokens: int) -> AsyncIterator[str]:
         # 바로 답 글 : 테스트가 조각·실패를 바꿀 때 덮어씀

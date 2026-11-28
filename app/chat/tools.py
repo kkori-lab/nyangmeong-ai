@@ -3,7 +3,7 @@
 - 도구 설명 정본 : data/tool_prompts.yaml
 - 등록 도구(draft_*)의 칸·필수·코드 값 : Java 도구 목록(catalog)
 - CARD 도구 : 확인 카드(ACTION, 2단계 쓰기). 등록 카드 2개도 ④부터 ACTION
-- navigate·search_guide·decline : Java API가 아닌 Python 도구(builtin)
+- navigate·search_guide·run_card·drop_card·decline : Java API가 아닌 Python 도구(builtin)
 - LLM은 도구와 인자만 고름 -> 인자는 여기서 다시 검증(매핑표·안내서·공통코드)
 """
 
@@ -19,6 +19,10 @@ SEARCH_GUIDE = "search_guide"
 DRAFT_SCHEDULE = "draft_schedule"
 DRAFT_CARE_ITEM = "draft_care_item"
 DECLINE = "decline"
+# 떠 있는 확인 카드 실행·버리기 (2026-11-28) : 확인·취소 말을 정규식 대신 도구 고르기 LLM이 정함
+RUN_CARD = "run_card"
+DROP_CARD = "drop_card"
+CARD_REPLY_TOOLS = frozenset({RUN_CARD, DROP_CARD})
 REGISTER_TOOLS = frozenset({DRAFT_SCHEDULE, DRAFT_CARE_ITEM})
 # 프로그래밍식 도구 호출 시험 (2026-11-26) : 코드 실행 도구 버전, 읽기 도구를 코드에서만·둘 다
 CODE_CALLER = "code_execution_20260120"
@@ -38,9 +42,19 @@ class Decline(BaseModel):
     unclear: bool = False
 
 
+class RunCard(BaseModel):
+    pass
+
+
+class DropCard(BaseModel):
+    pass
+
+
 BUILTIN_MODELS: dict[str, type[BaseModel]] = {
     NAVIGATE: Navigate,
     SEARCH_GUIDE: SearchGuide,
+    RUN_CARD: RunCard,
+    DROP_CARD: DropCard,
     DECLINE: Decline,
 }
 
@@ -85,7 +99,8 @@ def _builtin_definition(name: str, table: tuple[rules.RouteRow, ...]) -> dict:
 
 
 def tool_definitions(ptc: str | None = None) -> tuple[dict, ...]:
-    # 순서 고정(캐시 앞부분) : navigate, search_guide, Java 목록 도구, decline
+    # 순서 고정(캐시 앞부분) : navigate, search_guide, Java 목록 도구, run_card, drop_card, decline
+    # run_card·drop_card는 카드가 없을 때도 싣는다 : 턴마다 도구 목록이 바뀌면 캐시가 깨짐
     # ptc : 프로그래밍식 도구 호출 시험(2026-11-26). 읽기 도구에만 allowed_callers, 끝에 코드 실행
     entries = _catalog.entries.values() if _catalog is not None else ()
     table = rules.routing_table()
@@ -93,6 +108,8 @@ def tool_definitions(ptc: str | None = None) -> tuple[dict, ...]:
         _builtin_definition(NAVIGATE, table),
         _builtin_definition(SEARCH_GUIDE, table),
         *(entry.definition for entry in entries),
+        _builtin_definition(RUN_CARD, table),
+        _builtin_definition(DROP_CARD, table),
         _builtin_definition(DECLINE, table),
     )
     if ptc is None:

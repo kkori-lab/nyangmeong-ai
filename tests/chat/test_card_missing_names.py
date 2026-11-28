@@ -10,7 +10,7 @@ import pytest
 
 from app.chat import rules, service, tools
 from app.chat.service import ACTION_ASK_PHOTO, ACTION_EXECUTE_MESSAGE, ACTION_EXECUTE_PHOTO_MESSAGE
-from tests.chat.fakes import FakeToolAgent
+from tests.chat.fakes import FakeCardReplyAgent, FakeToolAgent
 from tests.chat.test_action import send
 from tests.chat.test_action_chat_confirm import done_of
 from tests.chat.test_lesion_card import NOW, analyzed, post
@@ -42,11 +42,11 @@ def test_눈_카드에_확인_말이면_사진_칸만_비어도_실행을_지시
     room = room_of(client, java, pet_sn=CHOCO)
     card = eye_card(client, room)
     assert card["missing"] == ["file"]
-    agent = use_agent(client, FakeToolAgent(fail=True))
+    agent = use_agent(client, FakeCardReplyAgent())
 
     done = done_of(send(client, room, "등록해 줘", action=card))
 
-    assert agent.decides == []
+    assert len(agent.decides) == 1
     assert done["execute"] is True
     # 사진 칸만 빈 카드의 확인 말 : 버튼을 말하지 않는 사진 안내 (2026-11-24 LJS 결정)
     assert done["message"]["cnvrsCn"] == ACTION_EXECUTE_PHOTO_MESSAGE
@@ -58,7 +58,7 @@ def test_눈_카드에_확인_말이면_사진_칸만_비어도_실행을_지시
 def test_피부_카드에_확인_말이면_부위만_한국어로_묻고_사진_칸은_묻지_않는다(client, java):
     room = room_of(client, java, pet_sn=CHOCO)
     card = post(client, room, analyzed()).json()["data"]["action"]
-    use_agent(client, FakeToolAgent(fail=True))
+    use_agent(client, FakeCardReplyAgent())
 
     done = done_of(send(client, room, "등록해 줘", action=card))
 
@@ -71,7 +71,7 @@ def test_피부_카드에_확인_말이면_부위만_한국어로_묻고_사진_
 
 def test_관찰_기록_카드도_사진_칸만_비면_확인_말에_실행을_지시한다(client, java):
     room = room_of(client, java, pet_sn=CHOCO)
-    use_agent(client, FakeToolAgent(fail=True))
+    use_agent(client, FakeCardReplyAgent())
     prior = {
         "tool": "draft_observation_cycle",
         "input": {"petSn": CHOCO, "obsrvArtclSn": 5, "obsrvDt": "2026-11-24T09:00:00"},
@@ -86,7 +86,7 @@ def test_관찰_기록_카드도_사진_칸만_비면_확인_말에_실행을_�
 
 def test_사진_칸이_없는_카드의_확인_말은_등록할게요_그대로(client, java):
     room = room_of(client, java, pet_sn=CHOCO)
-    use_agent(client, FakeToolAgent(fail=True))
+    use_agent(client, FakeCardReplyAgent())
     prior = {"tool": "draft_expense_limit", "input": {"mmExpndLimAmt": 300000}}
 
     done = done_of(send(client, room, "등록해 줘", action=prior))
@@ -119,7 +119,7 @@ def test_피부_분석_카드_턴_글에는_사진_안내가_없다(client, java
 
 def test_날짜_없는_일정_카드의_되물음에_hrInptYn이_없다(client, java):
     room = room_of(client, java, pet_sn=CHOCO)
-    use_agent(client, FakeToolAgent(fail=True))
+    use_agent(client, FakeCardReplyAgent())
     prior = {"tool": "draft_schedule", "input": {"petSn": CHOCO}}
 
     done = done_of(send(client, room, "등록해 줘", action=prior))

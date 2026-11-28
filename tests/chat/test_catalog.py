@@ -25,7 +25,7 @@ from tests.chat.test_messages import MessageJava, events, send
 from tests.chat.test_register import CHOCO, Extractor, use_extractor
 from tests.chat.test_tools import room_of, use_agent
 
-BUILTIN = {"navigate", "search_guide", "decline"}
+BUILTIN = {"navigate", "search_guide", "run_card", "drop_card", "decline"}
 REGISTER = {"draft_schedule", "draft_care_item"}
 # 수정·삭제 도구 (SCR-AIM-012, 2026-11-25)
 SECOND_UPDATES = {
