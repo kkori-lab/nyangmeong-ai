@@ -977,8 +977,9 @@
 - 결과 (2026-11-27): 검증 통과(1회차), 사람 확인. 기획과 달라진 것: 사람 결정 "전부 다 추가"로 10개 모두 실음(skip 없음), 새 hook `pet_optional`(지출 조건 삭제), 지출 조건 삭제는 POST라 동사 "삭제"로 삭제 카드, 카드 동사 해제·변경·삭제 더함, 번호 목록 칸 이름이 …Sn이면 카드 만들 때 나던 TypeError 고침, 기존 테스트 4개(navigate만 결정·없는 도구 예·도구 목록·동사 목록)를 결정에 맞춤. 측정 148/150(기존 140문항 138/140 그대로, 새 10문항 10/10)
 - 연결 남음: 카드 `params.values`·알림 설정 카드·`delete_expenses` query 숫자 배열 꼴·조건 삭제 삭제 카드 (frontend 세션에 알림, LJS 프론트)
 
-## SCR-AIM-013 대화창 · 사진 턴 닫힌 선택지 열기 (AGENT·사진 안내 LLM 글·가계부 영수증 카드, SCR-AIM-004 공통, 추가 요청) — 진행
+## SCR-AIM-013 대화창 · 사진 턴 닫힌 선택지 열기 (AGENT·사진 안내 LLM 글·가계부 영수증 카드, SCR-AIM-004 공통, 추가 요청) — 끝
 - 기능: `/ai/image-intent`가 고정 용도(CHARACTER·MEDICAL_RECEIPT·EXPENSE_RECEIPT·SKIN·EYE·ASK) 밖의 일을 글로 말하면 새 kind `AGENT`로 도구 고르기 에이전트에 넘기고, 붙인 사진을 파일 칸 카드에 미리 채운다. 사진 안내 글은 LLM이 쓰고(실패 때 고정 글), 가계부 영수증은 지출 등록 카드(`expense-card`)로 잇는다. 기능 ID 추가 없음
 - 요청: 2026-11-27 backend-94 전달 3번·frontend-dc 보고(사진+"프로필 사진 변경"이 캐릭터로)·frontend-6b ①(사진+"흰자 충혈 건 이미지를 이걸로 변경"이 ASK)
 - 기다리는 것: 없음 (백엔드 변경 없음. 프론트 연결은 frontend-dc와 합의)
 - 완료 조건: `/start` 기획의 완료 조건을 따른다.
+- 연결 남음: 3·4·5 사진 턴 AGENT·파일 칸 사진 미리 넣기·expense-card 프론트 (frontend-dc와 계약 합의·React 분기, LJS 프론트)

@@ -1,42 +1,11 @@
 # LJS 핸드오프
 
 ## 지금 하는 것
-SCR-AIM-013 대화창 · 사진 턴 닫힌 선택지 열기 (AGENT·사진 안내 LLM 글·가계부 영수증 카드, SCR-AIM-004 공통, 추가 요청) — 구현 중 (승인 2026-11-27 16:35, 시작 2026-11-27 16:27, 고침 16:35 사람 "같이 넣고 가급적 LLM이 앞단에서 판단")
-
-방향: 사진 턴에서 무엇을 할지와 안내 글은 LLM이 정한다. 서버는 막기만 한다(`kind` 허용값·글 길이·실패 때 지금 고정 글로). React 분기는 `kind` 그대로(계약 유지), 화면 글은 `messages`(이미 React가 그대로 그림).
-API 계약 변경(구현 전에 `docs/api/chat.md`·`docs/api/ocr.md`를 먼저 고침, 프론트 합의 전 초안, frontend-dc에 알림, 백엔드 변경 없음): image-intent `kind` `AGENT`·안내 글이 LLM 글로 바뀜, 새 API `POST /ai/conversations/{aiCnvrsRoomSn}/expense-card`
-
-1. 사진 용도 판단에 `AGENT` — `app/chat/schemas.py` `ImageIntentKind.AGENT`, `app/chat/clients.py` `IMAGE_INTENT_SYSTEM`·`ImageIntentOutput`: 글이 캐릭터·영수증·피부·눈 분석 밖의 앱 일(프로필 사진 바꾸기, 관찰 기록 사진 더하기·바꾸기, 그 밖 기록·묻는 말)을 말하면 `AGENT`. 글이 없으면 고르지 않는다. 정규식은 더하지 않는다.
-   완료 조건: 명령: `sh scripts/check.sh` (가짜 판단기 AGENT → 응답 `kind` AGENT, 프롬프트에 AGENT 정의·예)
-2. 사진 안내 글을 LLM이 — 같은 판단 호출의 구조화 출력에 `reply`(한두 문장, 200자) 칸을 더해 사용자 글에 맞춰 쓴다(ASK면 무엇을 할지 묻되 캐릭터·영수증·피부·눈 말고 "다른 일도 글로 말해 달라"를 열어 둠, 캐릭터 사진이 안 맞으면 그 이유, CHARACTER·SKIN·EYE·EXPENSE_RECEIPT는 이어 갈 일). 분석 결과·저장을 약속하지 않고 진단하지 않는다. `MEDICAL_RECEIPT`·`AGENT`·`CHECKUP_PDF`는 글 없음(뒤 API가 씀). 판단 실패·빈 글·길이 초과면 지금 고정 글(`IMAGE_MESSAGES`·`CHARACTER_PHOTO_UNFIT_MESSAGE`)을 쓴다. React의 ASK 칩은 그대로(글만 바뀜).
-   완료 조건: 명령: check.sh (가짜 판단기 `reply`가 저장 AI 메시지가 됨, 빈 글·201자·실패는 고정 글, AGENT·MEDICAL_RECEIPT는 AI 메시지 없음) / 화면: Postman 사람 확인(프로필 사진+글, 관찰 사진+글, 글 없는 반려동물 사진, 영수증+"캐릭터 만들어줘", 풍경 사진)
-3. AGENT 사진 턴 이어 가기 — `service.save_image_turn`: 사용자 `[사진] <글>`만 저장. React는 같은 방에 `/messages`를 `cnvrsCn` 없이(지금 있는 "마지막 사용자 메시지에 답변" 길) 부른다. 답할 메시지가 `[사진]`으로 시작하면 도구 고르기 시스템 블록(`clients.tool_system`)에 "회원이 이 메시지에 사진을 붙임, 사진 내용은 볼 수 없음, 파일 칸 카드를 고르면 붙인 사진이 들어감"을 넣고, 정규식(`rules.*`)에는 표시를 뗀 글을 준다. 예전 턴의 `[사진]`은 해당 없음.
-   완료 조건: 명령: check.sh / 화면: 사진+"프로필 사진 이걸로 바꿔줘" → AGENT → `/messages {}` → `draft_member_profile_update` 카드
-4. 카드에 사진 미리 채우기 계약 — 파일 칸 카드 4개(`draft_member_profile_update` `profilePhoto`, `draft_observation_cycle`·`draft_observation_cycle_update`·`draft_observation_item` `file`). Python은 지금처럼 `missing`에 파일 칸을 두고(글로 묻지 않음·확인 말 판정에서 안 셈), React가 AGENT 턴 카드의 `type: file` 칸에 붙인 사진을 넣는다. `draft_pet_update`는 Java 파일 칸이 없어 반려동물 사진 바꾸기는 안 됨(백엔드 요청 후보로 "다음에 할 것").
-   완료 조건: 화면: 3번 카드 `params`에 `profilePhoto` `type: file`, 확인 말에 `done.execute`
-5. 가계부 영수증 막다른 길 풀기 — `EXPENSE_RECEIPT`면 React가 `POST /ai/receipts`(출처 가계부 `AIMC0027`, 반려동물 생략 가능)를 부르고 새 `POST /ai/conversations/{방}/expense-card`로 결과를 보낸다. Python은 요약 AI 메시지를 저장하고 지출 등록 확인 카드(`draft_expense`, `receipt-card`와 같은 카드 모양)를 준다: `expndYmd` 결제일·`expndPlcusNm` 사용처·`expndClsfCd` 추정 카테고리·금액 = 영수증 금액 − 하단 할인·`dtlMttr` 품목명 ", "·반려동물은 비움(`missing`, 회원이 고름), 입력 방법 코드는 도구 목록·공통코드에서 영수증 값을 확인해 정함(없으면 지금 `fixed`). 인식 실패·오류·취소는 `receipt-result`와 같은 요약만, 도구 없으면 카드 없이 본창 가계부 안내. `app/chat/router.py`·`schemas.py`(`ExpenseCardRequest`·`ExpenseCardResult`)·`service.py`, 문서 `docs/api/chat.md` 행·DTO, `docs/api/ocr.md` 대화창 가계부 출처 줄.
-   완료 조건: 명령: check.sh (인식·실패·오류·취소·도구 없음·남의 방 404) / 화면: Postman `/ai/receipts`(AIMC0027) 응답을 `expense-card`에 보내 카드·저장 글 확인
-6. 도구 설명 — `data/tool_prompts.yaml`: `draft_member_profile_update`·`draft_observation_cycle`·`draft_observation_cycle_update`의 "사진은 다루지 않는다"를 "이번 메시지에 [사진]이 붙었으면 그 사진이 카드에 들어가고, 없으면 회원이 카드에서 올린다"로, 프로필 예 "[사진] 프로필 사진 이걸로 바꿔줘". `draft_pet_update`에 "반려동물 사진은 대화로 못 바꾼다(본창 반려동물 정보)".
-   완료 조건: 명령: check.sh
-7. 측정 — `tests/chat/data/tool_eval.jsonl` T151~T154(사진 표시 글: 프로필 → `draft_member_profile_update`, 관찰 사진 바꾸기·관찰 항목에 사진 기록 → `list_observation_items`, 반려동물 사진 → 카드 없음). `uv run python -m scripts.tool_eval` 기본 2회·`--agent` 2회(실제 호출). 사진 판단은 사진을 저장소에 둘 수 없어 2번 Postman 사람 확인.
-   완료 조건: 새 4문항 맞음, 기존 정답 수(148/150의 기존 문항) 그대로
-8. 문서 — `docs/api/chat.md` image-intent 행·ImageIntentResponse(`kind` AGENT, 안내 글은 LLM 글·실패 때 고정 글), `docs/design/tool-catalog.md`에 사진 턴 이어 가기 한 절.
-
-새 의존성: 없음
-
-### 이어서 할 일 (2026-11-27 17:24)
-- **검증부터.** 사람 요청으로 3회차(추가-1·2 반영 뒤) 검증 에이전트를 도중에 멈췄다. 이어 받으면 `/verify`(또는 `/impl` 3번)로 검증을 먼저 돌리고, 통과하면 README "사람 확인"대로 확인한 뒤 `/end`.
-- 지금 상태: `sh scripts/check.sh` 통과. 1회차 실패(지출 금액 할인 두 번)는 `recptAmt` 그대로 쓰게 고침. 2회차 실패(입력 방법 직접입력·반려동물 칸)는 사람 결정 "추천안대로"로 추가-1(사진 턴 반려동물 미리 채움, 없으면 공용)·추가-2(OCR 코드, 대화로 고쳐도 유지, `catalog.py` 고정 값 유지 한 줄)로 고침.
-- 측정(실제 호출, 2026-11-27): tool_eval 기본 153/154·152/154(새 T151~T154 모두 맞음, 틀린 것은 기존 T96·T135), `--agent` 15/15·14/15·14/15. A08 "체중 기록해 줘"는 HEAD(변경 전)에서도 3/3 틀려 이번 변경 탓 아님. 다만 오전보다 자주 틀려 원인은 따로 볼 만함.
-- 검증 중 만든 데이터: 대화방 1138~1147(지움)·1153~1160, Java 영수증 `recptSn` 621·623(가계부 출처)은 남아 있음.
-
-### 추가 요청
-| 번호 | 바꿀 파일 | 완료 조건 | 요청 |
-| --- | --- | --- | --- |
-| 추가-1 | `app/chat/service.py` `_expense_values`, `docs/api/chat.md` expense-card 행 | 명령: check.sh (보낸 `petSn`이 회원 반려동물이면 카드 줄 `petSn`, 아니면 비움 = 공용) / 화면: `expense-card`에 `petSn`을 주면 `lines[0].petSn` | 요청 2026-11-27 17:21 "추천안대로"(A: 기획의 "반려동물 비움(missing)" 대신 사진 턴에서 고른 아이를 미리 채우고 없으면 공용) |
-| 추가-2 | `app/chat/service.py` `_expense_values`, `app/chat/catalog.py` 카드 합치기(fixed), `tests/chat/test_expense_card.py`, `docs/api/chat.md` | 명령: check.sh (expense-card 카드 `expndInptMthCd`가 코드 목록에서 이름 "OCR"인 코드, 없으면 고정 값. 돌려받은 카드를 대화로 고쳐도 목록 안 코드면 그 값 유지) / 화면: `expense-card` 카드 `input.expndInptMthCd` = OCR 코드 | 요청 2026-11-27 17:21 "추천안대로"(B: 입력 방법을 OCR 코드로, 대화로 고쳐도 유지되게 catalog.py 한 줄 포함) |
+SCR-AIM-013 대화창 · 사진 턴 닫힌 선택지 열기 (AGENT·사진 안내 LLM 글·가계부 영수증 카드, 추가 요청 2건) — 끝 (2026-11-28, 검증 통과·사람 확인. 기획은 `milestones/LJS.md` 절과 커밋 2d82c71)
 
 ## 다음에 할 것
+- 연결 남음: SCR-AIM-013 사진 턴 프론트 (LJS 프론트, frontend-dc에 알림, 계약은 `docs/api/chat.md` 초안·프론트 합의 전): image-intent `kind` `AGENT`면 같은 방 `/messages`를 `{}`(cnvrsCn 없이)로 → 카드 `params`의 `type: file` 칸(`profilePhoto`·`file`)에 붙인 사진을 넣음. `EXPENSE_RECEIPT`면 `/ai/receipts`(AIMC0027) 응답 `data` 안의 `recptSn`·`ocr`에 `result`·`petSn`을 더해 `expense-card`로(껍데기째 보내면 RECOGNIZED는 400, 그 밖은 모르는 칸을 조용히 버림). 안내 글은 `messages` 그대로. 첫 턴 명령형 관찰·프로필 문장은 `execute: true`로 오므로 사진을 넣은 뒤 바로 실행하는 흐름이 맞는지 합의
+- 사진 턴 검증 메모 (2026-11-28): ① 영수증+"캐릭터 만들어줘" LLM 안내 글이 안 된다고 한 캐릭터 만들기를 다시 권함(판단 프롬프트 다듬기 후보) ② `EXPENSE_RECEIPT` 실패 때 고정 글 "본창 가계부에서 등록"(`app/chat/service.py` `IMAGE_MESSAGES`)이 이제 `expense-card` 흐름과 안 맞음 ③ `profilePhoto`는 필수가 아니라 카드 `missing`이 `[]` ④ tool_eval A08 "체중 기록해 줘"는 변경 전에도 3/3 틀림, 오전보다 자주 틀려 원인 따로 ⑤ 로컬 데이터: 대화방 1153~1160·1162~1168, Java 영수증 `recptSn` 621·623·624·625(가계부 출처)
 - 카드 확인·취소도 LLM이 판단 (2026-11-27 사람 "해제를 단어에 추가하는 게 아니라 LLM이 판단해서 툴을 호출하면 되는 거 아님?", 사진 턴 검증 뒤 별도 마일스톤): 증상은 "나비 공동양육 해제해줘" → 카드 → "해제해줘" → "지우려면 '삭제해 줘'라고 말해 주세요.". 원인: `unlink_caregiver`는 Java DELETE라 삭제 카드로 보고, `says_card_verb`가 "해제"를 확인 말로 받아도 `_action_answer`의 `_delete_confirmed`(`rules.says_delete`: 삭제·지워·없애만)가 다시 막음. 같은 이유로 `_confirm_line`(삭제 카드면 "맞으면 '삭제해 줘'")·`_target_missing`("지울 …을 찾지 못했어요")도 동사 "해제"를 무시함. 같은 대화의 "수줍은 집사야" → "지울 공동양육자를 찾지 못했어요"는 그 턴에 `list_caregivers`를 다시 읽지 않아 `brup_rel_sn`이 버려진 것으로 추정(턴 로그 미확인). 방향: 단어 목록(`action_reply_kind`·`says_card_verb`·`_delete_confirmed`)을 늘리지 않고, 카드가 떠 있으면 도구 고르기 LLM에 "카드 실행"·"카드 버리기" 도구를 주어 확인·취소·고치기를 LLM이 정함. 서버는 막기만(빈 필수 칸·같은 쓰기 반복·돌려받은 카드에 없는 도구, 삭제류 카드에 "응·네"만은 막기 유지 추천). 문구는 카드 `verb`로. 대가: 확인 턴마다 LLM 호출 1번(약 1초), tool_eval에 확인·취소·고치기 문항 넣고 기본·`--agent` 2회 이상. "고정 답 글을 LLM 글로"·루프 개선 ②(pending을 모델이)와 묶어 볼 것
 - 고정 답 글을 LLM 글로 (2026-11-27 사람 "가급적 LLM이 앞단에서 판단, 고정 형식 대답이 이상함", 사진 턴 다음): `/messages`의 고정 글 — 도구 거절 폴백(범위 밖·불분명), 이동 안내 "…로 이동할게요", 이어 가기 없음(`AGENT_STOPPED`) — 을 LLM이 쓰고 실패 때만 고정 글. 등록 초안 카드가 떠 있으면 칸 추출이 먼저라 다른 일로 못 넘어갈 수 있음(`service.py` `turn.draft` → `build_card`): tool_eval 문항으로 재 보고 맞으면 도구 고르기가 먼저 정하게. 확인·취소 말(`action_reply_kind`)·자리 표시 글은 막기라 그대로
 - 반려동물 사진 대화로 바꾸기 (백엔드 요청 후보): `draft_pet_update`에 Java 파일 칸이 없음
